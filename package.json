@@ -1,0 +1,44 @@
+{
+  "name": "wonflow",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WonFlow multi-organization and multi-branch hospital management platform",
+  "packageManager": "pnpm@11.15.1",
+  "engines": {
+    "node": ">=20.9.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter web dev",
+    "dev:web": "pnpm --filter web dev",
+    "build": "pnpm --filter web build",
+    "start": "pnpm --filter web start",
+    "lint": "pnpm --filter web lint",
+    "lint:fix": "pnpm --filter web lint:fix",
+    "typecheck": "pnpm -r run --if-present typecheck",
+    "db:format": "pnpm --filter @wonflow/database db:format",
+    "db:generate": "pnpm --filter @wonflow/database db:generate",
+    "db:validate": "pnpm --filter @wonflow/database db:validate",
+    "db:migrate": "pnpm --filter @wonflow/database db:migrate",
+    "db:deploy": "pnpm --filter @wonflow/database db:deploy",
+    "db:studio": "pnpm --filter @wonflow/database db:studio",
+    "check": "pnpm lint && pnpm typecheck && pnpm db:validate && git diff --check",
+    "check:full": "pnpm check && pnpm build",
+    "clean": "node tooling/scripts/clean.mjs",
+    "demo:genericity": "node tooling/scripts/p1-31-genericity-audit.mjs",
+    "demo:gate": "node tooling/scripts/p1-31-demo-gate.mjs",
+    "phase:audit": "node tooling/scripts/phase-one-scope-audit.mjs",
+    "test": "pnpm -r run --if-present test",
+    "test:e2e": "pnpm --filter web test:e2e",
+    "test:coverage": "pnpm --filter web test:coverage",
+    "db:backup": "node tooling/scripts/postgres-backup.mjs",
+    "worker:dev": "pnpm --filter @wonflow/worker dev",
+    "runtime:audit": "node tooling/scripts/production-runtime-audit.mjs",
+    "db:seed:dev": "pnpm exec tsx tooling/scripts/seed-development-logins.ts",
+    "db:seed:demo": "pnpm exec tsx tooling/scripts/seed-demo-data.ts"
+  },
+  "devDependencies": {
+    "dotenv": "^17.4.2",
+    "tsx": "^4.23.5"
+  }
+}

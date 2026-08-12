@@ -1,0 +1,75 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@source "../../../../apps/web/src/**/*.{ts,tsx}";
+@source "../**/*.{ts,tsx}";
+
+@theme inline {
+  --color-background: var(--surface); --color-foreground: var(--ink-700);
+  --color-card: var(--surface); --color-card-foreground: var(--ink-700);
+  --color-popover: var(--surface); --color-popover-foreground: var(--ink-700);
+  --color-primary: var(--blue-600); --color-primary-foreground: var(--surface);
+  --color-secondary: var(--muted); --color-secondary-foreground: var(--ink-700);
+  --color-muted: var(--muted); --color-muted-foreground: var(--ink-500);
+  --color-accent: var(--blue-50); --color-accent-foreground: var(--ink-900);
+  --color-destructive: var(--red-600); --color-border: var(--line);
+  --color-input: var(--line-2); --color-ring: var(--blue-600);
+  --color-sidebar: var(--surface); --color-sidebar-foreground: var(--ink-700);
+  --color-sidebar-primary: var(--blue-600); --color-sidebar-primary-foreground: var(--surface);
+  --color-sidebar-accent: var(--blue-50); --color-sidebar-accent-foreground: var(--ink-900);
+  --color-sidebar-border: var(--line); --color-sidebar-ring: var(--blue-600);
+  --font-sans: var(--font-inter), "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-sans); --font-mono: var(--font-geist-mono);
+  --radius-sm: var(--radius-control); --radius-md: var(--radius-control);
+  --radius-lg: var(--radius-card); --radius-xl: var(--radius-modal);
+}
+
+:root {
+  --ink-900: #0b1220; --ink-700: #2c3648; --ink-500: #5a657c; --ink-400: #8a93a6;
+  --line: #e6e9f0; --line-2: #d4dae6; --surface: #ffffff; --muted: #f7f8fc;
+  --blue-600: #2e5bff; --blue-700: #1e45d6; --blue-50: #eef2ff;
+  --violet-600: #7a5af8; --violet-50: #f4f0ff; --green-600: #0e9f6e;
+  --amber-600: #c2760b; --red-600: #e02d3c;
+  --radius-control: 6px; --radius-card: 10px; --radius-modal: 14px;
+  --shadow-sm: 0 1px 2px rgba(11,18,32,.06); --shadow-md: 0 8px 24px rgba(11,18,32,.08);
+  --control-height: 34px; --table-row-height: 40px; --sidebar-width: 240px;
+  --topbar-height: 52px; --card-padding: 16px; --page-gutter: 24px;
+  --background: var(--surface); --foreground: var(--ink-700);
+  --card: var(--surface); --card-foreground: var(--ink-700);
+  --popover: var(--surface); --popover-foreground: var(--ink-700);
+  --primary: var(--blue-600); --primary-foreground: var(--surface);
+  --secondary: var(--muted); --secondary-foreground: var(--ink-700);
+  --muted-foreground: var(--ink-500); --accent: var(--blue-50);
+  --accent-foreground: var(--ink-900); --destructive: var(--red-600);
+  --border: var(--line); --input: var(--line-2); --ring: var(--blue-600);
+  --sidebar: var(--surface); --sidebar-foreground: var(--ink-700);
+  --sidebar-primary: var(--blue-600); --sidebar-primary-foreground: var(--surface);
+  --sidebar-accent: var(--blue-50); --sidebar-accent-foreground: var(--ink-900);
+  --sidebar-border: var(--line); --sidebar-ring: var(--blue-600);
+}
+
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; border-color: var(--line); }
+  html { background: var(--surface); color: var(--ink-700); font-family: var(--font-sans); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  body { min-height: 100%; margin: 0; background: var(--surface); color: var(--ink-700); font: inherit; }
+  h1, h2, h3, h4, h5, h6 { color: var(--ink-900); font-weight: 600; line-height: 1.25; }
+  button, input, textarea, select { font: inherit; }
+  button:not(:disabled), [role="button"]:not([aria-disabled="true"]) { cursor: pointer; }
+  ::placeholder { color: var(--ink-400); }
+  :focus-visible { outline: 2px solid var(--blue-600); outline-offset: 2px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto; transition: none; animation: none; }
+}
+
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body * { visibility: hidden; }
+  .wf-print-report, .wf-print-report * { visibility: visible; }
+  .wf-print-report { position: absolute; inset: 0 auto auto 0; width: 100%; max-width: none; padding: 0; box-shadow: none; }
+  .wf-no-print { display: none; }
+  .wf-print-report table { page-break-inside: auto; }
+  .wf-print-report tr, .wf-print-report footer { page-break-inside: avoid; }
+  .wf-print-report thead { display: table-header-group; }
+}

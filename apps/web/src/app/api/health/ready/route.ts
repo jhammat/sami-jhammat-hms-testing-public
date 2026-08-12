@@ -1,0 +1,1 @@
+import{database}from"@wonflow/database";import{NextResponse}from"next/server";export async function GET(){try{await database.$queryRaw`SELECT 1`;return NextResponse.json({status:"ready",timestamp:new Date().toISOString()})}catch{return NextResponse.json({status:"not-ready"},{status:503})}}

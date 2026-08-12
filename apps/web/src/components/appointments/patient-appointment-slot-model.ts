@@ -1,0 +1,2 @@
+export interface PatientAppointmentSlotView { id: string; startsAt: string; endsAt: string; dateLabel: string; timeLabel: string; timeZoneLabel: string; clinicianName?: string; locationName?: string; }
+export function sortPatientAppointmentSlots(slots: readonly PatientAppointmentSlotView[]): PatientAppointmentSlotView[] { return [...slots].sort((a,b) => { const left = new Date(a.startsAt).getTime(); const right = new Date(b.startsAt).getTime(); return Number.isNaN(left) || Number.isNaN(right) ? a.startsAt.localeCompare(b.startsAt) : left-right; }); }

@@ -1,0 +1,2 @@
+import{NextResponse}from"next/server";import{requireRequestContext}from"@/lib/auth/permission-service";import{diagnosticsService as s}from"@/server/diagnostics/diagnostics-service";import{handleApiRoute}from"@/server/http/route-handler";
+export function GET(_r:Request,c:{params:Promise<{orderId:string}>}){return handleApiRoute(async()=>NextResponse.json({order:await s.getOrder(await requireRequestContext(),(await c.params).orderId)}))}

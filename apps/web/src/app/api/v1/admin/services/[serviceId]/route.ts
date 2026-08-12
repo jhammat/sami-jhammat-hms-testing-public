@@ -1,0 +1,3 @@
+import{NextResponse}from"next/server";import{requireRequestContext}from"@/lib/auth/permission-service";import{safeApiError}from"@/lib/api/route-helpers";import{hospitalAdministrationService as s}from"@/server/admin/hospital-administration-service";
+export async function PATCH(r:Request,{params}:{params:Promise<{serviceId:string}>}){try{return NextResponse.json({service:await s.updateService(await requireRequestContext(),(await params).serviceId,await r.json())})}catch(e){return safeApiError(e)}}
+export async function DELETE(_r:Request,{params}:{params:Promise<{serviceId:string}>}){try{return NextResponse.json({service:await s.deleteService(await requireRequestContext(),(await params).serviceId)})}catch(e){return safeApiError(e)}}

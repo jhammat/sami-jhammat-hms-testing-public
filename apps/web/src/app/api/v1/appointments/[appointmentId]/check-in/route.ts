@@ -1,0 +1,2 @@
+import{NextResponse}from"next/server";import{requireRequestContext}from"@/lib/auth/permission-service";import{receptionService as s}from"@/server/reception/reception-service";import{handleApiRoute}from"@/server/http/route-handler";
+export function POST(r:Request,c:{params:Promise<{appointmentId:string}>}){return handleApiRoute(async()=>NextResponse.json(await s.checkIn(await requireRequestContext(),(await c.params).appointmentId,await r.json())))}

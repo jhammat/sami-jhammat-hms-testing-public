@@ -1,0 +1,1 @@
+export default function Loading(){return <div id="main-content" aria-busy="true" className="space-y-6"><div className="h-72 animate-pulse rounded-3xl bg-slate-200 motion-reduce:animate-none"/><div className="h-96 animate-pulse rounded-3xl bg-slate-200 motion-reduce:animate-none"/></div>}

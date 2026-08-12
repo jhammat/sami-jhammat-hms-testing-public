@@ -1,0 +1,37 @@
+name: Phase 1 CI
+on:
+  pull_request:
+  push:
+    branches: [main, "feature/**"]
+permissions:
+  contents: read
+concurrency:
+  group: phase-1-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_DB: wonflow_test, POSTGRES_USER: wonflow, POSTGRES_PASSWORD: wonflow_ci_password }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U wonflow -d wonflow_test" --health-interval 10s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql://wonflow:wonflow_ci_password@127.0.0.1:5432/wonflow_test
+      NODE_ENV: test
+      CI: true
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with: { node-version: "20", cache: pnpm }
+      - run: corepack enable && corepack prepare pnpm@11.15.1 --activate
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @wonflow/database db:generate
+      - run: pnpm --filter @wonflow/database exec prisma migrate deploy
+      - run: pnpm runtime:audit
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build

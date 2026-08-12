@@ -1,0 +1,2 @@
+import{NextResponse}from"next/server";import{requireRequestContext}from"@/lib/auth/permission-service";import{receptionService as s}from"@/server/reception/reception-service";import{handleApiRoute}from"@/server/http/route-handler";
+export function POST(r:Request){return handleApiRoute(async()=>NextResponse.json({appointment:await s.bookAppointment(await requireRequestContext(),await r.json())},{status:201}))}

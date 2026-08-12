@@ -1,0 +1,2 @@
+import{NextResponse}from"next/server";import{requireRequestContext}from"@/lib/auth/permission-service";import{safeApiError}from"@/lib/api/route-helpers";import{hospitalAdministrationService as s}from"@/server/admin/hospital-administration-service";
+export async function PATCH(r:Request,{params}:{params:Promise<{roleId:string}>}){try{return NextResponse.json({role:await s.updateRole(await requireRequestContext(),(await params).roleId,await r.json())})}catch(e){return safeApiError(e)}}

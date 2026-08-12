@@ -1,0 +1,52 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "lint:fix": "eslint --fix",
+    "typecheck": "tsc --noEmit"
+    ,"test": "vitest run"
+    ,"test:watch": "vitest"
+    ,"test:coverage": "vitest run --coverage"
+    ,"test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.6.0",
+    "@wonflow/config": "workspace:*",
+    "@wonflow/contracts": "workspace:*",
+    "@wonflow/database": "workspace:*",
+    "@wonflow/mock-data": "workspace:*",
+    "@wonflow/ui": "workspace:*",
+    "@wonflow/validation": "workspace:*",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.25.0",
+    "next": "16.2.11",
+    "qrcode": "^1.5.4",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "shadcn": "^4.14.0",
+    "tailwind-merge": "^3.6.0",
+    "tw-animate-css": "^1.4.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@playwright/test": "^1.54.0",
+    "@vitest/coverage-v8": "^3.2.0",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@wonflow/typescript-config": "workspace:*",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.11",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+    ,"vitest": "^3.2.0"
+  }
+}

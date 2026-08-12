@@ -1,0 +1,1 @@
+import{SafeAreaView,Text,View}from"react-native";export default function Home(){return <SafeAreaView><View style={{padding:24,gap:8}}><Text style={{fontSize:28,fontWeight:"700"}}>Doctor workspace</Text><Text>Sign in to review today&apos;s queue, encounters, and released results.</Text></View></SafeAreaView>}

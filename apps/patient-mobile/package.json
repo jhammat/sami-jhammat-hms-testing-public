@@ -1,0 +1,23 @@
+{
+  "name": "@wonflow/patient-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "typecheck": "tsc --noEmit",
+    "ios": "expo run:ios"
+  },
+  "dependencies": {
+    "expo": "~53.0.0",
+    "expo-router": "~5.1.0",
+    "expo-secure-store": "~14.2.0",
+    "react": "19.0.0",
+    "react-native": "0.79.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "typescript": "~5.8.0"
+  }
+}

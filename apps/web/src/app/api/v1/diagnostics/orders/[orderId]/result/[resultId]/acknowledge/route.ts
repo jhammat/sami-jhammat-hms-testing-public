@@ -1,0 +1,2 @@
+import{NextResponse}from"next/server";import{requireRequestContext}from"@/lib/auth/permission-service";import{diagnosticsService as s}from"@/server/diagnostics/diagnostics-service";import{handleApiRoute}from"@/server/http/route-handler";
+export function POST(_r:Request,c:{params:Promise<{orderId:string;resultId:string}>}){return handleApiRoute(async()=>{const p=await c.params;return NextResponse.json({result:await s.acknowledgeResult(await requireRequestContext(),p.orderId,p.resultId)})})}

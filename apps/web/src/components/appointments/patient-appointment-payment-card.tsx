@@ -1,0 +1,10 @@
+import Link from "next/link";
+import { CreditCard } from "lucide-react";
+import type { PracticeMoney } from "@wonflow/contracts";
+import { createPatientAppointmentPaymentPath } from "@/lib/patient/patient-routes";
+import { formatPracticeMoney } from "./practice-money-format";
+export type PatientAppointmentPaymentDisplayStatus = "not-required" | "unpaid" | "pending" | "paid" | "partially-refunded" | "refunded" | "failed";
+const LABELS: Record<PatientAppointmentPaymentDisplayStatus,string> = { "not-required":"No payment required", unpaid:"Payment due", pending:"Payment processing", paid:"Paid", "partially-refunded":"Partially refunded", refunded:"Refunded", failed:"Payment unsuccessful" };
+interface Props { appointmentId: string; amount: PracticeMoney; status: PatientAppointmentPaymentDisplayStatus; paymentTiming: string; canPayNow: boolean; collectorLabel: string }
+export function PatientAppointmentPaymentCard(props: Props) { return <section aria-labelledby="appointment-payment-heading" className="rounded-2xl border border-amber-200 bg-amber-50 p-4"><p className="text-[10px] font-black uppercase tracking-wide text-amber-800">Payment status</p><h2 id="appointment-payment-heading" className="mt-1 text-sm font-black text-slate-950">{LABELS[props.status]}</h2><dl className="mt-4 grid gap-2 sm:grid-cols-3"><Detail label="Amount" value={formatPracticeMoney(props.amount)}/><Detail label="Timing" value={props.paymentTiming.replaceAll("-"," ")}/><Detail label="Collector" value={props.collectorLabel}/></dl>{props.canPayNow ? <Link className="mt-4 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-black text-white" href={createPatientAppointmentPaymentPath(props.appointmentId)}><CreditCard aria-hidden size={16}/>Pay now</Link> : null}</section> }
+function Detail({label,value}:{label:string;value:string}) { return <div className="rounded-xl border border-black/10 bg-white/60 p-3"><dt className="text-[9px] font-black uppercase">{label}</dt><dd className="mt-1 text-xs font-black capitalize">{value}</dd></div> }

@@ -1,0 +1,5 @@
+import { NextResponse } from "next/server";
+import { WonFlowRequestContextError } from "@wonflow/contracts";
+export class WonFlowApiError extends Error { constructor(readonly status:number,readonly code:string,message:string){super(message);this.name="WonFlowApiError";} }
+function contextErrorStatus(error:WonFlowRequestContextError){switch(error.code){case"permission-required":return 403;case"tenant-context-required":case"branch-context-required":return 400;default:return 401;}}
+export async function handleApiRoute(handler:()=>Promise<NextResponse>):Promise<NextResponse>{try{return await handler();}catch(error){if(error instanceof WonFlowApiError)return NextResponse.json({error:error.message,code:error.code},{status:error.status});if(error instanceof WonFlowRequestContextError)return NextResponse.json({error:error.message,code:error.code},{status:contextErrorStatus(error)});console.error("WonFlow API failure",error);return NextResponse.json({error:"The request could not be completed.",code:"internal-error"},{status:500});}}

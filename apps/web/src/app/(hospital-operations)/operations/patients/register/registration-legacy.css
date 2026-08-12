@@ -1,0 +1,1150 @@
+@import "./registration-ui-legacy.css";
+/* =========================================================
+   WonFlow Premium Visual System â€” WF-067
+   ========================================================= */
+
+:root {
+  --wf-canvas: #f4f7fb;
+  --wf-surface: #ffffff;
+  --wf-surface-soft: #f8fafc;
+  --wf-surface-blue: #eff6ff;
+  --wf-surface-violet: #f4f1ff;
+
+  --wf-text-strong: #0f172a;
+  --wf-text: #334155;
+  --wf-text-muted: #64748b;
+  --wf-text-faint: #94a3b8;
+
+  --wf-line: #dbe3ef;
+  --wf-line-strong: #c8d4e3;
+
+  --wf-blue: #2563eb;
+  --wf-blue-dark: #1d4ed8;
+  --wf-blue-soft: #eff6ff;
+
+  --wf-violet: #6d5dfc;
+  --wf-violet-dark: #5946e8;
+  --wf-violet-soft: #f4f1ff;
+
+  --wf-cyan: #0891b2;
+  --wf-cyan-soft: #ecfeff;
+
+  --wf-emerald: #059669;
+  --wf-emerald-soft: #ecfdf5;
+
+  --wf-amber: #d97706;
+  --wf-amber-soft: #fffbeb;
+
+  --wf-rose: #e11d48;
+  --wf-rose-soft: #fff1f2;
+
+  --wf-radius-sm: 10px;
+  --wf-radius-md: 14px;
+  --wf-radius-lg: 18px;
+  --wf-radius-xl: 24px;
+
+  --wf-shadow-subtle:
+    0 1px 2px rgba(15, 23, 42, 0.04),
+    0 8px 24px rgba(15, 23, 42, 0.05);
+
+  --wf-shadow-elevated:
+    0 2px 4px rgba(15, 23, 42, 0.05),
+    0 18px 46px rgba(15, 23, 42, 0.1);
+
+  --wf-focus-ring:
+    0 0 0 3px rgba(37, 99, 235, 0.14);
+
+  --wf-transition:
+    160ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+html {
+  background: var(--wf-canvas);
+}
+
+body {
+  background:
+    linear-gradient(
+      180deg,
+      #f8fbff 0,
+      var(--wf-canvas) 230px
+    );
+
+  color: var(--wf-text);
+
+  font-family:
+    var(--font-geist-sans, "Inter"),
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #dbeafe;
+  color: #1e3a8a;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  transition:
+    color var(--wf-transition),
+    background-color var(--wf-transition),
+    border-color var(--wf-transition),
+    box-shadow var(--wf-transition),
+    transform var(--wf-transition);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+  box-shadow: var(--wf-focus-ring);
+}
+
+.wf-page-shell {
+  margin-inline: auto;
+  width: min(100%, 1600px);
+}
+
+.wf-surface {
+  border: 1px solid var(--wf-line);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-surface);
+  box-shadow: var(--wf-shadow-subtle);
+}
+
+.wf-surface-soft {
+  border: 1px solid #e8edf5;
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-surface-soft);
+}
+
+.wf-section-title {
+  color: var(--wf-text-strong);
+  font-size: 1.0625rem;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.wf-section-description {
+  margin-top: 0.25rem;
+  color: var(--wf-text-muted);
+  font-size: 0.8125rem;
+  line-height: 1.55;
+}
+
+.wf-field {
+  min-height: 44px;
+  width: 100%;
+  border: 1px solid var(--wf-line-strong);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-surface);
+  padding: 0.68rem 0.875rem;
+  color: var(--wf-text-strong);
+  font-size: 0.875rem;
+}
+
+.wf-field::placeholder {
+  color: var(--wf-text-faint);
+}
+
+.wf-field:hover {
+  border-color: #aebed2;
+}
+
+.wf-field:focus {
+  border-color: var(--wf-blue);
+  box-shadow: var(--wf-focus-ring);
+  outline: none;
+}
+
+.wf-button-primary {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid var(--wf-blue);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-blue);
+  padding: 0.65rem 1rem;
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 750;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.18);
+}
+
+.wf-button-primary:hover {
+  border-color: var(--wf-blue-dark);
+  background: var(--wf-blue-dark);
+  transform: translateY(-1px);
+}
+
+.wf-button-secondary {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border: 1px solid var(--wf-line);
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-surface);
+  padding: 0.65rem 1rem;
+  color: var(--wf-text);
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.wf-button-secondary:hover {
+  border-color: #b8c5d6;
+  background: var(--wf-surface-soft);
+  color: var(--wf-text-strong);
+}
+
+.wf-button-danger {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #fecdd3;
+  border-radius: var(--wf-radius-md);
+  background: var(--wf-rose-soft);
+  padding: 0.65rem 1rem;
+  color: #be123c;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.wf-button-danger:hover {
+  border-color: #fda4af;
+  background: #ffe4e6;
+}
+
+.wf-table-shell {
+  overflow: hidden;
+  border: 1px solid var(--wf-line);
+  border-radius: var(--wf-radius-lg);
+  background: var(--wf-surface);
+}
+
+.wf-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.wf-table thead {
+  background: #f8fafc;
+}
+
+.wf-table th {
+  border-bottom: 1px solid var(--wf-line);
+  padding: 0.8rem 1rem;
+  color: var(--wf-text-muted);
+  font-size: 0.6875rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: left;
+  text-transform: uppercase;
+}
+
+.wf-table td {
+  border-bottom: 1px solid #edf1f6;
+  padding: 0.95rem 1rem;
+  color: var(--wf-text);
+  font-size: 0.8125rem;
+}
+
+.wf-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.wf-table tbody tr:hover {
+  background: #f8fbff;
+}
+
+.wf-status {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 0.2rem 0.625rem;
+  font-size: 0.6875rem;
+  font-weight: 750;
+}
+
+.wf-status-blue {
+  border-color: #bfdbfe;
+  background: var(--wf-blue-soft);
+  color: var(--wf-blue-dark);
+}
+
+.wf-status-violet {
+  border-color: #ddd6fe;
+  background: var(--wf-violet-soft);
+  color: var(--wf-violet-dark);
+}
+
+.wf-status-emerald {
+  border-color: #a7f3d0;
+  background: var(--wf-emerald-soft);
+  color: #047857;
+}
+
+.wf-status-amber {
+  border-color: #fde68a;
+  background: var(--wf-amber-soft);
+  color: #a16207;
+}
+
+.wf-status-rose {
+  border-color: #fecdd3;
+  background: var(--wf-rose-soft);
+  color: #be123c;
+}
+
+.wf-status-neutral {
+  border-color: #cbd5e1;
+  background: #f1f5f9;
+  color: #475569;
+}
+
+.wf-subtle-divider {
+  height: 1px;
+  border: 0;
+  background: var(--wf-line);
+}
+
+.wf-scrollbar {
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.wf-scrollbar::-webkit-scrollbar {
+  height: 8px;
+  width: 8px;
+}
+
+.wf-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #cbd5e1;
+}
+
+.wf-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button,
+  a,
+  input,
+  select,
+  textarea {
+    transition: none;
+  }
+}
+
+/* =========================================================
+   WonFlow shell-aware workflow layouts
+   ========================================================= */
+
+.wf-workflow-split {
+  display: grid;
+  min-width: 0;
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.wf-workflow-main,
+.wf-workflow-aside {
+  min-width: 0;
+}
+
+.wf-workspace-rail {
+  display: grid;
+  min-width: 0;
+  align-items: start;
+  gap: 1.25rem;
+}
+
+.wf-workspace-rail-main,
+.wf-workspace-rail-side {
+  min-width: 0;
+}
+
+/*
+  We use 1180px instead of Tailwind's 2xl breakpoint because the permanent
+  desktop sidebar consumes part of the available application width.
+*/
+@media (min-width: 1180px) {
+  .wf-workflow-split {
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(300px, 330px);
+  }
+
+  .wf-workflow-aside {
+    position: sticky;
+    top: 96px;
+    align-self: start;
+  }
+
+  .wf-workspace-rail {
+    grid-template-columns:
+      minmax(300px, 360px)
+      minmax(0, 1fr);
+  }
+
+  .wf-workspace-rail-side {
+    position: sticky;
+    top: 96px;
+    align-self: start;
+  }
+}
+
+@media (min-width: 1450px) {
+  .wf-workflow-split {
+    grid-template-columns:
+      minmax(0, 1fr)
+      360px;
+  }
+
+  .wf-workspace-rail {
+    grid-template-columns:
+      390px
+      minmax(0, 1fr);
+  }
+}
+
+/* =========================================================
+   WonFlow printable laboratory report â€” WF-072
+   ========================================================= */
+
+@media print {
+  @page {
+    size: A4;
+    margin: 12mm;
+  }
+
+  body {
+    background: white !important;
+  }
+
+  body * {
+    visibility: hidden !important;
+  }
+
+  .wf-print-report,
+  .wf-print-report * {
+    visibility: visible !important;
+  }
+
+  .wf-print-report {
+    position: absolute;
+    inset: 0 auto auto 0;
+
+    width: 100%;
+    max-width: none !important;
+
+    padding: 0 !important;
+
+    box-shadow: none !important;
+  }
+
+  .wf-no-print {
+    display: none !important;
+  }
+
+  .wf-print-report table {
+    page-break-inside: auto;
+  }
+
+  .wf-print-report tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+  }
+
+  .wf-print-report thead {
+    display: table-header-group;
+  }
+
+  .wf-print-report footer {
+    page-break-inside: avoid;
+  }
+}
+/* =========================================================
+   WonFlow existing-screen premium compatibility â€” WF-070
+   ========================================================= */
+
+.wf-screen-stack {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.wf-workflow-split,
+.wf-workspace-rail {
+  min-width: 0;
+}
+
+.wf-workflow-main,
+.wf-workflow-aside,
+.wf-workspace-rail-main,
+.wf-workspace-rail-side {
+  min-width: 0;
+}
+
+.wf-workflow-aside > *,
+.wf-workspace-rail-side > * {
+  min-width: 0;
+}
+
+table {
+  max-width: 100%;
+}
+
+input,
+select,
+textarea,
+button {
+  max-width: 100%;
+}
+
+textarea {
+  field-sizing: content;
+}
+
+select {
+  text-overflow: ellipsis;
+}
+
+.wf-content-scroll {
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.wf-sticky-actions {
+  position: sticky;
+  bottom: 1rem;
+  z-index: 20;
+
+  border: 1px solid var(--wf-line);
+  border-radius: var(--wf-radius-lg);
+
+  background:
+    rgba(255, 255, 255, 0.96);
+
+  box-shadow:
+    0 14px 38px
+    rgba(15, 23, 42, 0.14);
+
+  backdrop-filter: blur(14px);
+}
+
+@media (min-width: 1180px) {
+  .wf-workflow-split {
+    display: grid;
+
+    grid-template-columns:
+      minmax(0, 1fr)
+      minmax(290px, 330px);
+
+    align-items: start;
+    gap: 1.25rem;
+  }
+
+  .wf-workflow-aside {
+    position: sticky;
+    top: 96px;
+  }
+
+  .wf-workspace-rail {
+    display: grid;
+
+    grid-template-columns:
+      minmax(300px, 360px)
+      minmax(0, 1fr);
+
+    align-items: start;
+    gap: 1.25rem;
+  }
+
+  .wf-workspace-rail-side {
+    position: sticky;
+    top: 96px;
+  }
+}
+
+@media (min-width: 1500px) {
+  .wf-workflow-split {
+    grid-template-columns:
+      minmax(0, 1fr)
+      360px;
+  }
+
+  .wf-workspace-rail {
+    grid-template-columns:
+      390px
+      minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1179px) {
+  .wf-workflow-split,
+  .wf-workspace-rail {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+  }
+
+  .wf-workflow-aside,
+  .wf-workspace-rail-side {
+    position: static;
+    width: 100%;
+  }
+}
+
+@media (max-width: 767px) {
+  .wf-sticky-actions {
+    bottom: 0.5rem;
+  }
+
+  .wf-workflow-split,
+  .wf-workspace-rail {
+    gap: 1rem;
+  }
+}
+/* =========================================================
+   WonFlow Reception â€” polished first-release visual system
+   ========================================================= */
+
+.wf-reception-page {
+  background:
+    radial-gradient(
+      circle at 8% 0%,
+      rgba(79, 70, 229, 0.10),
+      transparent 27%
+    ),
+    radial-gradient(
+      circle at 94% 8%,
+      rgba(14, 165, 233, 0.08),
+      transparent 24%
+    ),
+    linear-gradient(
+      180deg,
+      #f8fbff 0%,
+      #f5f7fd 52%,
+      #f8fafc 100%
+    );
+}
+
+.wf-reception-page section {
+  border-color: rgba(203, 213, 225, 0.76);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow:
+    0 12px 30px rgba(15, 23, 42, 0.055),
+    0 1px 2px rgba(15, 23, 42, 0.025);
+  backdrop-filter: blur(12px);
+}
+
+.wf-section-header {
+  background:
+    linear-gradient(
+      90deg,
+      rgba(248, 250, 252, 0.98) 0%,
+      rgba(238, 242, 255, 0.84) 100%
+    );
+}
+
+.wf-field-label {
+  letter-spacing: -0.005em;
+}
+
+.wf-control,
+.wf-textarea {
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.025),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.35);
+}
+
+.wf-control:hover,
+.wf-textarea:hover {
+  border-color: #c7d2fe;
+}
+
+.wf-control::placeholder,
+.wf-textarea::placeholder {
+  color: #94a3b8;
+  font-size: 0.69rem;
+}
+
+.wf-control:focus,
+.wf-textarea:focus {
+  background: #ffffff;
+  box-shadow:
+    0 0 0 3px rgba(99, 102, 241, 0.10),
+    0 4px 12px rgba(79, 70, 229, 0.05);
+}
+
+.wf-billing-panel {
+  background:
+    linear-gradient(
+      180deg,
+      #ffffff 0%,
+      #fbfbff 52%,
+      #f7f7ff 100%
+    );
+}
+
+.wf-billing-header {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.10);
+  background:
+    linear-gradient(
+      135deg,
+      #172554 0%,
+      #312e81 52%,
+      #5b21b6 100%
+    );
+  box-shadow:
+    0 10px 24px rgba(49, 46, 129, 0.18);
+}
+
+.wf-purpose-card {
+  border: 1px solid #c7d2fe;
+  background:
+    linear-gradient(
+      135deg,
+      #eef2ff 0%,
+      #f5f3ff 60%,
+      #ffffff 100%
+    );
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.75),
+    0 5px 14px rgba(79, 70, 229, 0.055);
+}
+
+.wf-billing-totals {
+  border: 1px solid #dbe4ff;
+  border-radius: 14px;
+  padding: 12px;
+  background:
+    linear-gradient(
+      135deg,
+      rgba(238, 242, 255, 0.95) 0%,
+      rgba(245, 243, 255, 0.92) 100%
+    );
+}
+
+.wf-reception-page button {
+  letter-spacing: -0.005em;
+}
+
+.wf-reception-page select,
+.wf-reception-page input,
+.wf-reception-page textarea {
+  color: #172033;
+}
+
+@media (max-width: 1279px) {
+  .wf-billing-panel {
+    position: static;
+  }
+}
+/* Required Reception fields */
+
+.wf-form-field[data-required="true"]
+  .wf-required-control:invalid {
+  border-color: #fecaca;
+  background:
+    linear-gradient(
+      180deg,
+      #fffafa 0%,
+      #fff5f5 100%
+    );
+  box-shadow:
+    inset 3px 0 0
+      rgba(244, 63, 94, 0.16);
+}
+
+.wf-form-field[data-required="true"]
+  .wf-required-control:valid {
+  border-color: #bbf7d0;
+  background:
+    linear-gradient(
+      180deg,
+      #fbfffc 0%,
+      #f2fbf5 100%
+    );
+  box-shadow:
+    inset 3px 0 0
+      rgba(22, 163, 74, 0.15);
+}
+
+.wf-form-field[data-required="true"]
+  .wf-required-control:focus:invalid {
+  border-color: #fda4af;
+  box-shadow:
+    0 0 0 3px
+      rgba(244, 63, 94, 0.08),
+    inset 3px 0 0
+      rgba(244, 63, 94, 0.20);
+}
+
+.wf-form-field[data-required="true"]
+  .wf-required-control:focus:valid {
+  border-color: #86efac;
+  box-shadow:
+    0 0 0 3px
+      rgba(22, 163, 74, 0.08),
+    inset 3px 0 0
+      rgba(22, 163, 74, 0.20);
+}
+/* =========================================================
+   WonFlow Reception desktop fitting
+   ========================================================= */
+
+.wf-reception-page {
+  background:
+    radial-gradient(
+      circle at 8% 0%,
+      rgba(79, 70, 229, 0.08),
+      transparent 26%
+    ),
+    radial-gradient(
+      circle at 96% 8%,
+      rgba(14, 165, 233, 0.06),
+      transparent 24%
+    ),
+    linear-gradient(
+      180deg,
+      #f8fbff 0%,
+      #f5f7fd 100%
+    );
+}
+
+.wf-reception-page section {
+  position: relative;
+}
+
+@media (
+  min-width: 1280px
+) and (
+  max-height: 940px
+) {
+  .wf-reception-page {
+    padding-top: 7px;
+    padding-bottom: 7px;
+  }
+
+  .wf-page-header {
+    margin-bottom: 6px;
+  }
+
+  .wf-reception-grid {
+    gap: 8px;
+  }
+
+  .wf-reception-left {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .wf-reception-left > * {
+    margin-top: 0 !important;
+    margin-bottom: 0 !important;
+  }
+
+  .wf-reception-page
+    .wf-section-header {
+    min-height: 34px;
+    padding-top: 5px;
+    padding-bottom: 5px;
+  }
+
+  .wf-reception-page
+    .wf-section-header h2 {
+    font-size: 11px;
+  }
+
+  .wf-reception-page
+    .wf-control {
+    height: 30px;
+    border-radius: 9px;
+    padding-left: 9px;
+    padding-right: 9px;
+    font-size: 10px;
+  }
+
+  .wf-reception-page
+    .wf-textarea {
+    min-height: 40px;
+    padding-top: 7px;
+    padding-bottom: 7px;
+    font-size: 10px;
+  }
+
+  .wf-reception-page
+    .wf-field-label {
+    margin-bottom: 3px;
+    font-size: 8.5px;
+  }
+
+  .wf-reception-page
+    section > .p-3 {
+    padding: 9px;
+  }
+
+  .wf-reception-page
+    section > .p-2\.5 {
+    padding: 8px;
+  }
+
+  .wf-reception-page
+    button {
+    line-height: 1.15;
+  }
+
+  .wf-billing-panel
+    > div:last-child {
+    padding: 10px;
+  }
+}
+/* =========================================================
+   WonFlow sidebar â€” stronger blue and purple separation
+   ========================================================= */
+
+.wf-sidebar-shell,
+.wf-sidebar {
+  background:
+    radial-gradient(
+      circle at 15% 4%,
+      rgba(37, 99, 235, 0.20),
+      transparent 31%
+    ),
+    radial-gradient(
+      circle at 92% 40%,
+      rgba(124, 58, 237, 0.17),
+      transparent 38%
+    ),
+    linear-gradient(
+      180deg,
+      #e8f0ff 0%,
+      #eeeaff 46%,
+      #e5edff 100%
+    );
+}
+
+.wf-sidebar-shell {
+  border-right-color:
+    rgba(129, 140, 248, 0.48);
+  box-shadow:
+    8px 0 30px
+      rgba(67, 56, 202, 0.09);
+}
+
+.wf-sidebar {
+  border-right:
+    1px solid
+    rgba(165, 180, 252, 0.55);
+}
+
+.wf-sidebar-header {
+  background:
+    linear-gradient(
+      135deg,
+      rgba(239, 246, 255, 0.96) 0%,
+      rgba(224, 231, 255, 0.94) 54%,
+      rgba(237, 233, 254, 0.96) 100%
+    );
+  border-bottom-color:
+    rgba(165, 180, 252, 0.62);
+  box-shadow:
+    0 5px 18px
+      rgba(79, 70, 229, 0.07);
+  backdrop-filter:
+    blur(14px);
+}
+
+.wf-sidebar-navigation {
+  background:
+    linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.13),
+      rgba(224, 231, 255, 0.10)
+    );
+}
+
+.wf-sidebar-navigation a {
+  border:
+    1px solid transparent;
+}
+
+.wf-sidebar-navigation a:hover {
+  border-color:
+    rgba(129, 140, 248, 0.34);
+  background:
+    rgba(255, 255, 255, 0.54);
+  box-shadow:
+    0 5px 14px
+      rgba(79, 70, 229, 0.06);
+}
+
+.wf-sidebar-navigation
+  a[aria-current="page"] {
+  border-color:
+    rgba(129, 140, 248, 0.70);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(219, 234, 254, 0.96),
+      rgba(224, 231, 255, 0.96),
+      rgba(237, 233, 254, 0.92)
+    );
+  box-shadow:
+    0 7px 18px
+      rgba(79, 70, 229, 0.10);
+}
+
+.wf-sidebar
+  .wf-scrollbar::-webkit-scrollbar {
+  width: 5px;
+}
+
+.wf-sidebar
+  .wf-scrollbar::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      180deg,
+      #60a5fa,
+      #8b5cf6
+    );
+}
+
+.wf-sidebar
+  .wf-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* =========================================================
+   WonFlow completed workflow sections
+   ========================================================= */
+
+.wf-workflow-section {
+  transition:
+    background 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.wf-workflow-section-complete {
+  border-color: #10b981 !important;
+  background:
+    linear-gradient(
+      180deg,
+      #ffffff 0%,
+      #f0fdf4 100%
+    ) !important;
+  box-shadow:
+    0 12px 28px
+      rgba(5, 150, 105, 0.12),
+    inset 0 0 0 1px
+      rgba(16, 185, 129, 0.08) !important;
+}
+
+.wf-workflow-section-complete
+  .wf-section-header {
+  border-bottom-color:
+    rgba(167, 243, 208, 0.25);
+  background:
+    linear-gradient(
+      90deg,
+      rgba(6, 78, 59, 0.98),
+      rgba(4, 120, 87, 0.98)
+    );
+}
+
+.wf-workflow-section-complete
+  .wf-section-header h2 {
+  color: #ffffff;
+}
+
+.wf-workflow-section-complete
+  .wf-section-header > div > div {
+  color: #047857;
+  background: #ecfdf5;
+  box-shadow:
+    0 0 0 1px
+      rgba(167, 243, 208, 0.7);
+}
+
+.wf-workflow-section-complete
+  .wf-field-label {
+  color: #065f46;
+}
+
+.wf-workflow-section-complete
+  .wf-control,
+.wf-workflow-section-complete
+  .wf-textarea {
+  border-color:
+    rgba(167, 243, 208, 0.72);
+  background:
+    rgba(255, 255, 255, 0.97);
+  color: #052e2b;
+}
+
+.wf-workflow-section-complete
+  .wf-control:disabled,
+.wf-workflow-section-complete
+  .wf-textarea:disabled {
+  background: #ecfdf5;
+  color: #065f46;
+}
+
+.wf-workflow-section-complete
+  .wf-billing-header {
+  border-bottom-color:
+    rgba(167, 243, 208, 0.25);
+  background:
+    linear-gradient(
+      135deg,
+      #022c22 0%,
+      #064e3b 55%,
+      #047857 100%
+    );
+}
+
+.wf-workflow-section-complete
+  .wf-purpose-card,
+.wf-workflow-section-complete
+  .wf-billing-totals {
+  border-color: #6ee7b7;
+  background:
+    linear-gradient(
+      135deg,
+      #ecfdf5,
+      #d1fae5
+    );
+}

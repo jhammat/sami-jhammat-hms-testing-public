@@ -1,0 +1,1 @@
+"use client";export default function Error({reset}:{reset():void}){return <main className="grid min-h-[60vh] place-items-center" id="main-content"><section role="alert"><h1 className="text-xl font-black">Messages could not be loaded</h1><button className="mt-4 min-h-11 rounded-xl bg-slate-950 px-4 text-white" onClick={reset}>Try again</button></section></main>}

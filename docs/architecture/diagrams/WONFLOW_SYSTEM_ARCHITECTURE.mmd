@@ -1,0 +1,403 @@
+%%{init: {
+  "theme": "base",
+  "themeVariables": {
+    "fontFamily": "Inter, Arial, sans-serif",
+    "primaryTextColor": "#172033",
+    "lineColor": "#64748B",
+    "clusterBkg": "#F8FAFC",
+    "clusterBorder": "#CBD5E1"
+  },
+  "flowchart": {
+    "curve": "basis",
+    "nodeSpacing": 30,
+    "rankSpacing": 45,
+    "htmlLabels": true
+  }
+}}%%
+
+flowchart TB
+
+  %% ============================================================
+  %% USERS
+  %% ============================================================
+
+  subgraph USERS["1. Users and Access Channels"]
+    direction LR
+
+    U1["Platform<br/>Super Admin"]
+    U2["Organization<br/>Administrator"]
+    U3["Branch and Hospital<br/>Management"]
+    U4["Reception and<br/>Operations Staff"]
+    U5["Doctors and<br/>Clinical Staff"]
+    U6["Nurses and<br/>Ward Staff"]
+    U7["Diagnostic and<br/>Pharmacy Staff"]
+    U8["Finance and<br/>Insurance Staff"]
+    U9["Patients and<br/>Authorized Caregivers"]
+  end
+
+  %% ============================================================
+  %% CLIENT APPLICATIONS
+  %% ============================================================
+
+  subgraph CLIENTS["2. Role-Specific Client Applications"]
+    direction LR
+
+    C1["Platform Administration<br/>Portal"]
+    C2["Organization Administration<br/>Portal"]
+    C3["Hospital Operations<br/>Workspace"]
+    C4["Doctor Clinical<br/>Workspace"]
+    C5["Management and Reporting<br/>Portal"]
+    C6["Patient Access<br/>Responsive Web and PWA"]
+    C7["Patient Access<br/>Android APK via Capacitor"]
+  end
+
+  %% ============================================================
+  %% CURRENT FRONTEND DEMO
+  %% ============================================================
+
+  subgraph DEMO["3. Current Frontend Demo Boundary"]
+    direction LR
+
+    D1["Next.js App Router<br/>and React"]
+    D2["WonFlow Shared<br/>Design System"]
+    D3["Portal Shells,<br/>Routes and Navigation"]
+    D4["TypeScript Domain<br/>Contracts"]
+    D5["Shared Validation<br/>Rules"]
+    D6["Realistic Fictional<br/>Mock Data"]
+    D7["Interactive Demo<br/>State and Workflows"]
+    D8["English and Urdu<br/>Localization Foundation"]
+  end
+
+  %% ============================================================
+  %% PRODUCTION ENTRY
+  %% ============================================================
+
+  subgraph ENTRY["4. Production Application Entry and Security Boundary"]
+    direction LR
+
+    E1["CDN, WAF and<br/>Rate Limiting"]
+    E2["Application Gateway<br/>and Backend for Frontend"]
+    E3["Authentication,<br/>Sessions and MFA"]
+    E4["Authorization and<br/>Access-Scope Enforcement"]
+    E5["Tenant and Branch<br/>Context Resolution"]
+    E6["API Validation and<br/>Request Idempotency"]
+  end
+
+  %% ============================================================
+  %% CORE BUSINESS DOMAINS
+  %% ============================================================
+
+  subgraph DOMAINS["5. WonFlow Business and Clinical Domain Modules"]
+    direction TB
+
+    subgraph DOMAIN_ROW_1["Administration and Access"]
+      direction LR
+
+      M1["Platform and Tenant<br/>Administration"]
+      M2["Organizations,<br/>Branches and Departments"]
+      M3["Users, Roles and<br/>Permissions"]
+      M4["Staff and Practitioner<br/>Management"]
+      M5["Service Catalogue,<br/>Pricing and Configuration"]
+    end
+
+    subgraph DOMAIN_ROW_2["Patient Access and Hospital Operations"]
+      direction LR
+
+      M6["Patient Identity and<br/>Duplicate Prevention"]
+      M7["Appointments and<br/>Doctor Availability"]
+      M8["Arrival, Check-In,<br/>Tokens and Queues"]
+      M9["Encounters and<br/>Patient Journeys"]
+      M10["Referrals and<br/>Care Coordination"]
+    end
+
+    subgraph DOMAIN_ROW_3["Clinical Care"]
+      direction LR
+
+      M11["Doctor Consultation<br/>and Clinical Notes"]
+      M12["Problems, Diagnosis<br/>and Treatment Plans"]
+      M13["Medication Prescribing<br/>and Safety Checks"]
+      M14["Clinical Tasks,<br/>Orders and Follow-Up"]
+      M15["Patient Instructions<br/>and Clinical Documents"]
+    end
+
+    subgraph DOMAIN_ROW_4["Diagnostics and Pharmacy"]
+      direction LR
+
+      M16["Laboratory Orders,<br/>Specimens and Results"]
+      M17["Radiology Scheduling,<br/>Studies and Reports"]
+      M18["Pharmacy Review,<br/>Dispensing and Counselling"]
+      M19["Diagnostic Critical<br/>Results and Escalation"]
+      M20["External Diagnostic<br/>Provider Workflows"]
+    end
+
+    subgraph DOMAIN_ROW_5["Inpatient and Surgical Care"]
+      direction LR
+
+      M21["Admissions, Wards,<br/>Rooms and Beds"]
+      M22["Nursing Assessments,<br/>Care Plans and eMAR"]
+      M23["Ward Transfers,<br/>Handovers and Discharge"]
+      M24["Operation Theatre<br/>and Surgical Procedures"]
+      M25["Anaesthesia and<br/>Postoperative Recovery"]
+    end
+
+    subgraph DOMAIN_ROW_6["Finance and Commercial Operations"]
+      direction LR
+
+      M26["Charges, Invoices<br/>and Patient Accounts"]
+      M27["Payments, Receipts,<br/>Refunds and Credits"]
+      M28["Insurance Eligibility,<br/>Authorization and Claims"]
+      M29["Denials, Appeals and<br/>Remittance Management"]
+      M30["Packages, Corporate<br/>and Government Payers"]
+    end
+
+    subgraph DOMAIN_ROW_7["Future Configurable Modules"]
+      direction LR
+
+      M31["Inventory and<br/>Procurement"]
+      M32["Dentistry and<br/>Specialty Extensions"]
+      M33["Therapy, Rehabilitation<br/>and Home Care"]
+      M34["Medical Records and<br/>Document Management"]
+      M35["Additional Metadata-Driven<br/>Hospital Services"]
+    end
+  end
+
+  %% ============================================================
+  %% SHARED PLATFORM SERVICES
+  %% ============================================================
+
+  subgraph PLATFORM["6. Shared Platform Services"]
+    direction LR
+
+    P1["Workflow and State<br/>Transition Engine"]
+    P2["Metadata and Dynamic<br/>Form Configuration"]
+    P3["Notification and<br/>Communication Service"]
+    P4["Document and Report<br/>Generation Service"]
+    P5["Search and Patient<br/>Lookup Service"]
+    P6["Background Jobs and<br/>Scheduled Processing"]
+    P7["Real-Time Events,<br/>Queues and Status Updates"]
+    P8["Audit Trail and<br/>Immutable Event History"]
+    P9["Localization and<br/>Terminology Service"]
+    P10["Analytics and<br/>Reporting Service"]
+  end
+
+  %% ============================================================
+  %% EVENT AND INTEGRATION LAYER
+  %% ============================================================
+
+  subgraph INTEGRATION_LAYER["7. Events and Integration Layer"]
+    direction LR
+
+    I1["Internal Domain<br/>Events"]
+    I2["Reliable Outbox and<br/>Event Delivery"]
+    I3["Integration and<br/>Mapping Engine"]
+    I4["API and Webhook<br/>Connectors"]
+    I5["Import, Export and<br/>Interoperability Jobs"]
+  end
+
+  %% ============================================================
+  %% DATA LAYER
+  %% ============================================================
+
+  subgraph DATA["8. Production Data and Storage Layer"]
+    direction LR
+
+    DB1["PostgreSQL<br/>Transactional Database"]
+    DB2["Redis<br/>Cache and Coordination"]
+    DB3["Object Storage<br/>Documents and Attachments"]
+    DB4["Search Index<br/>Fast Operational Search"]
+    DB5["Analytics Store<br/>Reporting and BI"]
+    DB6["PACS or Secure Imaging<br/>Archive References"]
+    DB7["Backup and<br/>Recovery Storage"]
+  end
+
+  %% ============================================================
+  %% EXTERNAL SYSTEMS
+  %% ============================================================
+
+  subgraph EXTERNAL["9. External Systems and Partners"]
+    direction LR
+
+    X1["Payment Gateways,<br/>Banks and Wallets"]
+    X2["Insurance Payers,<br/>TPAs and Clearinghouses"]
+    X3["SMS, Email and<br/>Push Providers"]
+    X4["Laboratory Analysers<br/>and External Laboratories"]
+    X5["RIS, PACS and<br/>Imaging Equipment"]
+    X6["Pharmacy, Barcode and<br/>Inventory Devices"]
+    X7["Government and<br/>Regulatory Systems"]
+    X8["Approved Third-Party<br/>Clinical Services"]
+  end
+
+  %% ============================================================
+  %% INFRASTRUCTURE
+  %% ============================================================
+
+  subgraph INFRASTRUCTURE["10. Infrastructure, Security and Operations"]
+    direction LR
+
+    O1["Containerized<br/>Application Services"]
+    O2["Environment and<br/>Secrets Management"]
+    O3["Central Logging and<br/>Audit Monitoring"]
+    O4["Metrics, Tracing and<br/>Health Monitoring"]
+    O5["Automated Backups and<br/>Disaster Recovery"]
+    O6["Security Testing and<br/>Vulnerability Management"]
+    O7["Deployment Pipeline and<br/>Release Controls"]
+    O8["Production, Staging and<br/>Pilot Environments"]
+  end
+
+  %% ============================================================
+  %% MAIN USER CONNECTIONS
+  %% ============================================================
+
+  U1 --> C1
+  U2 --> C2
+  U3 --> C3
+  U4 --> C3
+  U5 --> C4
+  U6 --> C3
+  U7 --> C3
+  U8 --> C3
+  U3 --> C5
+  U9 --> C6
+  U9 --> C7
+
+  %% ============================================================
+  %% CURRENT DEMO FLOW
+  %% ============================================================
+
+  C1 --> D1
+  C2 --> D1
+  C3 --> D1
+  C4 --> D1
+  C5 --> D1
+  C6 --> D1
+  C7 --> D1
+
+  D1 --> D2
+  D1 --> D3
+  D3 --> D4
+  D4 --> D5
+  D4 --> D6
+  D6 --> D7
+  D1 --> D8
+
+  %% ============================================================
+  %% PRODUCTION FLOW
+  %% ============================================================
+
+  D1 -. "Production API requests" .-> E1
+
+  E1 --> E2
+  E2 --> E3
+  E3 --> E4
+  E4 --> E5
+  E5 --> E6
+  E6 --> DOMAINS
+
+  DOMAINS --> PLATFORM
+  DOMAINS --> INTEGRATION_LAYER
+  DOMAINS --> DATA
+
+  PLATFORM --> DATA
+  PLATFORM --> INTEGRATION_LAYER
+
+  INTEGRATION_LAYER --> EXTERNAL
+  INTEGRATION_LAYER --> DATA
+
+  DATA --> INFRASTRUCTURE
+  PLATFORM --> INFRASTRUCTURE
+  INTEGRATION_LAYER --> INFRASTRUCTURE
+
+  %% ============================================================
+  %% IMPORTANT DOMAIN RELATIONSHIPS
+  %% ============================================================
+
+  M1 --> M2
+  M2 --> M3
+  M2 --> M5
+
+  M6 --> M7
+  M7 --> M8
+  M8 --> M9
+
+  M9 --> M11
+  M11 --> M12
+  M12 --> M13
+  M12 --> M14
+  M11 --> M15
+
+  M14 --> M16
+  M14 --> M17
+  M13 --> M18
+  M16 --> M19
+  M17 --> M19
+
+  M9 --> M21
+  M21 --> M22
+  M21 --> M23
+  M21 --> M24
+  M24 --> M25
+
+  M5 --> M26
+  M16 --> M26
+  M17 --> M26
+  M18 --> M26
+  M21 --> M26
+  M24 --> M26
+
+  M26 --> M27
+  M26 --> M28
+  M28 --> M29
+  M28 --> M30
+
+  %% ============================================================
+  %% CROSS-CUTTING CONTROLS
+  %% ============================================================
+
+  E4 -. "Applied to every module" .-> M11
+  E4 -. "Applied to every module" .-> M26
+  E5 -. "Organization and branch isolation" .-> M6
+  E5 -. "Organization and branch isolation" .-> M21
+
+  P1 -. "Controls lifecycle states" .-> M7
+  P1 -. "Controls lifecycle states" .-> M16
+  P1 -. "Controls lifecycle states" .-> M24
+
+  P7 -. "Live status updates" .-> M8
+  P7 -. "Live status updates" .-> M21
+  P7 -. "Live status updates" .-> M24
+
+  P8 -. "Audits every significant action" .-> M3
+  P8 -. "Audits every significant action" .-> M11
+  P8 -. "Audits every significant action" .-> M27
+  P8 -. "Audits every significant action" .-> M29
+
+  %% ============================================================
+  %% VISUAL STYLES
+  %% ============================================================
+
+  classDef user fill:#EEF2FF,stroke:#6366F1,color:#312E81,stroke-width:1.5px;
+  classDef client fill:#EFF6FF,stroke:#2563EB,color:#1E3A8A,stroke-width:1.5px;
+  classDef demo fill:#F5F3FF,stroke:#7C3AED,color:#5B21B6,stroke-width:1.5px;
+  classDef security fill:#FFF7ED,stroke:#EA580C,color:#9A3412,stroke-width:1.5px;
+  classDef domain fill:#FFFFFF,stroke:#64748B,color:#172033,stroke-width:1.2px;
+  classDef platform fill:#F0FDFA,stroke:#0D9488,color:#115E59,stroke-width:1.5px;
+  classDef integration fill:#ECFEFF,stroke:#0891B2,color:#155E75,stroke-width:1.5px;
+  classDef data fill:#F0FDF4,stroke:#16A34A,color:#166534,stroke-width:1.5px;
+  classDef external fill:#FFFBEB,stroke:#D97706,color:#92400E,stroke-width:1.5px;
+  classDef infrastructure fill:#F8FAFC,stroke:#475569,color:#334155,stroke-width:1.5px;
+
+  class U1,U2,U3,U4,U5,U6,U7,U8,U9 user;
+  class C1,C2,C3,C4,C5,C6,C7 client;
+  class D1,D2,D3,D4,D5,D6,D7,D8 demo;
+  class E1,E2,E3,E4,E5,E6 security;
+
+  class M1,M2,M3,M4,M5,M6,M7,M8,M9,M10 domain;
+  class M11,M12,M13,M14,M15,M16,M17,M18,M19,M20 domain;
+  class M21,M22,M23,M24,M25,M26,M27,M28,M29,M30 domain;
+  class M31,M32,M33,M34,M35 domain;
+
+  class P1,P2,P3,P4,P5,P6,P7,P8,P9,P10 platform;
+  class I1,I2,I3,I4,I5 integration;
+  class DB1,DB2,DB3,DB4,DB5,DB6,DB7 data;
+  class X1,X2,X3,X4,X5,X6,X7,X8 external;
+  class O1,O2,O3,O4,O5,O6,O7,O8 infrastructure;

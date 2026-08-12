@@ -1,0 +1,1 @@
+import{NextResponse}from"next/server";import{requireRequestContext}from"@/lib/auth/permission-service";import{patientPortalService as s}from"@/server/patient/patient-portal-service";import{handleApiRoute}from"@/server/http/route-handler";export function GET(){return handleApiRoute(async()=>NextResponse.json({home:await s.getHome(await requireRequestContext())}))}

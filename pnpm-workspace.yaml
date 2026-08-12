@@ -1,0 +1,15 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+  - "tooling/*"
+
+fetchTimeout: 300000
+fetchRetries: 5
+networkConcurrency: 8
+
+allowBuilds:
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true
+  sharp: true
+  unrs-resolver: true

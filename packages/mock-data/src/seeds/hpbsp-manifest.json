@@ -1,0 +1,215 @@
+{
+  "organization": {
+    "displayName": "HPBSP",
+    "owner": {
+      "displayName": "Dr. Zulqarnain Hyidar",
+      "email": "zulqarnain@hpbsp.example"
+    },
+    "timeZone": "Asia/Karachi",
+    "defaultCurrencyCode": "PKR",
+    "supportedLanguageCodes": ["en", "ur"]
+  },
+
+  "locations": [
+    {
+      "displayName": "Shalamar Hospital",
+      "kind": "external-facility",
+      "clinicSessions": [
+        {
+          "weekday": "tuesday",
+          "startTime": "15:00",
+          "endTime": "18:00",
+          "slotDurationMinutes": 30,
+          "capacity": 6
+        },
+        {
+          "weekday": "saturday",
+          "startTime": "15:00",
+          "endTime": "18:00",
+          "slotDurationMinutes": 30,
+          "capacity": 6
+        }
+      ]
+    },
+    {
+      "displayName": "Horizon Hospital",
+      "kind": "external-facility",
+      "clinicSessions": [
+        {
+          "weekday": "monday",
+          "startTime": "15:00",
+          "endTime": "18:00",
+          "slotDurationMinutes": 30,
+          "capacity": 6
+        },
+        {
+          "weekday": "wednesday",
+          "startTime": "15:00",
+          "endTime": "18:00",
+          "slotDurationMinutes": 30,
+          "capacity": 6
+        },
+        {
+          "weekday": "friday",
+          "startTime": "15:00",
+          "endTime": "18:00",
+          "slotDurationMinutes": 30,
+          "capacity": 6
+        }
+      ]
+    }
+  ],
+
+  "team": {
+    "seniorRegistrar": {
+      "displayName": "Dr. Amina Farooq",
+      "independentlyBookable": true
+    },
+    "residents": [
+      {
+        "displayName": "Dr. Hassan Ahmed",
+        "supervisor": "owner",
+        "independentlyBookable": false
+      },
+      {
+        "displayName": "Dr. Laila Khan",
+        "supervisor": "owner",
+        "independentlyBookable": false
+      },
+      {
+        "displayName": "Dr. Faisal Ahmad",
+        "supervisor": "owner",
+        "independentlyBookable": false
+      }
+    ],
+    "houseSurgeons": [
+      {
+        "displayName": "Dr. Nida Malik",
+        "supervisor": "owner",
+        "independentlyBookable": false
+      },
+      {
+        "displayName": "Dr. Samir Hassan",
+        "supervisor": "owner",
+        "independentlyBookable": false
+      }
+    ],
+    "clinicalDietician": {
+      "displayName": "Ms. Zubaida Fatima",
+      "independentlyBookable": true
+    }
+  },
+
+  "services": [
+    {
+      "name": "General Surgery Consultation",
+      "category": "surgery",
+      "durationMinutes": 30,
+      "consultationModes": ["in-person"],
+      "eligibleTeamRoles": ["owner", "senior-registrar", "resident"],
+      "requiresDocumentUpload": false,
+      "publiclyVisible": true,
+      "locationOfferings": [
+        {
+          "location": "Shalamar Hospital",
+          "feeMinorUnits": 500000,
+          "currencyCode": "PKR",
+          "collector": "practice",
+          "paymentTiming": "before-visit",
+          "confirmationStatus": "confirmed",
+          "publiclyBookable": true
+        },
+        {
+          "location": "Horizon Hospital",
+          "feeMinorUnits": 500000,
+          "currencyCode": "PKR",
+          "collector": "practice",
+          "paymentTiming": "before-visit",
+          "confirmationStatus": "confirmed",
+          "publiclyBookable": true
+        }
+      ]
+    },
+    {
+      "name": "Post-Operative Follow-up",
+      "category": "follow-up",
+      "durationMinutes": 20,
+      "consultationModes": ["in-person"],
+      "eligibleTeamRoles": ["owner", "senior-registrar", "resident"],
+      "requiresDocumentUpload": true,
+      "publiclyVisible": true,
+      "locationOfferings": [
+        {
+          "location": "Shalamar Hospital",
+          "feeMinorUnits": 250000,
+          "currencyCode": "PKR",
+          "collector": "practice",
+          "paymentTiming": "at-visit",
+          "confirmationStatus": "confirmed",
+          "publiclyBookable": true
+        },
+        {
+          "location": "Horizon Hospital",
+          "feeMinorUnits": 250000,
+          "currencyCode": "PKR",
+          "collector": "practice",
+          "paymentTiming": "at-visit",
+          "confirmationStatus": "confirmed",
+          "publiclyBookable": true
+        }
+      ]
+    },
+    {
+      "name": "Dietary Counseling",
+      "category": "consultation",
+      "durationMinutes": 25,
+      "consultationModes": ["in-person"],
+      "eligibleTeamRoles": ["clinical-dietician"],
+      "requiresDocumentUpload": false,
+      "publiclyVisible": true,
+      "locationOfferings": [
+        {
+          "location": "Shalamar Hospital",
+          "feeMinorUnits": 300000,
+          "currencyCode": "PKR",
+          "collector": "practice",
+          "paymentTiming": "before-visit",
+          "confirmationStatus": "confirmed",
+          "publiclyBookable": true
+        },
+        {
+          "location": "Horizon Hospital",
+          "feeMinorUnits": 300000,
+          "currencyCode": "PKR",
+          "collector": "practice",
+          "paymentTiming": "before-visit",
+          "confirmationStatus": "confirmed",
+          "publiclyBookable": true
+        }
+      ]
+    }
+  ],
+
+  "bookingPolicy": {
+    "minimumNoticeMinutes": 1440,
+    "bookingHorizonDays": 90,
+    "cancellationWindowMinutes": 1440,
+    "rescheduleLimit": 2,
+    "noShowHandling": "charge-full-fee",
+    "prepaymentRequired": true
+  },
+
+  "content": {
+    "consentDraft": "I hereby consent to the surgical procedure and confirm I have discussed risks and benefits with my physician.",
+    "messageSafetyNoticeDraft": "Messages are for appointment coordination and non-urgent communications only. In case of emergency, please contact your hospital directly or call 911.",
+    "bookingTermsDraft": "Appointments must be booked at least 24 hours in advance. Cancellations must be made 24 hours before the appointment time. Missed appointments will be charged in full.",
+    "messageResponseCommitmentMinutes": 480
+  },
+
+  "demoGeneration": {
+    "fictionalPatientCount": 50,
+    "appointmentCount": 42,
+    "documentCount": 20,
+    "messageThreadCount": 6
+  }
+}

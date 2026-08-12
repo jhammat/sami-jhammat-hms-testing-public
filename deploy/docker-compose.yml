@@ -1,0 +1,84 @@
+# WonFlow Phase 1 — testing deployment (hpbsp)
+#
+#   docker compose --env-file .env.deploy up -d database
+#   docker compose --env-file .env.deploy run --rm migrate
+#   docker compose --env-file .env.deploy up -d --build web
+#
+# The app is served on ${WEB_PORT}. Put a TLS-terminating reverse proxy in
+# front of it before exposing the host to the internet.
+
+name: wonflow-hpbsp
+
+services:
+  database:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - wonflow-database:/var/lib/postgresql/data
+    # Bound to loopback: Postgres must not be reachable from the internet.
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  # One-off: applies migrations, then seeds the development logins.
+  # Runs as WONFLOW_ENVIRONMENT=staging because the seed script refuses to run
+  # when NODE_ENV or WONFLOW_ENVIRONMENT is "production".
+  migrate:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: builder
+    profiles: ["tools"]
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      WONFLOW_ENVIRONMENT: staging
+      DATABASE_URL: ${DATABASE_URL}
+      SESSION_SECRET: ${SESSION_SECRET}
+      AUTH_ENCRYPTION_KEY: ${AUTH_ENCRYPTION_KEY}
+      WONFLOW_DEVELOPMENT_PASSWORD: ${WONFLOW_DEVELOPMENT_PASSWORD}
+    command: >
+      sh -c "pnpm --filter @wonflow/database db:deploy &&
+             pnpm db:seed:dev"
+
+  web:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: web
+      args:
+        NEXT_PUBLIC_WONFLOW_APP_URL: ${NEXT_PUBLIC_WONFLOW_APP_URL}
+        NEXT_PUBLIC_WONFLOW_DATA_MODE: api
+        NEXT_PUBLIC_WONFLOW_ENABLE_DEMO: "false"
+        NEXT_PUBLIC_WONFLOW_SHOW_ENVIRONMENT_BANNER: "true"
+        NEXT_PUBLIC_WONFLOW_BUILD_ID: ${WONFLOW_BUILD_ID:-hpbsp-test}
+        WONFLOW_ENVIRONMENT: staging
+    restart: unless-stopped
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      WONFLOW_ENVIRONMENT: staging
+      PORT: "3000"
+      HOSTNAME: 0.0.0.0
+      DATABASE_URL: ${DATABASE_URL}
+      SESSION_SECRET: ${SESSION_SECRET}
+      AUTH_ENCRYPTION_KEY: ${AUTH_ENCRYPTION_KEY}
+      ALLOW_MOCK_DATA: "false"
+      NEXT_PUBLIC_WONFLOW_APP_URL: ${NEXT_PUBLIC_WONFLOW_APP_URL}
+    ports:
+      - "${WEB_PORT:-3007}:3000"
+
+volumes:
+  wonflow-database:

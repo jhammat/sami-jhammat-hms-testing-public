@@ -1,0 +1,9 @@
+import * as React from "react";
+import { cn } from "../lib/utils";
+
+export function Page({className,...props}:React.ComponentProps<"main">){return <main className={cn("mx-auto w-full max-w-[1440px] p-4 md:p-6",className)} {...props}/>}
+export function PageHeader({title,description,breadcrumb,actions,tabs,className}:Readonly<{title:string;description?:string;breadcrumb?:React.ReactNode;actions?:React.ReactNode;tabs?:React.ReactNode;className?:string}>){return <header className={cn("mb-6 space-y-3",className)}>{breadcrumb}<div className="flex flex-wrap items-start justify-between gap-4"><div><h1 className="text-xl font-semibold text-[var(--ink-900)]">{title}</h1>{description&&<p className="mt-1 max-w-3xl text-sm text-[var(--ink-500)]">{description}</p>}</div>{actions&&<div className="flex flex-wrap gap-2">{actions}</div>}</div>{tabs}</header>}
+export function Section({title,description,actions,children,className}:React.PropsWithChildren<{title?:string;description?:string;actions?:React.ReactNode;className?:string}>){return <section className={cn("space-y-4",className)}>{(title||actions)&&<div className="flex items-start justify-between gap-4"><div>{title&&<h2 className="text-base font-semibold">{title}</h2>}{description&&<p className="mt-1 text-xs text-[var(--ink-500)]">{description}</p>}</div>{actions}</div>}{children}</section>}
+export function Split({className,...props}:React.ComponentProps<"div">){return <div className={cn("grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]",className)} {...props}/>}
+export function Toolbar({className,...props}:React.ComponentProps<"div">){return <div role="toolbar" className={cn("flex min-h-[34px] flex-wrap items-center gap-2",className)} {...props}/>}
+export function Divider({className,...props}:React.ComponentProps<"hr">){return <hr className={cn("border-0 border-t border-[var(--line)]",className)} {...props}/>}

@@ -1,0 +1,4 @@
+"use server";
+import type { PatientAppointmentMutationState } from "@/components/appointments/patient-appointment-mutation-model";
+import { readPatientAppointmentFormIdentifier } from "@/lib/patient/patient-appointment-input.server";
+export async function bookPatientAppointmentAction(_previous: PatientAppointmentMutationState, formData: FormData): Promise<PatientAppointmentMutationState> { if (!readPatientAppointmentFormIdentifier(formData, "offeringId")) return { status: "error", message: "Choose an appointment type before continuing.", fieldErrors: { offeringId: "Select an appointment type." } }; if (!readPatientAppointmentFormIdentifier(formData, "slotId")) return { status: "error", message: "Choose an available appointment time.", fieldErrors: { slotId: "Select an available time." } }; return { status: "stale", message: "Booking is unavailable for the current patient session." }; }

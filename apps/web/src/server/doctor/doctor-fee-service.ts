@@ -1,0 +1,220 @@
+import { database } from "@wonflow/database";
+import { requireTenantContext } from "@wonflow/contracts";
+import type { WonFlowRequestContext, WonFlowTenantRequestContext } from "@wonflow/contracts";
+
+import { WonFlowApiError } from "@/server/http/route-handler";
+
+async function resolveDoctor(contextInput: WonFlowRequestContext) {
+  const context = requireTenantContext(contextInput);
+  if (!context.membershipId) {
+    throw new WonFlowApiError(403, "doctor-membership-required", "A doctor membership is required.");
+  }
+  const doctor = await database.doctorProfile.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      staffProfile: {
+        membershipId: context.membershipId,
+        status: "ACTIVE",
+        membership: { organizationId: context.organizationId, archivedAt: null },
+      },
+    },
+    include: { staffProfile: { include: { membership: true } } },
+  });
+  if (!doctor) {
+    throw new WonFlowApiError(403, "doctor-profile-required", "A valid doctor profile is required.");
+  }
+  const organization = await database.organization.findFirst({
+    where: { id: context.organizationId, tenantId: context.tenantId, archivedAt: null },
+    select: { id: true, displayName: true, doctorFeeAuthority: true },
+  });
+  if (!organization) {
+    throw new WonFlowApiError(404, "organization-not-found", "The hospital organization could not be found.");
+  }
+  return { context, doctor, organization };
+}
+
+async function audit(
+  context: WonFlowTenantRequestContext,
+  action: string,
+  serviceId: string,
+) {
+  await database.auditEvent.create({
+    data: {
+      tenantId: context.tenantId,
+      branchId: context.branchId,
+      actorMembershipId: context.membershipId,
+      sessionId: context.sessionId,
+      requestId: context.requestId,
+      action,
+      entityType: "service",
+      entityId: serviceId,
+      severity: "INFORMATION",
+      sourceApplication: context.sourceApplication,
+    },
+  });
+}
+
+export class DoctorFeeService {
+  async getServices(requestContext: WonFlowRequestContext) {
+    const { context, doctor, organization } = await resolveDoctor(requestContext);
+    const [branches, services] = await Promise.all([
+      database.branch.findMany({
+        where: {
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          archivedAt: null,
+          status: "ACTIVE",
+        },
+        orderBy: [{ isMainBranch: "desc" }, { name: "asc" }],
+        select: { id: true, name: true, code: true, currencyCode: true },
+      }),
+      database.serviceDefinition.findMany({
+        where: { tenantId: context.tenantId, doctorId: doctor.id, isActive: true },
+        include: { branch: true },
+        orderBy: [{ isActive: "desc" }, { name: "asc" }],
+      }),
+    ]);
+
+    return {
+      authority: organization.doctorFeeAuthority,
+      organization: { id: organization.id, name: organization.displayName },
+      doctor: {
+        id: doctor.id,
+        displayName: doctor.staffProfile.membership.displayName,
+        specialty: doctor.specialty,
+      },
+      branches,
+      services,
+    };
+  }
+
+  async createService(
+    requestContext: WonFlowRequestContext,
+    input: {
+      branchId?: string;
+      code: string;
+      name: string;
+      description?: string;
+      durationMinutes: number;
+      priceMinorUnits: number;
+      publiclyBookable?: boolean;
+      consultationMode?: "IN_PERSON" | "ONLINE";
+    },
+  ) {
+    const { context, doctor, organization } = await resolveDoctor(requestContext);
+    if (organization.doctorFeeAuthority !== "DOCTOR") {
+      throw new WonFlowApiError(403, "hospital-controls-fee", "This hospital manages doctor consultation services and fees.");
+    }
+    if (!input.name?.trim() || !input.code?.trim()) {
+      throw new WonFlowApiError(400, "service-details-required", "Enter a service name and code.");
+    }
+    if (!Number.isInteger(input.durationMinutes) || input.durationMinutes < 5 || input.durationMinutes > 480) {
+      throw new WonFlowApiError(400, "invalid-service-duration", "Duration must be between 5 and 480 minutes.");
+    }
+    if (!Number.isInteger(input.priceMinorUnits) || input.priceMinorUnits < 0) {
+      throw new WonFlowApiError(400, "invalid-service-price", "Enter a valid consultation fee.");
+    }
+    const branch = input.branchId
+      ? await database.branch.findFirst({
+          where: {
+            id: input.branchId,
+            tenantId: context.tenantId,
+            organizationId: context.organizationId,
+            archivedAt: null,
+            status: "ACTIVE",
+          },
+        })
+      : null;
+    if (input.branchId && !branch) {
+      throw new WonFlowApiError(400, "invalid-service-branch", "The selected branch is unavailable.");
+    }
+    const entity = await database.serviceDefinition.create({
+      data: {
+        tenantId: context.tenantId,
+        branchId: branch?.id ?? null,
+        doctorId: doctor.id,
+        code: `DR-${doctor.id.slice(0, 8)}-${input.code.trim()}`.toUpperCase(),
+        name: input.name.trim(),
+        category: "CONSULTATION",
+        description: input.description?.trim() || null,
+        durationMinutes: input.durationMinutes,
+        priceMinorUnits: input.priceMinorUnits,
+        currencyCode: branch?.currencyCode ?? context.currencyCode,
+        publiclyBookable: input.publiclyBookable ?? false,
+        consultationMode: input.consultationMode ?? "IN_PERSON",
+        handlerMembershipId: doctor.staffProfile.membershipId,
+        billingOwner: "DOCTOR",
+      },
+      include: { branch: true },
+    });
+    await audit(context, "doctor.consultation-service.created", entity.id);
+    return entity;
+  }
+
+  async updateService(
+    requestContext: WonFlowRequestContext,
+    serviceId: string,
+    input: {
+      name?: string;
+      description?: string;
+      durationMinutes?: number;
+      priceMinorUnits?: number;
+      publiclyBookable?: boolean;
+      isActive?: boolean;
+      consultationMode?: "IN_PERSON" | "ONLINE";
+    },
+  ) {
+    const { context, doctor, organization } = await resolveDoctor(requestContext);
+    if (organization.doctorFeeAuthority !== "DOCTOR") {
+      throw new WonFlowApiError(403, "hospital-controls-fee", "This hospital manages doctor consultation services and fees.");
+    }
+    const existing = await database.serviceDefinition.findFirst({
+      where: { id: serviceId, tenantId: context.tenantId, doctorId: doctor.id },
+    });
+    if (!existing) {
+      throw new WonFlowApiError(404, "service-not-found", "The consultation service could not be found.");
+    }
+    if (input.name !== undefined && !input.name.trim()) {
+      throw new WonFlowApiError(400, "invalid-service-name", "Enter a consultation service name.");
+    }
+    if (input.durationMinutes !== undefined && (!Number.isInteger(input.durationMinutes) || input.durationMinutes < 5 || input.durationMinutes > 480)) {
+      throw new WonFlowApiError(400, "invalid-service-duration", "Duration must be between 5 and 480 minutes.");
+    }
+    if (input.priceMinorUnits !== undefined && (!Number.isInteger(input.priceMinorUnits) || input.priceMinorUnits < 0)) {
+      throw new WonFlowApiError(400, "invalid-service-price", "Enter a valid consultation fee.");
+    }
+    if (input.priceMinorUnits !== undefined && existing.billingOwner !== "DOCTOR") {
+      throw new WonFlowApiError(403, "hospital-controls-fee", existing.billingOwner === "DEPARTMENT" ? "This fee is controlled by the department that owns the service." : "This fee is controlled by hospital administration.");
+    }
+    const entity = await database.serviceDefinition.update({
+      where: { id: existing.id, tenantId: context.tenantId },
+      data: {
+        ...input,
+        name: input.name?.trim(),
+        description: input.description === undefined ? undefined : input.description.trim() || null,
+      },
+      include: { branch: true },
+    });
+    await audit(context, "doctor.consultation-service.updated", entity.id);
+    return entity;
+  }
+
+  async deleteService(requestContext: WonFlowRequestContext, serviceId: string) {
+    const { context, doctor, organization } = await resolveDoctor(requestContext);
+    if (organization.doctorFeeAuthority !== "DOCTOR") {
+      throw new WonFlowApiError(403, "hospital-controls-fee", "This hospital manages doctor consultation services and fees.");
+    }
+    const existing = await database.serviceDefinition.findFirst({
+      where: { id: serviceId, tenantId: context.tenantId, doctorId: doctor.id, isActive: true },
+    });
+    if (!existing) throw new WonFlowApiError(404, "service-not-found", "The service could not be found.");
+    const entity = await database.serviceDefinition.update({
+      where: { id: existing.id, tenantId: context.tenantId },
+      data: { isActive: false, publiclyBookable: false },
+    });
+    await audit(context, "doctor.consultation-service.deleted", entity.id);
+    return entity;
+  }
+}
+
+export const doctorFeeService = new DoctorFeeService();

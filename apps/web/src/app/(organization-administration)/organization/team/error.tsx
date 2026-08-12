@@ -1,0 +1,4 @@
+"use client";
+import Link from "next/link";
+import { ORGANIZATION_HOME_PATH } from "@/lib/organization/organization-routes";
+export default function ErrorState({reset}:{error:Error;reset():void}){return <main id="main-content" className="grid min-h-[60vh] place-items-center px-4"><section role="alert" className="max-w-xl rounded-3xl border border-rose-200 bg-white p-6"><h1 className="text-2xl font-black">Team configuration could not be loaded</h1><p className="mt-3 text-sm text-slate-600">No team changes were made.</p><div className="mt-5 flex gap-3"><button onClick={reset} className="min-h-11 rounded-xl bg-slate-950 px-4 text-white">Try again</button><Link href={ORGANIZATION_HOME_PATH} className="inline-flex min-h-11 items-center rounded-xl border px-4">Organization dashboard</Link></div></section></main>}

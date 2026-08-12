@@ -1,0 +1,1886 @@
+"use client";
+
+import {
+  Bell,
+  Building2,
+  CalendarClock,
+  ChevronRight,
+  Clock3,
+  FileClock,
+  FileText,
+  FlaskConical,
+  History,
+  Image as ImageIcon,
+  Save,
+  Search,
+  Settings,
+  SlidersHorizontal,
+  Smartphone,
+  Upload,
+  UserRound,
+  UsersRound,
+  Volume2,
+} from "lucide-react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
+
+import { phaseOneApi } from "@/lib/api/phase-one-api";
+
+import {
+  readDemoAppointmentBookings,
+  type DemoAppointmentBooking,
+} from "@/lib/appointments";
+import {
+  readDemoClinicalDocumentation,
+  readDemoClinicalEncounters,
+  type DemoClinicalDocumentation,
+  type DemoClinicalEncounter,
+} from "@/lib/clinical";
+import {
+  getLaboratoryResultSeverity,
+  getRadiologyResultSeverity,
+  readDemoLaboratoryResultReviews,
+  readDemoRadiologyResultReviews,
+  readDemoStructuredLaboratoryResults,
+  readDemoStructuredRadiologyResults,
+  type DemoLaboratoryResultReview,
+  type DemoRadiologyResultReview,
+  type DemoStructuredLaboratoryResult,
+  type DemoStructuredRadiologyResult,
+} from "@/lib/diagnostics";
+import {
+  readDemoDoctorSchedules,
+  type DemoDoctorSchedule,
+} from "@/lib/doctor-schedules";
+import {
+  getDemoPatientRegistrationAge,
+  readDemoPatientRegistrations,
+  type DemoPatientRegistrationResult,
+} from "@/lib/patients";
+import {
+  readDemoQueueEntries,
+  type DemoQueueEntry,
+} from "@/lib/queue";
+
+import {
+  WONFLOW_AVATAR_CHANGED_EVENT,
+  usePracticeLocation,
+} from "@/components/shell";
+
+import { DoctorPageHeader } from "./doctor-page-header";
+import {
+  DoctorPortalIdentity,
+  useDoctorPortalContext,
+} from "./doctor-portal-shell";
+import { DoctorProfileAvatar } from "./doctor-profile-avatar";
+
+const SECONDARY_DATA_EVENTS = [
+  "wonflow:demo-patients-changed",
+  "wonflow:demo-appointments-changed",
+  "wonflow:demo-queue-changed",
+  "wonflow:demo-clinical-encounters-changed",
+  "wonflow:demo-clinical-documentation-changed",
+  "wonflow:demo-doctor-schedules-changed",
+  "wonflow:demo-structured-laboratory-results-changed",
+  "wonflow:demo-structured-radiology-results-changed",
+  "wonflow:demo-laboratory-result-reviews-changed",
+  "wonflow:demo-radiology-result-reviews-changed",
+] as const;
+
+const INPUT_CLASS_NAME =
+  "h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+
+const DAY_NAMES = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+] as const;
+
+interface DoctorSecondaryData {
+  patients: DemoPatientRegistrationResult[];
+  appointments: DemoAppointmentBooking[];
+  queueEntries: DemoQueueEntry[];
+  encounters: DemoClinicalEncounter[];
+  documentation: DemoClinicalDocumentation[];
+  schedules: DemoDoctorSchedule[];
+  laboratoryResults: DemoStructuredLaboratoryResult[];
+  radiologyResults: DemoStructuredRadiologyResult[];
+  laboratoryReviews: DemoLaboratoryResultReview[];
+  radiologyReviews: DemoRadiologyResultReview[];
+}
+
+const EMPTY_SECONDARY_DATA: DoctorSecondaryData = {
+  patients: [],
+  appointments: [],
+  queueEntries: [],
+  encounters: [],
+  documentation: [],
+  schedules: [],
+  laboratoryResults: [],
+  radiologyResults: [],
+  laboratoryReviews: [],
+  radiologyReviews: [],
+};
+
+type QueueSnapshotPatient = NonNullable<DemoQueueEntry["snapshot"]>["patient"];
+
+interface ConnectedPatient {
+  id: string;
+  displayName: string;
+  mrNumber: string;
+  identityNumber: string;
+  mobileNumber: string;
+  gender: string;
+  age?: number;
+  appointments: DemoAppointmentBooking[];
+  queueEntries: DemoQueueEntry[];
+  encounters: DemoClinicalEncounter[];
+  lastActivityAt?: string;
+  nextAppointment?: DemoAppointmentBooking;
+  lastDiagnosis?: string;
+  unreadReports: number;
+}
+
+interface ReportInboxItem {
+  id: string;
+  kind: "laboratory" | "radiology";
+  title: string;
+  patientId: string;
+  updatedAt: string;
+  status: string;
+  severity: "normal" | "abnormal" | "critical";
+  reviewed: boolean;
+  href: string;
+}
+
+function readSecondaryData(): DoctorSecondaryData {
+  return {
+    patients: readDemoPatientRegistrations(),
+    appointments: readDemoAppointmentBookings(),
+    queueEntries: readDemoQueueEntries(),
+    encounters: readDemoClinicalEncounters(),
+    documentation: readDemoClinicalDocumentation(),
+    schedules: readDemoDoctorSchedules(),
+    laboratoryResults: readDemoStructuredLaboratoryResults(),
+    radiologyResults: readDemoStructuredRadiologyResults(),
+    laboratoryReviews: readDemoLaboratoryResultReviews(),
+    radiologyReviews: readDemoRadiologyResultReviews(),
+  };
+}
+
+function useDoctorSecondaryData(): DoctorSecondaryData {
+  const [data, setData] = useState<DoctorSecondaryData>(EMPTY_SECONDARY_DATA);
+
+  const reload = useCallback(() => {
+    setData(readSecondaryData());
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(reload);
+
+    SECONDARY_DATA_EVENTS.forEach((eventName) => {
+      window.addEventListener(eventName, reload);
+    });
+    window.addEventListener("storage", reload);
+
+    return () => {
+      SECONDARY_DATA_EVENTS.forEach((eventName) => {
+        window.removeEventListener(eventName, reload);
+      });
+      window.removeEventListener("storage", reload);
+    };
+  }, [reload]);
+
+  return data;
+}
+
+function todayValue(): string {
+  return new Date().toLocaleDateString("en-CA");
+}
+
+function formatDate(value?: string): string {
+  if (!value) return "Not recorded";
+  const parsed = new Date(value.length === 10 ? `${value}T12:00:00` : value);
+  if (Number.isNaN(parsed.getTime())) return "Not recorded";
+  return parsed.toLocaleDateString([], {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function formatDateTime(value?: string): string {
+  if (!value) return "Not recorded";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Not recorded";
+  return parsed.toLocaleString([], {
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+function humanize(value: string): string {
+  return value
+    .replaceAll("-", " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function getInitials(value: string): string {
+  return value
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part.charAt(0).toUpperCase())
+    .join("");
+}
+
+function newestTimestamp(values: Array<string | undefined>): string | undefined {
+  return values
+    .filter((value): value is string => Boolean(value))
+    .sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0];
+}
+
+function snapshotForPatient(entries: DemoQueueEntry[]): QueueSnapshotPatient | undefined {
+  return [...entries]
+    .sort(
+      (left, right) =>
+        new Date(right.checkedInAt).getTime() - new Date(left.checkedInAt).getTime(),
+    )
+    .find((entry) => entry.snapshot !== undefined)?.snapshot?.patient;
+}
+
+function buildConnectedPatients(
+  doctorId: string,
+  data: DoctorSecondaryData,
+): ConnectedPatient[] {
+  if (doctorId === "") return [];
+
+  const appointments = data.appointments.filter(
+    (appointment) => appointment.practitionerId === doctorId,
+  );
+  const queueEntries = data.queueEntries.filter(
+    (entry) => entry.practitionerId === doctorId,
+  );
+  const encounters = data.encounters.filter(
+    (encounter) => encounter.practitionerId === doctorId,
+  );
+  const connectedIds = new Set([
+    ...appointments.map((appointment) => appointment.patientId),
+    ...queueEntries.map((entry) => entry.patientId),
+    ...encounters.map((encounter) => encounter.patientId),
+  ]);
+  const registrationsById = new Map(
+    data.patients.map((registration) => [registration.id, registration]),
+  );
+  const today = todayValue();
+
+  return [...connectedIds]
+    .map((patientId): ConnectedPatient | undefined => {
+      const registration = registrationsById.get(patientId);
+      const patientAppointments = appointments.filter(
+        (appointment) => appointment.patientId === patientId,
+      );
+      const patientQueueEntries = queueEntries.filter(
+        (entry) => entry.patientId === patientId,
+      );
+      const patientEncounters = encounters.filter(
+        (encounter) => encounter.patientId === patientId,
+      );
+      const snapshot = snapshotForPatient(patientQueueEntries);
+
+      if (registration === undefined && snapshot === undefined) return undefined;
+
+      const nextAppointment = patientAppointments
+        .filter(
+          (appointment) =>
+            appointment.appointmentDate >= today &&
+            appointment.status !== "cancelled" &&
+            appointment.status !== "completed" &&
+            appointment.status !== "no-show",
+        )
+        .sort((left, right) =>
+          left.scheduledStartAt.localeCompare(right.scheduledStartAt),
+        )[0];
+
+      const encounterIds = new Set(patientEncounters.map((encounter) => encounter.id));
+      const documentation = data.documentation
+        .filter((record) => encounterIds.has(record.encounterId))
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      const diagnosis = documentation
+        .flatMap((record) => record.diagnoses)
+        .find((record) => record.diagnosis.trim() !== "")?.diagnosis;
+
+      const laboratoryResultIds = data.laboratoryResults
+        .filter(
+          (result) =>
+            result.practitionerId === doctorId && result.patientId === patientId,
+        )
+        .map((result) => result.id);
+      const radiologyResultIds = data.radiologyResults
+        .filter(
+          (result) =>
+            result.practitionerId === doctorId && result.patientId === patientId,
+        )
+        .map((result) => result.id);
+      const reviewedLaboratoryIds = new Set(
+        data.laboratoryReviews
+          .filter((review) => review.status !== "pending")
+          .map((review) => review.structuredResultId),
+      );
+      const reviewedRadiologyIds = new Set(
+        data.radiologyReviews
+          .filter((review) => review.status !== "pending")
+          .map((review) => review.structuredResultId),
+      );
+      const unreadReports =
+        laboratoryResultIds.filter((id) => !reviewedLaboratoryIds.has(id)).length +
+        radiologyResultIds.filter((id) => !reviewedRadiologyIds.has(id)).length;
+
+      return {
+        id: patientId,
+        displayName: registration?.displayName ?? snapshot?.displayName ?? "Patient",
+        mrNumber: registration?.mrNumber ?? snapshot?.mrNumber ?? patientId,
+        identityNumber:
+          registration?.draft.cnicNumber ?? snapshot?.identityNumber ?? "",
+        mobileNumber:
+          registration?.draft.mobileNumber ?? snapshot?.mobileNumber ?? "",
+        gender: registration?.draft.gender ?? snapshot?.gender ?? "unknown",
+        age:
+          registration !== undefined
+            ? getDemoPatientRegistrationAge(registration)
+            : snapshot?.ageYears,
+        appointments: patientAppointments,
+        queueEntries: patientQueueEntries,
+        encounters: patientEncounters,
+        lastActivityAt: newestTimestamp([
+          ...patientAppointments.map((appointment) => appointment.scheduledStartAt),
+          ...patientQueueEntries.map((entry) => entry.checkedInAt),
+          ...patientEncounters.map((encounter) => encounter.startedAt),
+        ]),
+        nextAppointment,
+        lastDiagnosis: diagnosis,
+        unreadReports,
+      };
+    })
+    .filter((patient): patient is ConnectedPatient => patient !== undefined)
+    .sort(
+      (left, right) =>
+        new Date(right.lastActivityAt ?? 0).getTime() -
+        new Date(left.lastActivityAt ?? 0).getTime(),
+    );
+}
+
+function buildInboxItems(
+  doctorId: string,
+  data: DoctorSecondaryData,
+): ReportInboxItem[] {
+  const laboratoryReviewsByResultId = new Map(
+    data.laboratoryReviews.map((review) => [review.structuredResultId, review]),
+  );
+  const radiologyReviewsByResultId = new Map(
+    data.radiologyReviews.map((review) => [review.structuredResultId, review]),
+  );
+
+  return [
+    ...data.laboratoryResults
+      .filter(
+        (result) => result.practitionerId === doctorId && result.status !== "draft",
+      )
+      .map(
+        (result): ReportInboxItem => ({
+          id: result.id,
+          kind: "laboratory",
+          title: result.panelName,
+          patientId: result.patientId,
+          updatedAt: result.finalizedAt || result.resultReadyAt || result.updatedAt,
+          status: result.status,
+          severity: getLaboratoryResultSeverity(result),
+          reviewed:
+            laboratoryReviewsByResultId.get(result.id)?.status !== undefined &&
+            laboratoryReviewsByResultId.get(result.id)?.status !== "pending",
+          href: "/doctor/results",
+        }),
+      ),
+    ...data.radiologyResults
+      .filter(
+        (result) => result.practitionerId === doctorId && result.status !== "draft",
+      )
+      .map(
+        (result): ReportInboxItem => ({
+          id: result.id,
+          kind: "radiology",
+          title: result.studyName,
+          patientId: result.patientId,
+          updatedAt: result.finalizedAt || result.resultReadyAt || result.updatedAt,
+          status: result.status,
+          severity: getRadiologyResultSeverity(result),
+          reviewed:
+            radiologyReviewsByResultId.get(result.id)?.status !== undefined &&
+            radiologyReviewsByResultId.get(result.id)?.status !== "pending",
+          href: "/doctor/radiology-results",
+        }),
+      ),
+  ].sort(
+    (left, right) =>
+      new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime(),
+  );
+}
+
+function PatientAvatar({ patient }: { patient: ConnectedPatient }) {
+  return (
+    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 text-xs font-black text-indigo-700 ring-1 ring-indigo-200">
+      {getInitials(patient.displayName)}
+    </span>
+  );
+}
+
+function StatusPill({
+  children,
+  tone = "slate",
+}: {
+  children: ReactNode;
+  tone?: "slate" | "indigo" | "emerald" | "amber" | "rose";
+}) {
+  const tones = {
+    slate: "bg-slate-100 text-slate-600 ring-slate-200",
+    indigo: "bg-indigo-50 text-indigo-700 ring-indigo-100",
+    emerald: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+    amber: "bg-amber-50 text-amber-700 ring-amber-100",
+    rose: "bg-rose-50 text-rose-700 ring-rose-100",
+  } as const;
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-black ring-1 ${tones[tone]}`}
+    >
+      {children}
+    </span>
+  );
+}
+
+function EmptyState({
+  icon,
+  title,
+  description,
+  action,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-10 text-center">
+      <span className="mx-auto grid h-11 w-11 place-items-center rounded-xl bg-slate-100 text-slate-500">
+        {icon}
+      </span>
+      <h2 className="mt-3 text-sm font-black text-slate-900">{title}</h2>
+      <p className="mx-auto mt-1 max-w-xl text-xs leading-5 text-slate-500">
+        {description}
+      </p>
+      {action ? <div className="mt-4">{action}</div> : null}
+    </div>
+  );
+}
+
+function MetricCard({
+  label,
+  value,
+  helper,
+  tone = "indigo",
+}: {
+  label: string;
+  value: number | string;
+  helper: string;
+  tone?: "indigo" | "emerald" | "amber" | "rose" | "slate";
+}) {
+  const toneClass = {
+    indigo: "border-indigo-100 bg-indigo-50/55 text-indigo-700",
+    emerald: "border-emerald-100 bg-emerald-50/55 text-emerald-700",
+    amber: "border-amber-100 bg-amber-50/55 text-amber-700",
+    rose: "border-rose-100 bg-rose-50/55 text-rose-700",
+    slate: "border-slate-200 bg-white text-slate-700",
+  } as const;
+
+  return (
+    <div className={`rounded-2xl border p-3 ${toneClass[tone]}`}>
+      <p className="text-[10px] font-black uppercase tracking-[0.1em] opacity-70">
+        {label}
+      </p>
+      <p className="mt-1 text-2xl font-black text-slate-950">{value}</p>
+      <p className="mt-0.5 text-[10px] font-semibold opacity-75">{helper}</p>
+    </div>
+  );
+}
+
+type PatientFilter =
+  | "all"
+  | "today"
+  | "upcoming"
+  | "follow-ups"
+  | "previous"
+  | "unread";
+
+export function DoctorPatientsPage() {
+  const { doctorId } = useDoctorPortalContext();
+  const data = useDoctorSecondaryData();
+  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useState<PatientFilter>("all");
+  const patients = useMemo(
+    () => buildConnectedPatients(doctorId, data),
+    [data, doctorId],
+  );
+  const today = todayValue();
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visiblePatients = patients.filter((patient) => {
+    const searchText = [
+      patient.displayName,
+      patient.mrNumber,
+      patient.identityNumber,
+      patient.mobileNumber,
+    ]
+      .join(" ")
+      .toLocaleLowerCase();
+    if (normalizedQuery !== "" && !searchText.includes(normalizedQuery)) return false;
+
+    if (filter === "today") {
+      return (
+        patient.appointments.some((record) => record.appointmentDate === today) ||
+        patient.queueEntries.some((record) => record.businessDate === today) ||
+        patient.encounters.some((record) => record.startedAt.slice(0, 10) === today)
+      );
+    }
+    if (filter === "upcoming") return patient.nextAppointment !== undefined;
+    if (filter === "follow-ups") {
+      return (
+        patient.appointments.some((record) =>
+          record.serviceName.toLocaleLowerCase().includes("follow-up"),
+        ) || patient.encounters.some((record) => record.encounterType === "follow-up")
+      );
+    }
+    if (filter === "previous") {
+      return patient.encounters.some((record) => record.status === "completed");
+    }
+    if (filter === "unread") return patient.unreadReports > 0;
+    return true;
+  });
+
+  const filters: Array<{ value: PatientFilter; label: string }> = [
+    { value: "all", label: "All Connected" },
+    { value: "today", label: "Today" },
+    { value: "upcoming", label: "Upcoming" },
+    { value: "follow-ups", label: "Follow-ups" },
+    { value: "previous", label: "Previous Patients" },
+    { value: "unread", label: "Unread Reports" },
+  ];
+
+  useEffect(() => {
+    const rawAnchor =
+      window.location.hash.slice(1);
+    if (rawAnchor === "") return;
+
+    let anchor = rawAnchor;
+    try {
+      anchor = decodeURIComponent(
+        rawAnchor,
+      );
+    } catch {
+      return;
+    }
+
+    const target =
+      document.getElementById(anchor);
+    if (target === null) return;
+
+    target.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    target.focus({
+      preventScroll: true,
+    });
+  }, [visiblePatients.length]);
+
+  return (
+    <div className="space-y-4">
+      <DoctorPageHeader
+        description="Patients legitimately connected through your appointments, queue and encounters."
+        icon={<UsersRound size={18} />}
+        title="My Patients"
+      />
+
+      <section className="relative overflow-hidden rounded-[20px] border border-indigo-100/80 bg-gradient-to-r from-white via-slate-50/60 to-indigo-50/70 p-3 shadow-[0_12px_32px_rgba(79,70,229,0.08)]">
+        <div className="pointer-events-none absolute -right-10 -top-16 h-32 w-32 rounded-full bg-violet-400/10 blur-2xl" />
+        <div className="relative grid gap-2 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-center">
+          <label className="relative block">
+            <span className="sr-only">Search connected patients</span>
+            <Search
+              aria-hidden="true"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              size={15}
+            />
+            <input
+              className={`${INPUT_CLASS_NAME} pl-9`}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search name, MR number, CNIC / passport or mobile"
+              type="search"
+              value={query}
+            />
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {filters.map((item) => (
+              <button
+                className={`min-h-9 rounded-xl px-3 text-[11px] font-black transition ${
+                  filter === item.value
+                    ? "bg-indigo-600 text-white"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+                key={item.value}
+                onClick={() => setFilter(item.value)}
+                type="button"
+              >
+                {item.label}
+              </button>
+            ))}
+            <button
+              className="min-h-9 cursor-not-allowed rounded-xl bg-slate-50 px-3 text-[11px] font-black text-slate-400 ring-1 ring-slate-200"
+              disabled
+              title="Patient-upload storage is not connected in this milestone."
+              type="button"
+            >
+              New Documents
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div className="flex items-center justify-between gap-3 rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 shadow-sm backdrop-blur">
+        <div>
+          <h2 className="text-sm font-black text-slate-950">Connected directory</h2>
+          <p className="text-[11px] text-slate-500">
+            {visiblePatients.length} of {patients.length} connected patients shown
+          </p>
+        </div>
+        <StatusPill tone="indigo">Doctor-scoped records</StatusPill>
+      </div>
+
+      {visiblePatients.length === 0 ? (
+        <EmptyState
+          description={
+            patients.length === 0
+              ? "No patients are connected to this doctor through current appointments, queue records or encounters."
+              : "No connected patient matches the current search and filter."
+          }
+          icon={<UserRound size={19} />}
+          title={patients.length === 0 ? "No connected patients yet" : "No matching patients"}
+        />
+      ) : (
+        <div className="grid gap-3 xl:grid-cols-2">
+          {visiblePatients.map((patient) => {
+            const latestQueueEntry = [...patient.queueEntries].sort(
+              (left, right) =>
+                new Date(right.checkedInAt).getTime() -
+                new Date(left.checkedInAt).getTime(),
+            )[0];
+
+            return (
+              <article
+                className="group relative isolate scroll-mt-24 overflow-hidden rounded-[20px] border border-indigo-100/80 bg-gradient-to-br from-white via-white to-indigo-50/55 p-4 shadow-[0_12px_30px_rgba(79,70,229,0.07)] transition duration-300 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-[0_18px_42px_rgba(79,70,229,0.14)] focus:outline-none focus:ring-2 focus:ring-indigo-400 target:border-indigo-300 target:ring-2 target:ring-indigo-100"
+                id={`doctor-patient-${patient.id}`}
+                key={patient.id}
+                tabIndex={-1}
+              >
+                <div className="flex items-start gap-3">
+                  <PatientAvatar patient={patient} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-black text-slate-950">
+                          {patient.displayName}
+                        </h3>
+                        <p className="mt-0.5 text-[11px] font-bold text-indigo-600">
+                          {patient.mrNumber}
+                        </p>
+                      </div>
+                      {patient.unreadReports > 0 ? (
+                        <StatusPill tone="amber">
+                          {patient.unreadReports} unread report
+                          {patient.unreadReports === 1 ? "" : "s"}
+                        </StatusPill>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 text-[11px] text-slate-500">
+                      {patient.age === undefined ? "Age not recorded" : `${patient.age} years`} ·{" "}
+                      {humanize(patient.gender)} · {patient.mobileNumber || "No mobile"}
+                    </p>
+                  </div>
+                </div>
+
+                <dl className="mt-4 grid gap-3 rounded-[15px] border border-white bg-gradient-to-r from-slate-50 via-indigo-50/50 to-cyan-50/45 p-3 shadow-inner sm:grid-cols-3">
+                  <div>
+                    <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                      Last visit
+                    </dt>
+                    <dd className="mt-1 text-[11px] font-bold text-slate-700">
+                      {formatDate(patient.lastActivityAt)}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                      Last diagnosis
+                    </dt>
+                    <dd className="mt-1 line-clamp-2 text-[11px] font-bold text-slate-700">
+                      {patient.lastDiagnosis ?? "Not documented"}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                      Next appointment
+                    </dt>
+                    <dd className="mt-1 text-[11px] font-bold text-slate-700">
+                      {patient.nextAppointment
+                        ? `${formatDate(patient.nextAppointment.appointmentDate)} · ${patient.nextAppointment.slotStart}`
+                        : "None scheduled"}
+                    </dd>
+                  </div>
+                </dl>
+
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <span className="text-[10px] font-semibold text-slate-500">
+                    {patient.encounters.length} encounter
+                    {patient.encounters.length === 1 ? "" : "s"}
+                  </span>
+                  {latestQueueEntry ? (
+                    <Link
+                      className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-indigo-600 px-3 text-[11px] font-black text-white hover:bg-indigo-700"
+                      href={`/doctor/consultations?queueEntryId=${encodeURIComponent(
+                        latestQueueEntry.id,
+                      )}`}
+                    >
+                      Open Profile <ChevronRight size={13} />
+                    </Link>
+                  ) : (
+                    <button
+                      className="min-h-9 cursor-not-allowed rounded-xl bg-slate-100 px-3 text-[11px] font-black text-slate-400"
+                      disabled
+                      title="A dedicated doctor patient profile route is planned for the next milestone."
+                      type="button"
+                    >
+                      Open Profile
+                    </button>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type InboxFilter = "all" | "unread" | "flagged" | "laboratory" | "radiology";
+
+export function DoctorInboxPage() {
+  const { doctorId } = useDoctorPortalContext();
+  const data = useDoctorSecondaryData();
+  const [filter, setFilter] = useState<InboxFilter>("all");
+  const patients = useMemo(
+    () => buildConnectedPatients(doctorId, data),
+    [data, doctorId],
+  );
+  const patientsById = useMemo(
+    () => new Map(patients.map((patient) => [patient.id, patient])),
+    [patients],
+  );
+  const items = useMemo(() => buildInboxItems(doctorId, data), [data, doctorId]);
+  const visibleItems = items.filter((item) => {
+    if (filter === "unread") return !item.reviewed;
+    if (filter === "flagged") return item.severity !== "normal";
+    if (filter === "laboratory" || filter === "radiology") return item.kind === filter;
+    return true;
+  });
+  const unread = items.filter((item) => !item.reviewed).length;
+  const flagged = items.filter((item) => item.severity !== "normal").length;
+
+  return (
+    <div className="space-y-4">
+      <DoctorPageHeader
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Link className="wf-button-secondary" href="/doctor/results">
+              Laboratory
+            </Link>
+            <Link className="wf-button-secondary" href="/doctor/radiology-results">
+              Radiology
+            </Link>
+          </div>
+        }
+        description="Finalized and result-ready diagnostic records assigned to you for review."
+        icon={<FileText size={18} />}
+        title="Reports & Documents"
+      />
+
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <MetricCard helper="Available reports" label="Diagnostic records" value={items.length} />
+        <MetricCard helper="Not yet reviewed" label="Awaiting review" tone="amber" value={unread} />
+        <MetricCard helper="Abnormal or critical" label="Flagged" tone="rose" value={flagged} />
+        <MetricCard
+          helper="Storage not connected"
+          label="Patient uploads"
+          tone="slate"
+          value="—"
+        />
+      </div>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-wrap items-center gap-1.5">
+          {(
+            [
+              ["all", "All"],
+              ["unread", "Unreviewed"],
+              ["flagged", "Flagged"],
+              ["laboratory", "Laboratory"],
+              ["radiology", "Radiology"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              className={`min-h-9 rounded-xl px-3 text-[11px] font-black ${
+                filter === value
+                  ? "bg-indigo-600 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+              }`}
+              key={value}
+              onClick={() => setFilter(value)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+          <button
+            className="min-h-9 cursor-not-allowed rounded-xl bg-slate-50 px-3 text-[11px] font-black text-slate-400 ring-1 ring-slate-200"
+            disabled
+            title="Patient-upload storage will be connected in a later milestone."
+            type="button"
+          >
+            Uploaded Documents
+          </button>
+        </div>
+      </section>
+
+      {visibleItems.length === 0 ? (
+        <EmptyState
+          action={
+            <div className="flex flex-wrap justify-center gap-2">
+              <Link className="wf-button-secondary" href="/doctor/results">
+                Open Laboratory Worklist
+              </Link>
+              <Link className="wf-button-secondary" href="/doctor/radiology-results">
+                Open Radiology Worklist
+              </Link>
+            </div>
+          }
+          description={
+            items.length === 0
+              ? "No result-ready or finalized diagnostic reports are currently assigned to this doctor. Patient-upload storage is not connected yet."
+              : "No reports match the selected inbox filter."
+          }
+          icon={<FileText size={19} />}
+          title={items.length === 0 ? "Inbox is clear" : "No matching reports"}
+        />
+      ) : (
+        <div className="grid gap-3 xl:grid-cols-2">
+          {visibleItems.map((item) => {
+            const patient = patientsById.get(item.patientId);
+            return (
+              <article
+                className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center"
+                key={`${item.kind}-${item.id}`}
+              >
+                <span
+                  className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${
+                    item.kind === "laboratory"
+                      ? "bg-cyan-50 text-cyan-700"
+                      : "bg-violet-50 text-violet-700"
+                  }`}
+                >
+                  {item.kind === "laboratory" ? (
+                    <FlaskConical size={18} />
+                  ) : (
+                    <ImageIcon size={18} />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <h3 className="truncate text-sm font-black text-slate-950">
+                      {item.title}
+                    </h3>
+                    <StatusPill
+                      tone={
+                        item.severity === "critical"
+                          ? "rose"
+                          : item.severity === "abnormal"
+                            ? "amber"
+                            : "emerald"
+                      }
+                    >
+                      {humanize(item.severity)}
+                    </StatusPill>
+                    {!item.reviewed ? <StatusPill tone="indigo">Unreviewed</StatusPill> : null}
+                  </div>
+                  <p className="mt-1 text-[11px] font-semibold text-slate-600">
+                    {patient?.displayName ?? "Patient record unavailable"} ·{" "}
+                    {patient?.mrNumber ?? item.patientId}
+                  </p>
+                  <p className="mt-0.5 text-[10px] text-slate-400">
+                    {humanize(item.kind)} · {humanize(item.status)} · {formatDateTime(item.updatedAt)}
+                  </p>
+                </div>
+                <Link
+                  className="inline-flex min-h-9 shrink-0 items-center justify-center gap-1 rounded-xl bg-indigo-600 px-3 text-[11px] font-black text-white"
+                  href={item.href}
+                >
+                  Review <ChevronRight size={13} />
+                </Link>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function DoctorHistoryPage() {
+  const { doctorId } = useDoctorPortalContext();
+  const {
+    locations,
+    matchesLegacyBranch,
+    selectedLocation,
+  } = usePracticeLocation();
+  const data = useDoctorSecondaryData();
+  const [query, setQuery] = useState("");
+  const patients = useMemo(
+    () => buildConnectedPatients(doctorId, data),
+    [data, doctorId],
+  );
+  const patientsById = useMemo(
+    () => new Map(patients.map((patient) => [patient.id, patient])),
+    [patients],
+  );
+  const locationsByBranchId = useMemo(
+    () => new Map(
+      locations
+        .filter((location) => location.linkedBranchId !== undefined)
+        .map((location) => [location.linkedBranchId!, location]),
+    ),
+    [locations],
+  );
+  const documentationByEncounterId = useMemo(
+    () => new Map(data.documentation.map((record) => [record.encounterId, record])),
+    [data.documentation],
+  );
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const completed = data.encounters
+    .filter(
+      (encounter) =>
+        encounter.practitionerId === doctorId &&
+        encounter.status === "completed" &&
+        matchesLegacyBranch(encounter.branchId),
+    )
+    .filter((encounter) => {
+      if (normalizedQuery === "") return true;
+      const patient = patientsById.get(encounter.patientId);
+      const documentation = documentationByEncounterId.get(encounter.id);
+      return [
+        patient?.displayName ?? "",
+        patient?.mrNumber ?? "",
+        encounter.encounterNumber,
+        encounter.reasonForVisit,
+        ...((documentation?.diagnoses ?? []).map((diagnosis) => diagnosis.diagnosis)),
+      ]
+        .join(" ")
+        .toLocaleLowerCase()
+        .includes(normalizedQuery);
+    })
+    .sort((left, right) =>
+      (right.completedAt ?? right.updatedAt).localeCompare(
+        left.completedAt ?? left.updatedAt,
+      ),
+    );
+
+  return (
+    <div className="space-y-4">
+      <DoctorPageHeader
+        description="Completed clinical encounters documented under the active doctor."
+        icon={<History size={18} />}
+        title="Consultation History"
+      />
+
+      <label className="relative block rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <span className="sr-only">Search consultation history</span>
+        <Search
+          aria-hidden="true"
+          className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400"
+          size={15}
+        />
+        <input
+          className={`${INPUT_CLASS_NAME} pl-9`}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search patient, MR number, encounter, reason or diagnosis"
+          type="search"
+          value={query}
+        />
+      </label>
+
+      {completed.length === 0 ? (
+        <EmptyState
+          description={
+            normalizedQuery === ""
+              ? selectedLocation !== undefined &&
+                selectedLocation.linkedBranchId === undefined
+                ? "This worklist has no branch-linked demo records for the selected external location."
+                : "No items at this location"
+              : "No completed encounter matches the current search."
+          }
+          icon={<History size={19} />}
+          title="No consultation history"
+        />
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="hidden grid-cols-[130px_minmax(180px,1fr)_minmax(220px,1.2fr)_150px_130px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 text-[9px] font-black uppercase tracking-[0.1em] text-slate-400 lg:grid">
+            <span>Date</span>
+            <span>Patient</span>
+            <span>Diagnosis / reason</span>
+            <span>Branch</span>
+            <span className="text-right">Action</span>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {completed.map((encounter) => {
+              const patient = patientsById.get(encounter.patientId);
+              const documentation = documentationByEncounterId.get(encounter.id);
+              const diagnosis = documentation?.diagnoses.find(
+                (record) => record.diagnosis.trim() !== "",
+              )?.diagnosis;
+              const followUp = documentation?.followUpPlan.trim();
+
+              return (
+                <article
+                  className="grid gap-3 px-4 py-4 lg:grid-cols-[130px_minmax(180px,1fr)_minmax(220px,1.2fr)_150px_130px] lg:items-center"
+                  key={encounter.id}
+                >
+                  <div>
+                    <p className="text-xs font-black text-slate-800">
+                      {formatDate(encounter.completedAt ?? encounter.updatedAt)}
+                    </p>
+                    <p className="mt-0.5 text-[9px] text-slate-400">
+                      {encounter.encounterNumber}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-slate-900">
+                      {patient?.displayName ?? "Patient record unavailable"}
+                    </p>
+                    <p className="mt-0.5 text-[10px] font-semibold text-indigo-600">
+                      {patient?.mrNumber ?? encounter.patientId}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="line-clamp-2 text-xs font-bold text-slate-700">
+                      {diagnosis ?? encounter.reasonForVisit ?? "Not documented"}
+                    </p>
+                    <p className="mt-1 text-[10px] text-slate-500">
+                      {followUp ? "Follow-up plan documented" : "No follow-up plan recorded"}
+                    </p>
+                  </div>
+                  <p className="text-[11px] font-semibold text-slate-600">
+                    {locationsByBranchId.get(encounter.branchId)?.name ?? "Unknown location"}
+                  </p>
+                  <Link
+                    className="inline-flex min-h-9 items-center justify-center rounded-xl bg-indigo-50 px-3 text-[10px] font-black text-indigo-700 ring-1 ring-indigo-100"
+                    href={`/doctor/encounters/${encodeURIComponent(encounter.id)}`}
+                  >
+                    Open Summary
+                  </Link>
+                </article>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type FollowUpState = "all" | "due-today" | "upcoming" | "overdue" | "completed";
+
+function appointmentFollowUpState(appointment: DemoAppointmentBooking): Exclude<FollowUpState, "all"> {
+  if (appointment.status === "completed") return "completed";
+  const today = todayValue();
+  if (appointment.appointmentDate === today) return "due-today";
+  return appointment.appointmentDate > today ? "upcoming" : "overdue";
+}
+
+export function DoctorFollowUpsPage() {
+  const { doctorId } = useDoctorPortalContext();
+  const data = useDoctorSecondaryData();
+  const [filter, setFilter] = useState<FollowUpState>("all");
+  const patients = useMemo(
+    () => buildConnectedPatients(doctorId, data),
+    [data, doctorId],
+  );
+  const patientsById = useMemo(
+    () => new Map(patients.map((patient) => [patient.id, patient])),
+    [patients],
+  );
+  const followUps = data.appointments
+    .filter(
+      (appointment) =>
+        appointment.practitionerId === doctorId &&
+        appointment.serviceName.toLocaleLowerCase().includes("follow-up") &&
+        appointment.status !== "cancelled" &&
+        appointment.status !== "no-show",
+    )
+    .sort((left, right) => left.scheduledStartAt.localeCompare(right.scheduledStartAt));
+  const visibleFollowUps = followUps.filter(
+    (appointment) =>
+      filter === "all" || appointmentFollowUpState(appointment) === filter,
+  );
+  const encountersById = new Map(data.encounters.map((encounter) => [encounter.id, encounter]));
+  const unstructuredPlans = data.documentation
+    .filter(
+      (record) =>
+        record.practitionerId === doctorId && record.followUpPlan.trim() !== "",
+    )
+    .filter((record) => {
+      const encounter = encountersById.get(record.encounterId);
+      return (
+        encounter !== undefined &&
+        !followUps.some((appointment) => appointment.id === encounter.appointmentId)
+      );
+    })
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const counts = {
+    "due-today": followUps.filter(
+      (appointment) => appointmentFollowUpState(appointment) === "due-today",
+    ).length,
+    upcoming: followUps.filter(
+      (appointment) => appointmentFollowUpState(appointment) === "upcoming",
+    ).length,
+    overdue: followUps.filter(
+      (appointment) => appointmentFollowUpState(appointment) === "overdue",
+    ).length,
+    completed: followUps.filter(
+      (appointment) => appointmentFollowUpState(appointment) === "completed",
+    ).length,
+  };
+
+  return (
+    <div className="space-y-4">
+      <DoctorPageHeader
+        description="Structured follow-up appointments plus documented plans that still need scheduling."
+        icon={<CalendarClock size={18} />}
+        title="Follow-ups"
+      />
+
+      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <MetricCard helper="Scheduled for today" label="Due today" tone="indigo" value={counts["due-today"]} />
+        <MetricCard helper="Future bookings" label="Upcoming" tone="emerald" value={counts.upcoming} />
+        <MetricCard helper="Past open bookings" label="Overdue" tone="rose" value={counts.overdue} />
+        <MetricCard helper="Completed bookings" label="Completed" tone="slate" value={counts.completed} />
+      </div>
+
+      <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              ["all", "All"],
+              ["due-today", "Due Today"],
+              ["upcoming", "Upcoming"],
+              ["overdue", "Overdue"],
+              ["completed", "Completed"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              className={`min-h-9 rounded-xl px-3 text-[11px] font-black ${
+                filter === value
+                  ? "bg-indigo-600 text-white"
+                  : "bg-slate-100 text-slate-600"
+              }`}
+              key={value}
+              onClick={() => setFilter(value)}
+              type="button"
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {visibleFollowUps.length === 0 ? (
+        <EmptyState
+          description={
+            followUps.length === 0
+              ? "No structured follow-up appointments are currently connected to this doctor."
+              : "No follow-up appointments match the selected status."
+          }
+          icon={<CalendarClock size={19} />}
+          title="No follow-ups in this view"
+        />
+      ) : (
+        <div className="grid gap-3 xl:grid-cols-2">
+          {visibleFollowUps.map((appointment) => {
+            const patient = patientsById.get(appointment.patientId);
+            const state = appointmentFollowUpState(appointment);
+            return (
+              <article
+                className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm"
+                key={appointment.id}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-black text-slate-950">
+                      {patient?.displayName ?? "Patient record unavailable"}
+                    </p>
+                    <p className="mt-0.5 text-[10px] font-bold text-indigo-600">
+                      {patient?.mrNumber ?? appointment.patientId} · {appointment.appointmentNumber}
+                    </p>
+                  </div>
+                  <StatusPill
+                    tone={
+                      state === "completed"
+                        ? "emerald"
+                        : state === "overdue"
+                          ? "rose"
+                          : state === "due-today"
+                            ? "indigo"
+                            : "amber"
+                    }
+                  >
+                    {humanize(state)}
+                  </StatusPill>
+                </div>
+                <div className="mt-3 grid gap-2 rounded-xl bg-slate-50 p-3 sm:grid-cols-2">
+                  <p className="text-[11px] font-bold text-slate-700">
+                    <Clock3 className="mr-1 inline" size={12} />
+                    {formatDate(appointment.appointmentDate)} · {appointment.slotStart}
+                  </p>
+                  <p className="text-[11px] font-bold text-slate-700">
+                    {appointment.serviceName}
+                  </p>
+                </div>
+                <p className="mt-3 text-xs leading-5 text-slate-600">
+                  {appointment.reasonForVisit || "No follow-up reason recorded."}
+                </p>
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      {unstructuredPlans.length > 0 ? (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50/60 p-4">
+          <div className="flex items-start gap-3">
+            <FileClock className="mt-0.5 shrink-0 text-amber-700" size={18} />
+            <div>
+              <h2 className="text-sm font-black text-amber-950">
+                Documented plans without structured due dates
+              </h2>
+              <p className="mt-1 text-[11px] leading-5 text-amber-800">
+                These are clinician-entered notes, so WonFlow does not infer due, overdue or completed status.
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 grid gap-2 lg:grid-cols-2">
+            {unstructuredPlans.slice(0, 6).map((record) => {
+              const encounter = encountersById.get(record.encounterId);
+              const patient = encounter ? patientsById.get(encounter.patientId) : undefined;
+              return (
+                <article className="rounded-xl bg-white p-3 ring-1 ring-amber-100" key={record.id}>
+                  <p className="text-[11px] font-black text-slate-900">
+                    {patient?.displayName ?? "Patient record unavailable"}
+                  </p>
+                  <p className="mt-1 line-clamp-3 text-[11px] leading-5 text-slate-600">
+                    {record.followUpPlan}
+                  </p>
+                  {encounter ? (
+                    <Link
+                      className="mt-2 inline-flex text-[10px] font-black text-indigo-700"
+                      href={`/doctor/encounters/${encodeURIComponent(encounter.id)}`}
+                    >
+                      Open consultation summary
+                    </Link>
+                  ) : null}
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
+    </div>
+  );
+}
+
+function DoctorProfileEditor({
+  doctor,
+  onSaved,
+}: {
+  doctor: DoctorPortalIdentity;
+  onSaved(): void;
+}) {
+  const { branches } = useDoctorPortalContext();
+  const [form, setForm] = useState({
+    displayName: doctor.displayName,
+    title: doctor.title ?? "Doctor",
+    specialtyName: doctor.specialtyName,
+    registrationNumber: doctor.registrationNumber ?? "",
+    qualifications: doctor.qualifications ?? "",
+    contactPhone: doctor.contactPhone ?? "",
+    biography: doctor.biography ?? "",
+    primaryBranchId: doctor.primaryBranchId,
+    durationMinutes: doctor.durationMinutes ?? 15,
+    publiclyBookable: doctor.publiclyBookable ?? false,
+    profileImageData: doctor.profileImageUrl ?? "",
+  });
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string>();
+  const [error, setError] = useState<string>();
+
+  function update<Key extends keyof typeof form>(key: Key, value: (typeof form)[Key]) {
+    setForm((current) => ({ ...current, [key]: value }));
+    setMessage(undefined);
+    setError(undefined);
+  }
+
+  function selectPhoto(file?: File) {
+    if (!file) return;
+    if (!(["image/jpeg", "image/png", "image/webp"] as string[]).includes(file.type) || file.size > 1_000_000) {
+      setError("Choose a JPG, PNG or WebP image smaller than 1 MB.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => update("profileImageData", String(reader.result));
+    reader.onerror = () => setError("The selected photo could not be read.");
+    reader.readAsDataURL(file);
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSaving(true);
+    setMessage(undefined);
+    setError(undefined);
+    try {
+      await phaseOneApi<{ profile: DoctorPortalIdentity }>("/api/v1/doctor/profile", {
+        method: "PATCH",
+        body: JSON.stringify({ ...form, profileImageData: form.profileImageData || null }),
+      });
+      setMessage("Your profile has been saved and updated across the doctor portal.");
+      // The application shell keeps the profile photo outside the session, so
+      // tell it to re-read the new one.
+      window.dispatchEvent(new Event(WONFLOW_AVATAR_CHANGED_EVENT));
+      window.setTimeout(onSaved, 500);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Your profile could not be saved.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const field = "mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+  const label = "text-[10px] font-black uppercase tracking-wide text-slate-500";
+
+  return (
+    <form className="p-5" onSubmit={save}>
+      <div className="grid items-start gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
+        <aside className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-5 text-center">
+          <DoctorProfileAvatar
+            className="mx-auto h-32 w-32 rounded-full text-2xl shadow-[0_14px_34px_rgba(79,70,229,0.18)] ring-4 ring-white"
+            name={form.displayName}
+            profileImageUrl={form.profileImageData || undefined}
+          />
+          <h3 className="mt-4 text-sm font-black text-slate-950">{form.displayName || "Doctor profile"}</h3>
+          <p className="mt-1 text-[10px] font-semibold text-slate-500">{form.specialtyName || "Add your specialty"}</p>
+          <label className="mt-4 inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-white px-4 text-xs font-black text-indigo-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50">
+            <Upload size={15} /> Upload photo
+            <input
+              accept="image/jpeg,image/png,image/webp"
+              className="sr-only"
+              onChange={(event) => selectPhoto(event.target.files?.[0])}
+              type="file"
+            />
+          </label>
+          {form.profileImageData ? (
+            <button className="mt-2 block w-full text-[10px] font-bold text-rose-600" onClick={() => update("profileImageData", "")} type="button">
+              Remove photo
+            </button>
+          ) : null}
+          <p className="mt-3 text-[9px] leading-4 text-slate-500">JPG, PNG or WebP. Maximum size 1 MB.</p>
+        </aside>
+
+        <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
+          <div className="border-b border-slate-200 pb-3 sm:col-span-2">
+            <h3 className="text-sm font-black text-slate-950">Professional information</h3>
+            <p className="mt-1 text-[10px] text-slate-500">Details patients and hospital teams use to identify you.</p>
+          </div>
+          <label className={label}>Full name<input className={field} onChange={(event) => update("displayName", event.target.value)} required value={form.displayName} /></label>
+          <label className={label}>Professional title<input className={field} onChange={(event) => update("title", event.target.value)} value={form.title} /></label>
+          <label className={label}>Specialty / department<input className={`${field} bg-slate-50 text-slate-500`} disabled title="Assigned by the hospital administrator" value={form.specialtyName} /></label>
+          <label className={label}>Registration number<input className={field} onChange={(event) => update("registrationNumber", event.target.value)} value={form.registrationNumber} /></label>
+          <label className={label}>Qualifications<input className={field} onChange={(event) => update("qualifications", event.target.value)} placeholder="MBBS, FCPS, MRCP..." value={form.qualifications} /></label>
+          <label className={label}>Contact phone<input className={field} onChange={(event) => update("contactPhone", event.target.value)} type="tel" value={form.contactPhone} /></label>
+          <div className="mt-3 border-b border-slate-200 pb-3 sm:col-span-2">
+            <h3 className="text-sm font-black text-slate-950">Hospital assignment</h3>
+            <p className="mt-1 text-[10px] text-slate-500">Your secure account identifiers and default working location.</p>
+          </div>
+          <label className={label}>Login email<input className={`${field} bg-slate-50 text-slate-500`} disabled value={doctor.email ?? ""} /></label>
+          <label className={label}>Employee number<input className={`${field} bg-slate-50 text-slate-500`} disabled value={doctor.employeeNumber} /></label>
+          <label className={label}>Primary location
+            <select className={field} onChange={(event) => update("primaryBranchId", event.target.value)} value={form.primaryBranchId}>
+              <option value="">Select location</option>
+              {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
+            </select>
+          </label>
+          <label className={label}>Default consultation minutes<input className={field} max={480} min={5} onChange={(event) => update("durationMinutes", Number(event.target.value))} type="number" value={form.durationMinutes} /></label>
+          <div className="mt-3 border-b border-slate-200 pb-3 sm:col-span-2">
+            <h3 className="text-sm font-black text-slate-950">Patient-facing profile</h3>
+            <p className="mt-1 text-[10px] text-slate-500">Introduce your experience and control appointment visibility.</p>
+          </div>
+          <label className={`${label} sm:col-span-2`}>Professional biography<textarea className="mt-1 min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-white p-3 text-xs font-semibold leading-5 text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" onChange={(event) => update("biography", event.target.value)} placeholder="Share your clinical experience, interests and approach to patient care..." value={form.biography} /></label>
+          <label className="flex items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50/70 p-3 text-xs font-bold text-indigo-950 sm:col-span-2">
+            <input checked={form.publiclyBookable} onChange={(event) => update("publiclyBookable", event.target.checked)} type="checkbox" /> Allow patients to book my published services
+          </label>
+        </div>
+      </div>
+      {error ? <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-700">{error}</p> : null}
+      {message ? <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-700">{message}</p> : null}
+      <div className="mt-5 flex justify-end border-t border-slate-100 pt-4">
+        <button className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-5 text-xs font-black text-white shadow-lg shadow-indigo-500/20 hover:from-indigo-700 hover:to-violet-700 disabled:opacity-60" disabled={saving} type="submit">
+          <Save size={15} /> {saving ? "Saving..." : "Save profile"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+export function DoctorProfilePage() {
+  const { doctor, doctorId, reload } = useDoctorPortalContext();
+  const {
+    locations,
+    matchesLegacyBranch,
+  } = usePracticeLocation();
+  const data = useDoctorSecondaryData();
+  const schedules = data.schedules
+    .filter(
+      (schedule) =>
+        schedule.practitionerId === doctorId &&
+        matchesLegacyBranch(schedule.branchId),
+    )
+    .sort(
+      (left, right) =>
+        left.dayOfWeek - right.dayOfWeek || left.startTime.localeCompare(right.startTime),
+    );
+  const locationsByBranchId = new Map(
+    locations
+      .filter((location) => location.linkedBranchId !== undefined)
+      .map((location) => [location.linkedBranchId!, location]),
+  );
+  return (
+    <div className="space-y-4">
+      <DoctorPageHeader
+        description="Manage your practitioner identity and hospital profile."
+        icon={<UserRound size={18} />}
+        title="My Profile"
+      />
+
+      {doctor === undefined ? (
+        <EmptyState
+          description="Select an available practitioner before opening the Doctor profile."
+          icon={<UserRound size={19} />}
+          title="Doctor profile unavailable"
+        />
+      ) : (
+        <>
+          <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-[0_14px_40px_rgba(15,23,42,0.07)]">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 via-white to-indigo-50/60 px-5 py-4 text-slate-950">
+              <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-4">
+                  <div>
+                    <p className="text-[9px] font-black uppercase tracking-[0.16em] text-indigo-600">
+                      WonFlow practitioner profile
+                    </p>
+                    <h2 className="mt-1 text-xl font-black">{doctor.displayName}</h2>
+                    <p className="mt-1 text-xs font-semibold text-slate-500">
+                      {doctor.specialtyName} · Employee {doctor.employeeNumber}
+                    </p>
+                  </div>
+                </div>
+                <p className="max-w-64 text-[10px] leading-4 text-slate-500">
+                  Manage your professional details and profile photo below. Changes are shown throughout your doctor portal.
+                </p>
+              </div>
+            </div>
+            <DoctorProfileEditor doctor={doctor} onSaved={reload} />
+          </section>
+
+          <section className="hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-sm font-black text-slate-950">Weekly schedule</h2>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  Current working blocks from Doctor Schedule.
+                </p>
+              </div>
+              <Link className="wf-button-secondary" href="/doctor/schedule">
+                Manage Schedule
+              </Link>
+            </div>
+            {schedules.length === 0 ? (
+              <div className="mt-4 rounded-xl border border-dashed border-slate-300 p-5 text-center text-xs font-semibold text-slate-500">
+                No weekly schedule blocks are configured.
+              </div>
+            ) : (
+              <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                {schedules.map((schedule) => (
+                  <article
+                    className={`rounded-xl border p-3 ${
+                      schedule.active
+                        ? "border-indigo-100 bg-indigo-50/50"
+                        : "border-slate-200 bg-slate-50 opacity-65"
+                    }`}
+                    key={schedule.id}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-xs font-black text-slate-900">
+                        {DAY_NAMES[schedule.dayOfWeek]}
+                      </p>
+                      <StatusPill tone={schedule.active ? "emerald" : "slate"}>
+                        {schedule.active ? "Active" : "Inactive"}
+                      </StatusPill>
+                    </div>
+                    <p className="mt-2 text-[11px] font-bold text-indigo-700">
+                      {schedule.startTime}–{schedule.endTime}
+                    </p>
+                    <p className="mt-1 text-[10px] leading-4 text-slate-500">
+                      {locationsByBranchId.get(schedule.branchId)?.name ?? "Unknown location"} ·{" "}
+                      {schedule.appointmentDurationMinutes} min · {schedule.maximumPatients} patients
+                    </p>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}
+
+type AppointmentView = "today" | "upcoming" | "all";
+
+export function DoctorAppointmentsPage() {
+  const { doctorId } = useDoctorPortalContext();
+  const data = useDoctorSecondaryData();
+  const [view, setView] = useState<AppointmentView>("today");
+  const today = todayValue();
+  const patients = new Map(buildConnectedPatients(doctorId, data).map((patient) => [patient.id, patient]));
+  const appointments = data.appointments
+    .filter((appointment) => appointment.practitionerId === doctorId)
+    .sort((left, right) => left.scheduledStartAt.localeCompare(right.scheduledStartAt));
+  const visible = appointments.filter((appointment) =>
+    view === "all"
+      ? true
+      : view === "today"
+        ? appointment.appointmentDate === today
+        : appointment.appointmentDate > today && !["cancelled", "completed", "no-show"].includes(appointment.status),
+  );
+  const todayCount = appointments.filter((appointment) => appointment.appointmentDate === today).length;
+  const upcomingCount = appointments.filter((appointment) => appointment.appointmentDate > today && !["cancelled", "completed", "no-show"].includes(appointment.status)).length;
+  const waitingCount = data.queueEntries.filter((entry) => entry.practitionerId === doctorId && ["waiting", "called"].includes(entry.status)).length;
+
+  return (
+    <div className="space-y-4">
+      <DoctorPageHeader description="Review your confirmed schedule, patient arrival status and consultation queue." icon={<CalendarClock size={18} />} title="Appointments" />
+      <section className="grid gap-3 sm:grid-cols-3">
+        {[{ label: "Today", value: todayCount, tone: "from-indigo-500 to-violet-600" }, { label: "Upcoming", value: upcomingCount, tone: "from-cyan-500 to-blue-600" }, { label: "Waiting now", value: waitingCount, tone: "from-emerald-500 to-teal-600" }].map((metric) => <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" key={metric.label}><div className="flex items-center gap-3"><span className={`grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br ${metric.tone} text-white`}><CalendarClock size={17} /></span><div><p className="text-xl font-black text-slate-950">{metric.value}</p><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{metric.label}</p></div></div></div>)}
+      </section>
+      <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-indigo-50 via-white to-cyan-50 px-5 py-4"><div><h2 className="text-sm font-black text-slate-950">My appointment schedule</h2><p className="mt-1 text-[10px] text-slate-500">Appointments assigned to your practitioner profile.</p></div><div className="flex rounded-xl bg-slate-100 p-1">{(["today", "upcoming", "all"] as const).map((item) => <button className={`rounded-lg px-3 py-2 text-[10px] font-black capitalize ${view === item ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`} key={item} onClick={() => setView(item)} type="button">{item}</button>)}</div></div>
+        {visible.length === 0 ? <div className="m-5"><EmptyState action={<Link className="wf-button-secondary" href="/doctor/queue">Open patient queue</Link>} description={view === "today" ? "No appointments are assigned to you for today." : "No appointments match this view."} icon={<CalendarClock size={20} />} title="No appointments found" /></div> : <div className="divide-y divide-slate-100">{visible.map((appointment) => {
+          const patient = patients.get(appointment.patientId);
+          const queueEntry = data.queueEntries.find((entry) => entry.appointmentId === appointment.id);
+          const statusTone = appointment.status === "completed" ? "emerald" : appointment.status === "cancelled" || appointment.status === "no-show" ? "rose" : appointment.appointmentDate === today ? "indigo" : "amber";
+          return <article className="grid gap-4 p-5 transition hover:bg-slate-50/70 lg:grid-cols-[110px_minmax(0,1fr)_180px] lg:items-center" key={appointment.id}><div><p className="text-lg font-black text-indigo-700">{appointment.slotStart}</p><p className="text-[10px] font-semibold text-slate-500">{formatDate(appointment.appointmentDate)}</p></div><div className="flex min-w-0 items-center gap-3"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 text-xs font-black text-indigo-700">{getInitials(patient?.displayName ?? "Patient")}</span><div className="min-w-0"><h3 className="truncate text-sm font-black text-slate-950">{patient?.displayName ?? "Patient record"}</h3><p className="mt-1 text-[10px] font-semibold text-slate-500">{patient?.mrNumber ?? appointment.patientId} · {appointment.serviceName} · {appointment.durationMinutes} min</p><p className="mt-1 truncate text-[10px] text-slate-600">{appointment.reasonForVisit || "No appointment reason recorded."}</p></div></div><div className="flex items-center justify-between gap-2 lg:justify-end"><StatusPill tone={statusTone}>{humanize(queueEntry?.status ?? appointment.status)}</StatusPill><Link className="rounded-xl bg-indigo-600 px-3 py-2 text-[10px] font-black text-white hover:bg-indigo-700" href={queueEntry ? `/doctor/consultations?queueEntryId=${encodeURIComponent(queueEntry.id)}` : "/doctor/queue"}>{queueEntry?.status === "serving" ? "Continue" : queueEntry ? "Open patient" : "View queue"}</Link></div></article>;
+        })}</div>}
+      </section>
+    </div>
+  );
+}
+
+type DisplayDensity = "compact" | "comfortable";
+
+interface DoctorPortalPreferences {
+  notificationsEnabled: boolean;
+  queueSoundEnabled: boolean;
+  defaultAppointmentDuration: string;
+  displayDensity: DisplayDensity;
+  mobileCompactActions: boolean;
+}
+
+const DOCTOR_PREFERENCES_KEY = "wonflow-doctor-portal-preferences";
+const DEFAULT_PREFERENCES: DoctorPortalPreferences = {
+  notificationsEnabled: true,
+  queueSoundEnabled: true,
+  defaultAppointmentDuration: "15",
+  displayDensity: "compact",
+  mobileCompactActions: true,
+};
+
+function readDoctorPreferences(): DoctorPortalPreferences {
+  try {
+    const rawValue = window.localStorage.getItem(DOCTOR_PREFERENCES_KEY);
+    if (rawValue === null) return DEFAULT_PREFERENCES;
+    const parsed = JSON.parse(rawValue) as Partial<DoctorPortalPreferences>;
+    return {
+      notificationsEnabled:
+        typeof parsed.notificationsEnabled === "boolean"
+          ? parsed.notificationsEnabled
+          : DEFAULT_PREFERENCES.notificationsEnabled,
+      queueSoundEnabled:
+        typeof parsed.queueSoundEnabled === "boolean"
+          ? parsed.queueSoundEnabled
+          : DEFAULT_PREFERENCES.queueSoundEnabled,
+      defaultAppointmentDuration:
+        typeof parsed.defaultAppointmentDuration === "string"
+          ? parsed.defaultAppointmentDuration
+          : DEFAULT_PREFERENCES.defaultAppointmentDuration,
+      displayDensity:
+        parsed.displayDensity === "comfortable" ? "comfortable" : "compact",
+      mobileCompactActions:
+        typeof parsed.mobileCompactActions === "boolean"
+          ? parsed.mobileCompactActions
+          : DEFAULT_PREFERENCES.mobileCompactActions,
+    };
+  } catch {
+    return DEFAULT_PREFERENCES;
+  }
+}
+
+export function DoctorSettingsPage() {
+  const [preferences, setPreferences] = useState<DoctorPortalPreferences>(
+    DEFAULT_PREFERENCES,
+  );
+  const [savedMessage, setSavedMessage] = useState<string>();
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setPreferences(readDoctorPreferences());
+    });
+  }, []);
+
+  function updatePreference<Key extends keyof DoctorPortalPreferences>(
+    key: Key,
+    value: DoctorPortalPreferences[Key],
+  ): void {
+    setPreferences((current) => ({ ...current, [key]: value }));
+    setSavedMessage(undefined);
+  }
+
+  function savePreferences(): void {
+    window.localStorage.setItem(DOCTOR_PREFERENCES_KEY, JSON.stringify(preferences));
+    window.dispatchEvent(new Event("wonflow:doctor-portal-preferences-changed"));
+    setSavedMessage("Doctor Portal preferences saved in this browser.");
+  }
+
+  return (
+    <div className="space-y-4">
+      <DoctorPageHeader
+        actions={
+          <button
+            className="inline-flex min-h-10 items-center rounded-xl bg-indigo-600 px-4 text-xs font-black text-white hover:bg-indigo-700"
+            onClick={savePreferences}
+            type="button"
+          >
+            Save Preferences
+          </button>
+        }
+        description="Compact browser-local preferences for this Doctor Portal demonstration."
+        icon={<Settings size={18} />}
+        title="Settings"
+      />
+
+      {savedMessage ? (
+        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-bold text-emerald-700">
+          {savedMessage}
+        </p>
+      ) : null}
+
+      <div className="grid items-start gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+        <aside className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          <p className="mb-2 text-[9px] font-black uppercase tracking-[0.12em] text-slate-400">
+            Active account
+          </p>
+          <DoctorPortalIdentity compact />
+          <p className="mt-3 text-[10px] leading-4 text-slate-500">
+            Preferences are stored under one browser-local Doctor Portal settings record.
+          </p>
+        </aside>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <SettingsSection
+            description="Choose which clinical activity should request your attention."
+            icon={<Bell size={17} />}
+            title="Notifications"
+          >
+            <PreferenceToggle
+              checked={preferences.notificationsEnabled}
+              description="Store the preference for Doctor Portal notifications. Browser delivery is not connected yet."
+              label="Portal notifications"
+              onChange={(value) => updatePreference("notificationsEnabled", value)}
+            />
+            <PreferenceToggle
+              checked={preferences.queueSoundEnabled}
+              description="Store whether queue calls should use an audible cue when sound support is connected."
+              icon={<Volume2 size={15} />}
+              label="Queue sound"
+              onChange={(value) => updatePreference("queueSoundEnabled", value)}
+            />
+          </SettingsSection>
+
+          <SettingsSection
+            description="Defaults used when preparing your clinical workspace. Location is controlled by the session switcher."
+            icon={<Building2 size={17} />}
+            title="Clinical defaults"
+          >
+            <label className="block text-[11px] font-black text-slate-600">
+              Default appointment duration
+              <select
+                className={`${INPUT_CLASS_NAME} mt-1.5`}
+                onChange={(event) =>
+                  updatePreference("defaultAppointmentDuration", event.target.value)
+                }
+                value={preferences.defaultAppointmentDuration}
+              >
+                {["10", "15", "20", "30", "45", "60"].map((minutes) => (
+                  <option key={minutes} value={minutes}>
+                    {minutes} minutes
+                  </option>
+                ))}
+              </select>
+            </label>
+          </SettingsSection>
+
+          <SettingsSection
+            description="Select the preferred information density for future shell integration."
+            icon={<SlidersHorizontal size={17} />}
+            title="Display density"
+          >
+            <div className="grid grid-cols-2 gap-2">
+              {(["compact", "comfortable"] as const).map((density) => (
+                <button
+                  className={`rounded-xl border p-3 text-left ${
+                    preferences.displayDensity === density
+                      ? "border-indigo-300 bg-indigo-50 text-indigo-800"
+                      : "border-slate-200 bg-white text-slate-600"
+                  }`}
+                  key={density}
+                  onClick={() => updatePreference("displayDensity", density)}
+                  type="button"
+                >
+                  <span className="block text-xs font-black">{humanize(density)}</span>
+                  <span className="mt-1 block text-[9px] leading-4 opacity-75">
+                    {density === "compact" ? "More information per view" : "More spacing between controls"}
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="mt-3 text-[10px] leading-4 text-slate-400">
+              The preference is saved now; global density switching will be connected in a later milestone.
+            </p>
+          </SettingsSection>
+
+          <SettingsSection
+            description="Keep frequent clinical actions easy to reach on smaller screens."
+            icon={<Smartphone size={17} />}
+            title="Mobile preferences"
+          >
+            <PreferenceToggle
+              checked={preferences.mobileCompactActions}
+              description="Store a preference for compact mobile action groups."
+              label="Compact action controls"
+              onChange={(value) => updatePreference("mobileCompactActions", value)}
+            />
+          </SettingsSection>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SettingsSection({
+  title,
+  description,
+  icon,
+  children,
+}: {
+  title: string;
+  description: string;
+  icon: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-indigo-50 text-indigo-700">
+          {icon}
+        </span>
+        <div>
+          <h2 className="text-sm font-black text-slate-950">{title}</h2>
+          <p className="mt-0.5 text-[10px] leading-4 text-slate-500">{description}</p>
+        </div>
+      </div>
+      <div className="mt-4">{children}</div>
+    </section>
+  );
+}
+
+function PreferenceToggle({
+  label,
+  description,
+  checked,
+  onChange,
+  icon,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  onChange(value: boolean): void;
+  icon?: ReactNode;
+}) {
+  return (
+    <label className="flex cursor-pointer items-start justify-between gap-4 rounded-xl bg-slate-50 p-3 first:mt-0 [&+&]:mt-2">
+      <span className="flex min-w-0 gap-2">
+        {icon ? <span className="mt-0.5 text-slate-400">{icon}</span> : null}
+        <span>
+          <span className="block text-xs font-black text-slate-800">{label}</span>
+          <span className="mt-0.5 block text-[9px] leading-4 text-slate-500">
+            {description}
+          </span>
+        </span>
+      </span>
+      <input
+        checked={checked}
+        className="mt-1 h-4 w-4 shrink-0 accent-indigo-600"
+        onChange={(event) => onChange(event.target.checked)}
+        type="checkbox"
+      />
+    </label>
+  );
+}

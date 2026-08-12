@@ -1,0 +1,2 @@
+"use client";
+export default function ErrorState({reset}:{error:Error;reset():void}){return <main id="main-content" className="grid min-h-[60vh] place-items-center"><section role="alert" className="max-w-xl rounded-3xl border border-rose-200 p-6"><h1 className="text-2xl font-black">Policies could not be loaded</h1><p className="mt-3 text-sm text-slate-600">No policy or content changes were made.</p><button onClick={reset} className="mt-5 min-h-11 rounded-xl bg-slate-950 px-4 text-white">Try again</button></section></main>}
