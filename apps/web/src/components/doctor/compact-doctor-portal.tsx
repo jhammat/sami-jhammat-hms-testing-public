@@ -165,7 +165,7 @@ export function CompactDoctorPortal({
     doctorId: portal.doctorId,
     businessDate: portal.businessDate,
     sitting: portal.sitting,
-    schedules: portal.schedules,
+    roster: portal.roster,
     entries,
     activeEntries,
     message,

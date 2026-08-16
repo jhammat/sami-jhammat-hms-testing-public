@@ -1,26 +1,6 @@
 "use client";
 
 import {
-  Activity,
-  BadgeDollarSign,
-  CalendarDays,
-  CalendarClock,
-  FileClock,
-  FileText,
-  History,
-  LayoutDashboard,
-  ListOrdered,
-  LogOut,
-  Settings,
-  UserRound,
-  Users,
-} from "lucide-react";
-
-import type {
-  LucideIcon,
-} from "lucide-react";
-
-import {
   createContext,
   useCallback,
   useContext,
@@ -48,15 +28,6 @@ import {
   PracticeLocationProvider,
   usePracticeLocation,
 } from "@/components/shell";
-
-import {
-  DOCTOR_SCHEDULES_CHANGED_EVENT,
-  readDemoDoctorSchedules,
-} from "@/lib/doctor-schedules";
-
-import type {
-  DemoDoctorSchedule,
-} from "@/lib/doctor-schedules";
 
 import type {
   DemoDoctorSitting,
@@ -107,14 +78,10 @@ export type DoctorPortalIdentity = MockPractitioner & {
   publiclyBookable?: boolean;
 };
 
-const ACTIVE_DOCTOR_STORAGE_KEY =
-  "wonflow-active-doctor-id";
-
-const BUSINESS_DATE_STORAGE_KEY =
-  "wonflow-doctor-business-date";
-
-const SIDEBAR_MODE_STORAGE_KEY =
-  "wonflow-doctor-sidebar-collapsed";
+// In-memory, session-lived: which business date is being viewed is
+// interface state, not user data, so it never claims to persist across a
+// reload — it is simply remembered for the rest of this browser tab's life.
+let rememberedBusinessDate: string | undefined;
 
 interface DoctorDirectory {
   profile: DoctorPortalIdentity;
@@ -132,7 +99,7 @@ export interface DoctorPortalContextValue {
   sitting?: DemoDoctorSitting;
   queueEntries: DemoQueueEntry[];
   encounters: DemoClinicalEncounter[];
-  schedules: DemoDoctorSchedule[];
+  roster: DoctorSittingsResponse["roster"];
 
   loading: boolean;
 
@@ -163,144 +130,6 @@ export function useDoctorPortalContext():
   return context;
 }
 
-interface DoctorNavigationItem {
-  label: string;
-  href: string;
-  icon: LucideIcon;
-
-  matchPrefixes?: readonly string[];
-  action?: "sign-out";
-}
-
-interface DoctorNavigationGroup {
-  label:
-    | "Main"
-    | "Clinical"
-    | "Account";
-
-  items:
-    readonly DoctorNavigationItem[];
-}
-
-export const DOCTOR_NAVIGATION_GROUPS:
-  readonly DoctorNavigationGroup[] = [
-    {
-      label: "Main",
-      items: [
-        {
-          label: "Today",
-          href: "/doctor",
-          icon: LayoutDashboard,
-        },
-        {
-          label: "Appointments",
-          href: "/doctor/appointments",
-          icon: CalendarClock,
-          matchPrefixes: ["/doctor/appointments/"],
-        },
-        {
-          label: "My Schedule",
-          href: "/doctor/schedule",
-          icon: CalendarDays,
-          matchPrefixes: [
-            "/doctor/schedule/",
-          ],
-        },
-        {
-          label: "Today’s Queue",
-          href: "/doctor/queue",
-          icon: ListOrdered,
-          matchPrefixes: [
-            "/doctor/queue/",
-          ],
-        },
-        {
-          label: "My Patients",
-          href: "/doctor/patients",
-          icon: Users,
-          matchPrefixes: [
-            "/doctor/patients/",
-          ],
-        },
-      ],
-    },
-    {
-      label: "Clinical",
-      items: [
-        {
-          label: "Consultations",
-          href: "/doctor/consultations",
-          icon: Activity,
-          matchPrefixes: [
-            "/doctor/consultations/",
-            "/doctor/encounters/",
-          ],
-        },
-        {
-          label: "Reports & Documents",
-          href: "/doctor/inbox",
-          icon: FileText,
-          matchPrefixes: [
-            "/doctor/inbox/",
-            "/doctor/results",
-            "/doctor/radiology-results",
-          ],
-        },
-        {
-          label: "Consultation History",
-          href: "/doctor/history",
-          icon: History,
-          matchPrefixes: [
-            "/doctor/history/",
-          ],
-        },
-        {
-          label: "Follow-ups",
-          href: "/doctor/follow-ups",
-          icon: FileClock,
-          matchPrefixes: [
-            "/doctor/follow-ups/",
-          ],
-        },
-      ],
-    },
-    {
-      label: "Account",
-      items: [
-        {
-          label: "My Profile",
-          href: "/doctor/profile",
-          icon: UserRound,
-          matchPrefixes: [
-            "/doctor/profile/",
-          ],
-        },
-        {
-          label: "Practice Configuration",
-          href: "/doctor/fees",
-          icon: BadgeDollarSign,
-          matchPrefixes: [
-            "/doctor/fees/",
-          ],
-        },
-        {
-          label: "Settings",
-          href: "/doctor/settings",
-          icon: Settings,
-          matchPrefixes: [
-            "/doctor/settings/",
-          ],
-        },
-        {
-          label: "Sign Out",
-          href: "/auth/login",
-          icon: LogOut,
-          action: "sign-out",
-        },
-      ],
-    },
-  ];
-
 function getCurrentBusinessDate():
   string {
   const date = new Date();
@@ -317,10 +146,10 @@ function getCurrentBusinessDate():
 }
 
 function isBusinessDate(
-  value: string | null,
+  value: string | null | undefined,
 ): value is string {
   return (
-    value !== null &&
+    value != null &&
     /^\d{4}-\d{2}-\d{2}$/.test(
       value,
     )
@@ -358,24 +187,6 @@ function getSittingStatusStyle(
     case undefined:
       return "bg-blue-50 text-blue-700 ring-blue-200";
   }
-}
-
-function isNavigationItemActive(
-  pathname: string,
-  item: DoctorNavigationItem,
-): boolean {
-  if (pathname === item.href) {
-    return true;
-  }
-
-  return (
-    item.matchPrefixes?.some(
-      (prefix) =>
-        pathname.startsWith(
-          prefix,
-        ),
-    ) ?? false
-  );
 }
 
 export interface DoctorPortalIdentityProps {
@@ -561,6 +372,11 @@ function DoctorPortalShellContent({
     [businessDate, directoryBranches, sittingsResource.data],
   );
 
+  const roster = useMemo<DoctorSittingsResponse["roster"]>(
+    () => sittingsResource.data?.roster ?? [],
+    [sittingsResource.data],
+  );
+
   const rawQueueEntries = useMemo<DemoQueueEntry[]>(
     () => {
       const currentDoctorId = directory.data?.profile.id;
@@ -572,21 +388,9 @@ function DoctorPortalShellContent({
     [activeSittingRecord, businessDate, dashboard.data, directory.data],
   );
 
-  const [
-    rawSchedules,
-    setRawSchedules,
-  ] = useState<DemoDoctorSchedule[]>(
-    [],
-  );
-
   const doctors = useMemo<DoctorPortalIdentity[]>(() => {
     return directoryDoctors;
   }, [directoryDoctors]);
-
-  const [
-    collapsed,
-    setCollapsed,
-  ] = useState(false);
 
   const [
     mobileNavigationOpen,
@@ -613,59 +417,22 @@ function DoctorPortalShellContent({
     useCallback(() => {
       dashboardReload();
       sittingsReload();
-      setRawSchedules(
-        readDemoDoctorSchedules(),
-      );
     }, [dashboardReload, sittingsReload]);
 
   useEffect(() => {
     queueMicrotask(() => {
       reloadOperationalData();
 
-      const storedDate =
-        window.localStorage.getItem(
-          BUSINESS_DATE_STORAGE_KEY,
-        );
-
       if (
         isBusinessDate(
-          storedDate,
+          rememberedBusinessDate,
         )
       ) {
         setBusinessDateState(
-          storedDate,
+          rememberedBusinessDate,
         );
       }
-
-      setCollapsed(
-        window.localStorage.getItem(
-          SIDEBAR_MODE_STORAGE_KEY,
-        ) === "true",
-      );
     });
-
-    const events = [
-      DOCTOR_SCHEDULES_CHANGED_EVENT,
-      "storage",
-    ] as const;
-
-    events.forEach((eventName) => {
-      window.addEventListener(
-        eventName,
-        reloadOperationalData,
-      );
-    });
-
-    return () => {
-      events.forEach(
-        (eventName) => {
-          window.removeEventListener(
-            eventName,
-            reloadOperationalData,
-          );
-        },
-      );
-    };
   }, [reloadOperationalData]);
 
   // The queue and sitting are real, server-side data now — reception can
@@ -703,12 +470,6 @@ function DoctorPortalShellContent({
       setDoctorIdState(
         nextDoctor.id,
       );
-
-      window.localStorage.setItem(
-        ACTIVE_DOCTOR_STORAGE_KEY,
-        nextDoctor.id,
-      );
-
     });
   }, [
     businessDate,
@@ -865,19 +626,6 @@ function DoctorPortalShellContent({
       [dashboard.data, doctorId],
     );
 
-  const schedules =
-    useMemo(
-      () =>
-        rawSchedules.filter(
-          (schedule) =>
-            schedule.practitionerId === doctorId,
-        ),
-      [
-        doctorId,
-        rawSchedules,
-      ],
-    );
-
   const setDoctorId =
     useCallback(
       (value: string) => {
@@ -892,11 +640,6 @@ function DoctorPortalShellContent({
         }
 
         setDoctorIdState(value);
-        window.localStorage.setItem(
-          ACTIVE_DOCTOR_STORAGE_KEY,
-          value,
-        );
-
       },
       [doctors],
     );
@@ -911,10 +654,7 @@ function DoctorPortalShellContent({
         }
 
         setBusinessDateState(value);
-        window.localStorage.setItem(
-          BUSINESS_DATE_STORAGE_KEY,
-          value,
-        );
+        rememberedBusinessDate = value;
       },
       [],
     );
@@ -941,7 +681,7 @@ function DoctorPortalShellContent({
         sitting,
         queueEntries,
         encounters,
-        schedules,
+        roster,
         loading:
           directory.status ===
             "idle" ||
@@ -961,28 +701,12 @@ function DoctorPortalShellContent({
         encounters,
         queueEntries,
         reload,
-        schedules,
+        roster,
         setBusinessDate,
         setDoctorId,
         sitting,
       ],
     );
-
-  function toggleSidebar(): void {
-    setCollapsed(
-      (currentValue) => {
-        const nextValue =
-          !currentValue;
-
-        window.localStorage.setItem(
-          SIDEBAR_MODE_STORAGE_KEY,
-          String(nextValue),
-        );
-
-        return nextValue;
-      },
-    );
-  }
 
   /*
    * The unified WonFlow shell (registration-legacy-shell.tsx) now supplies

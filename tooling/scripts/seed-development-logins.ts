@@ -31,24 +31,20 @@ const branch = await database.branch.upsert({
   update: { organizationId: organization.id, name: "Main Hospital", status: "ACTIVE", isMainBranch: true, archivedAt: null },
 });
 
-const permissions = [
-  "appointments.manage", "appointments.read", "billing.invoices.manage", "encounters.manage", "encounters.read",
-  "encounters.sign", "laboratory.orders.read", "laboratory.orders.manage", "laboratory.results.manage", "laboratory.results.release", "organization.audit.read", "organization.branches.manage",
-  "organization.profile.manage", "organization.profile.read", "organization.roles.manage", "organization.roles.read",
-  "organization.schedules.manage", "organization.schedules.read", "organization.services.manage",
-  "organization.services.read", "organization.users.manage", "organization.users.read", "patients.manage", "patients.read",
-  "pharmacy.dispensing.manage", "queues.manage",
-  "radiology.orders.read", "radiology.orders.manage", "radiology.reports.manage", "radiology.reports.release",
-] as const;
-const permissionRows = await Promise.all(permissions.map((code) => database.permission.upsert({
-  where: { code }, create: { code, category: code.split(".")[0]!, label: code }, update: {},
-})));
-
 /**
  * The permissions each workspace legitimately needs — shared with tenant
  * provisioning and staff invitation so seeded and real hospitals never drift.
  */
 const { WORKSPACE_PERMISSION_CODES: workspacePermissions } = await import("../../apps/web/src/server/access/workspace-roles.js") as { WORKSPACE_PERMISSION_CODES: Record<string, readonly string[]> };
+
+// Derived from the same source, not hand-duplicated: a permission code added
+// to a workspace above and forgotten here previously meant `granted` below
+// could never contain it for ANY seeded role, no matter how the role
+// definition changed — the exact bug this line exists to make impossible.
+const permissions = [...new Set(Object.values(workspacePermissions).flat())];
+const permissionRows = await Promise.all(permissions.map((code) => database.permission.upsert({
+  where: { code }, create: { code, category: code.split(".")[0]!, label: code }, update: {},
+})));
 
 const accounts = [
   ["admin", "ADMIN", "Hospital Administrator"], ["reception", "RECEPTION", "Reception Officer"],
@@ -132,6 +128,44 @@ for (const [name, workspace, displayName] of accounts) {
       update: { isActive: true, isPrimary: true },
     });
   }
+}
+
+/**
+ * A junior doctor whose notes require countersignature, supervised by the
+ * main seeded doctor — a fixture for FIX-21's negative security test
+ * proving a supervised clinician cannot self-sign their own note.
+ */
+const supervisingDoctor = await database.doctorProfile.findFirst({
+  where: { tenantId: tenant.id, staffProfile: { membership: { identity: { normalizedEmail: "doctor@wonflow.local" } } } },
+  select: { id: true },
+});
+if (supervisingDoctor) {
+  const email = "supervised-doctor@wonflow.local";
+  const identity = await database.identity.upsert({
+    where: { normalizedEmail: email },
+    create: { email, normalizedEmail: email, passwordHash, mustChangePassword: false, status: "ACTIVE", emailVerifiedAt: new Date(), passwordChangedAt: new Date() },
+    update: { email, passwordHash, mustChangePassword: false, status: "ACTIVE", failedLoginCount: 0, lockedUntil: null, archivedAt: null },
+  });
+  const membership = await database.tenantMembership.upsert({
+    where: { tenantId_identityId: { tenantId: tenant.id, identityId: identity.id } },
+    create: { tenantId: tenant.id, identityId: identity.id, organizationId: organization.id, primaryBranchId: branch.id, displayName: "Supervised Doctor", status: "ACTIVE", workspaceCodes: ["DOCTOR"], primaryWorkspace: "DOCTOR" },
+    update: { organizationId: organization.id, primaryBranchId: branch.id, displayName: "Supervised Doctor", status: "ACTIVE", workspaceCodes: ["DOCTOR"], primaryWorkspace: "DOCTOR", archivedAt: null },
+  });
+  const doctorRole = await database.role.findFirst({ where: { tenantId: tenant.id, code: "DOCTOR" }, select: { id: true } });
+  if (doctorRole) {
+    await database.membershipRole.deleteMany({ where: { tenantId: tenant.id, membershipId: membership.id } });
+    await database.membershipRole.create({ data: { tenantId: tenant.id, membershipId: membership.id, roleId: doctorRole.id, branchId: branch.id } });
+  }
+  const staffProfile = await database.staffProfile.upsert({
+    where: { membershipId: membership.id },
+    create: { tenantId: tenant.id, membershipId: membership.id, branchId: branch.id, employeeNumber: "DEV-DOCTOR-002", staffType: "DOCTOR", title: "Supervised Doctor" },
+    update: { branchId: branch.id, staffType: "DOCTOR", status: "ACTIVE", title: "Supervised Doctor" },
+  });
+  await database.doctorProfile.upsert({
+    where: { staffProfileId: staffProfile.id },
+    create: { tenantId: tenant.id, staffProfileId: staffProfile.id, specialty: "General Medicine", publiclyBookable: false, requiresCountersignature: true, supervisorDoctorId: supervisingDoctor.id },
+    update: { specialty: "General Medicine", publiclyBookable: false, requiresCountersignature: true, supervisorDoctorId: supervisingDoctor.id },
+  });
 }
 
 /**
@@ -373,6 +407,14 @@ if (developmentDoctor && developmentPatient && doctorMembership) {
    */
   const OPEN_ORDERS_PER_TYPE = 8;
 
+  // The worklist filters by createdAt within "today" (see getWorklist in
+  // diagnostics-service.ts), so an open order created on an earlier day
+  // never counts toward what a same-day e2e run can find, no matter how
+  // many exist — count only today's, or this pool silently runs dry the
+  // moment a run spans a calendar day boundary.
+  const startOfToday = new Date();
+  startOfToday.setUTCHours(0, 0, 0, 0);
+
   for (const type of ["LABORATORY", "RADIOLOGY"] as const) {
     const openCount = await database.diagnosticOrder.count({
       where: {
@@ -380,6 +422,7 @@ if (developmentDoctor && developmentPatient && doctorMembership) {
         encounterId: encounter.id,
         type,
         status: { notIn: ["COMPLETED", "CANCELLED", "ENTERED_IN_ERROR"] },
+        createdAt: { gte: startOfToday },
       },
     });
 

@@ -78,12 +78,15 @@ async function resolveTenant(transaction: Prisma.TransactionClient, input: Tenan
 }
 
 export class PlatformAdministrationService {
-  async listTenants(context: WonFlowPlatformRequestContext) {
+  async listTenants(context: WonFlowPlatformRequestContext, scope: "active" | "deleted" = "active") {
     requirePermission(context, "platform.tenants.read");
     return database.tenant.findMany({
-      where: { archivedAt: null },
+      // Deleted tenants are retained as platform-only backups, but separated
+      // from the live directory so no one mistakes them for working tenants.
+      where: scope === "deleted" ? { archivedAt: { not: null } } : { archivedAt: null },
       orderBy: { createdAt: "desc" },
       include: { organizations: { include: { branches: true } }, subscription: true, entitlements: true },
+      take: 500,
     });
   }
 
@@ -146,6 +149,9 @@ export class PlatformAdministrationService {
 
     return database.$transaction(async (transaction) => {
       const resolved = await resolveTenant(transaction, input);
+      if (resolved.tenant?.archivedAt) {
+        throw new WonFlowApiError(409, "tenant-archived", "Archived tenant backups cannot be activated.");
+      }
       const tenant = resolved.tenant
         ? await transaction.tenant.update({
             where: { id: resolved.tenant.id },
@@ -348,11 +354,28 @@ export class PlatformAdministrationService {
     });
   }
 
-  async setTenantStatus(context: WonFlowPlatformRequestContext, input: { tenantId: string; status: "ACTIVE" | "SUSPENDED" | "ARCHIVED"; reason: string }) {
+  async setTenantStatus(context: WonFlowPlatformRequestContext, input: { tenantId: string; status: "ACTIVE" | "SUSPENDED"; confirmation: string; reason: string }) {
     requirePermission(context, "platform.tenants.manage");
-    if (!input.reason?.trim()) throw new Error("A reason is required.");
+    if (input.status !== "ACTIVE" && input.status !== "SUSPENDED") {
+      throw new WonFlowApiError(400, "invalid-tenant-status", "Use the tenant deletion workflow to archive a tenant.");
+    }
+    const reason = input.reason?.trim() ?? "";
+    if (reason.length < 8) throw new WonFlowApiError(400, "status-reason-required", "Enter a clear reason of at least 8 characters.");
+    const confirmation = input.confirmation?.trim();
+    const expectedConfirmation = input.status === "ACTIVE" ? "REACTIVATE" : "RESTRICT";
+    if (confirmation !== expectedConfirmation && !(input.status === "SUSPENDED" && confirmation === "SUSPEND")) throw new WonFlowApiError(400, "status-confirmation-mismatch", `Type "${expectedConfirmation}" to confirm this action.`);
+    input = { ...input, reason };
     return database.$transaction(async (transaction) => {
-      const tenant = await transaction.tenant.update({ where: { id: input.tenantId }, data: { status: input.status } });
+      const currentTenant = await transaction.tenant.findFirst({ where: { id: input.tenantId, archivedAt: null } });
+      if (!currentTenant) throw new WonFlowApiError(404, "tenant-not-found", "The active tenant could not be found.");
+      const statusChangedAt = new Date();
+      const tenant = await transaction.tenant.update({ where: { id: currentTenant.id }, data: { status: input.status } });
+      if (input.status === "SUSPENDED") {
+        await Promise.all([
+          transaction.authSession.updateMany({ where: { tenantId: tenant.id, status: "ACTIVE" }, data: { status: "REVOKED", revokedAt: statusChangedAt, revocationReason: "tenant-restricted" } }),
+          transaction.oneTimeToken.updateMany({ where: { tenantId: tenant.id, status: "ACTIVE" }, data: { status: "REVOKED" } }),
+        ]);
+      }
       await transaction.auditEvent.create({ data: { tenantId: tenant.id, requestId: context.requestId, action: `platform.tenant.${input.status.toLowerCase()}`, entityType: "tenant", entityId: tenant.id, severity: input.status === "SUSPENDED" ? "CRITICAL" : "WARNING", reason: input.reason.trim(), sourceApplication: context.sourceApplication } });
       return tenant;
     });
@@ -402,6 +425,10 @@ export class PlatformAdministrationService {
           where: { tenantId: tenant.id, status: "ACTIVE" },
           data: { status: "REVOKED", revokedAt: archivedAt, revocationReason: "tenant-archived" },
         }),
+        transaction.oneTimeToken.updateMany({
+          where: { tenantId: tenant.id, status: "ACTIVE" },
+          data: { status: "REVOKED" },
+        }),
         transaction.supportAccessGrant.updateMany({
           where: { tenantId: tenant.id, status: { in: ["REQUESTED", "APPROVED", "ACTIVE"] } },
           data: { status: "REVOKED", revokedAt: archivedAt },
@@ -447,12 +474,210 @@ export class PlatformAdministrationService {
     });
   }
 
+  async permanentlyDeleteTenant(
+    context: WonFlowPlatformRequestContext,
+    input: { tenantId: string; confirmation: string; reason: string },
+  ) {
+    requirePermission(context, "platform.tenants.manage");
+
+    const confirmation = input.confirmation?.trim() ?? "";
+    const reason = input.reason?.trim() ?? "";
+    if (reason.length < 8) {
+      throw new WonFlowApiError(400, "delete-reason-required", "Enter a clear reason of at least 8 characters.");
+    }
+
+    return database.$transaction(async (transaction) => {
+      const tenant = await transaction.tenant.findFirst({
+        where: { id: input.tenantId, archivedAt: { not: null } },
+        include: { organizations: true },
+      });
+      if (!tenant) {
+        throw new WonFlowApiError(404, "tenant-not-found", "The archived tenant could not be found.");
+      }
+      if (tenant.slug === "wonflow-development") {
+        throw new WonFlowApiError(403, "internal-tenant-protected", "The internal development tenant cannot be permanently deleted.");
+      }
+      if (confirmation !== "PERMANENTLY DELETE") {
+        throw new WonFlowApiError(400, "delete-confirmation-mismatch", 'Type "PERMANENTLY DELETE" to confirm permanent deletion.');
+      }
+
+      // Delete all related records in the correct order respecting foreign key constraints
+      await transaction.membershipRole.deleteMany({
+        where: {
+          membership: { tenantId: tenant.id },
+        },
+      });
+
+      await transaction.rolePermission.deleteMany({
+        where: {
+          role: { tenantId: tenant.id },
+        },
+      });
+
+      await transaction.role.deleteMany({
+        where: { tenantId: tenant.id },
+      });
+
+      await transaction.tenantMembership.deleteMany({
+        where: { tenantId: tenant.id },
+      });
+
+      await transaction.branch.deleteMany({
+        where: { tenantId: tenant.id },
+      });
+
+      await transaction.organization.deleteMany({
+        where: { tenantId: tenant.id },
+      });
+
+      await transaction.tenantEntitlement.deleteMany({
+        where: { tenantId: tenant.id },
+      });
+
+      await transaction.tenantSubscription.deleteMany({
+        where: { tenantId: tenant.id },
+      });
+
+      await transaction.auditEvent.deleteMany({
+        where: { tenantId: tenant.id },
+      });
+
+      await transaction.outboxEvent.deleteMany({
+        where: { tenantId: tenant.id },
+      });
+
+      await transaction.supportAccessGrant.deleteMany({
+        where: { tenantId: tenant.id },
+      });
+
+      await transaction.authSession.deleteMany({
+        where: { identity: { memberships: { some: { tenantId: tenant.id } } } },
+      });
+
+      await transaction.identity.deleteMany({
+        where: {
+          memberships: { some: { tenantId: tenant.id } },
+          isPlatformAdministrator: false,
+        },
+      });
+
+      // Finally delete the tenant
+      await transaction.tenant.delete({
+        where: { id: tenant.id },
+      });
+
+      await transaction.auditEvent.create({
+        data: {
+          tenantId: null,
+          requestId: context.requestId,
+          action: "platform.tenant.permanently-deleted",
+          entityType: "tenant",
+          entityId: tenant.id,
+          severity: "CRITICAL",
+          reason,
+          metadata: { actorIdentityId: context.userId, tenantSlug: tenant.slug, tenantDisplayName: tenant.displayName },
+          sourceApplication: context.sourceApplication,
+        },
+      });
+
+      return { deletedTenantId: tenant.id, tenantSlug: tenant.slug };
+    });
+  }
+
+  async restoreTenant(
+    context: WonFlowPlatformRequestContext,
+    input: { tenantId: string; confirmation: string; reason: string },
+  ) {
+    requirePermission(context, "platform.tenants.manage");
+
+    const confirmation = input.confirmation?.trim() ?? "";
+    const reason = input.reason?.trim() ?? "";
+    if (reason.length < 8) {
+      throw new WonFlowApiError(400, "restore-reason-required", "Enter a clear reason of at least 8 characters.");
+    }
+
+    return database.$transaction(async (transaction) => {
+      const tenant = await transaction.tenant.findFirst({
+        where: { id: input.tenantId, archivedAt: { not: null } },
+        include: { organizations: true },
+      });
+      if (!tenant) {
+        throw new WonFlowApiError(404, "tenant-not-found", "The archived tenant could not be found.");
+      }
+      if (tenant.slug === "wonflow-development") {
+        throw new WonFlowApiError(403, "internal-tenant-protected", "The internal development tenant cannot be restored here.");
+      }
+      if (confirmation !== "RESTORE") {
+        throw new WonFlowApiError(400, "restore-confirmation-mismatch", 'Type "RESTORE" to confirm restoration.');
+      }
+
+      const restoredAt = new Date();
+      
+      // Restore tenant status to ACTIVE (was DRAFT, but restored tenants should be operational)
+      const restoredTenant = await transaction.tenant.update({
+        where: { id: tenant.id },
+        data: { status: "ACTIVE", archivedAt: null },
+      });
+
+      // Restore organizations
+      await transaction.organization.updateMany({
+        where: { tenantId: tenant.id },
+        data: { status: "ACTIVE", archivedAt: null },
+      });
+
+      // Restore branches
+      await transaction.branch.updateMany({
+        where: { tenantId: tenant.id },
+        data: { status: "ACTIVE", archivedAt: null },
+      });
+
+      // Restore memberships
+      await transaction.tenantMembership.updateMany({
+        where: { tenantId: tenant.id },
+        data: { status: "ACTIVE", archivedAt: null },
+      });
+
+      // Restore subscription status if it was cancelled
+      await transaction.tenantSubscription.updateMany({
+        where: { tenantId: tenant.id, status: "CANCELLED" },
+        data: { status: "UNCONFIGURED" },
+      });
+
+      await transaction.auditEvent.create({
+        data: {
+          tenantId: tenant.id,
+          requestId: context.requestId,
+          action: "platform.tenant.restored",
+          entityType: "tenant",
+          entityId: tenant.id,
+          severity: "WARNING",
+          reason,
+          metadata: { actorIdentityId: context.userId, tenantSlug: tenant.slug, tenantDisplayName: tenant.displayName },
+          sourceApplication: context.sourceApplication,
+        },
+      });
+
+      await transaction.outboxEvent.create({
+        data: {
+          tenantId: tenant.id,
+          type: "tenant.restored",
+          aggregateType: "tenant",
+          aggregateId: tenant.id,
+          payload: { tenantId: tenant.id, tenantSlug: tenant.slug, restoredAt: restoredAt.toISOString() },
+        },
+      });
+
+      return restoredTenant;
+    });
+  }
+
   async setEntitlement(context: WonFlowPlatformRequestContext, input: { tenantId: string; moduleCode: string; enabled: boolean; limits?: object; tenantSlug?: string; tenantDisplayName?: string }) {
     requirePermission(context, "platform.entitlements.manage");
     if (!PLATFORM_MODULE_CODES.has(input.moduleCode) || typeof input.enabled !== "boolean") throw new WonFlowApiError(400, "invalid-entitlement", "The entitlement request is invalid.");
     return database.$transaction(async (transaction) => {
       const resolved = await resolveTenant(transaction, input);
       let tenant = resolved.tenant;
+      if (tenant?.archivedAt) throw new WonFlowApiError(409, "tenant-archived", "Archived tenant backups cannot have entitlements changed.");
       if (!tenant) {
         if (!resolved.slug || !input.tenantDisplayName?.trim()) throw new WonFlowApiError(404, "tenant-not-found", "The tenant could not be resolved.");
         tenant = await transaction.tenant.create({ data: { slug: resolved.slug, displayName: input.tenantDisplayName.trim(), status: "DRAFT", organizations: { create: { code: "MAIN", displayName: input.tenantDisplayName.trim() } }, subscription: { create: {} } } });
@@ -468,6 +693,7 @@ export class PlatformAdministrationService {
     return database.$transaction(async (transaction) => {
       const resolved = await resolveTenant(transaction, input);
       if (!resolved.tenant) throw new WonFlowApiError(404, "tenant-not-found", "Activate the tenant before saving its subscription.");
+      if (resolved.tenant.archivedAt) throw new WonFlowApiError(409, "tenant-archived", "Archived tenant backups cannot have subscriptions changed.");
       const data = {
         planCode: input.planCode,
         status: input.status,
@@ -483,14 +709,59 @@ export class PlatformAdministrationService {
     });
   }
 
-  async createSupportAccess(context: WonFlowPlatformRequestContext, input: { tenantId: string; reason: string; permissionCodes?: string[]; expiresAt: string }) {
-    requirePermission(context, "platform.support-access.manage");
-    return database.supportAccessGrant.create({ data: { tenantId: input.tenantId, requestedByIdentityId: context.userId, reason: input.reason.trim(), permissionCodes: input.permissionCodes ?? [], expiresAt: new Date(input.expiresAt) } });
+  async cancelSubscription(context: WonFlowPlatformRequestContext, input: { tenantId: string; confirmation: string; reason: string }) {
+    requirePermission(context, "platform.subscriptions.manage");
+    const reason = input.reason?.trim() ?? "";
+    if (reason.length < 8) throw new WonFlowApiError(400, "cancellation-reason-required", "Enter a clear cancellation reason of at least 8 characters.");
+    if (input.confirmation?.trim() !== "CANCEL SUBSCRIPTION") throw new WonFlowApiError(400, "cancellation-confirmation-mismatch", "Type \"CANCEL SUBSCRIPTION\" to confirm cancellation.");
+    return database.$transaction(async (transaction) => {
+      const tenant = await transaction.tenant.findFirst({ where: { id: input.tenantId, archivedAt: null } });
+      if (!tenant) throw new WonFlowApiError(404, "tenant-not-found", "The active tenant could not be found.");
+      const subscription = await transaction.tenantSubscription.update({ where: { tenantId: tenant.id }, data: { status: "CANCELLED", renewsAt: new Date() } });
+      await transaction.auditEvent.create({ data: { tenantId: tenant.id, requestId: context.requestId, action: "platform.subscription.cancelled", entityType: "tenant-subscription", entityId: subscription.id, severity: "CRITICAL", reason, metadata: { actorIdentityId: context.userId }, sourceApplication: context.sourceApplication } });
+      await transaction.outboxEvent.create({ data: { tenantId: tenant.id, type: "tenant.subscription.cancelled", aggregateType: "tenant-subscription", aggregateId: subscription.id, payload: { tenantId: tenant.id, cancelledAt: new Date().toISOString(), reason } } });
+      return subscription;
+    });
   }
 
-  async updateSupportAccess(context: WonFlowPlatformRequestContext, input: { accessId: string; status: "APPROVED" | "ACTIVE" | "REVOKED" | "REJECTED" }) {
+  /** Time-boxed, reason-required and audited — the server, not the client, caps how long a grant can run for. */
+  async createSupportAccess(context: WonFlowPlatformRequestContext, input: { tenantId: string; reason: string; permissionCodes?: string[]; expiresAt: string }) {
     requirePermission(context, "platform.support-access.manage");
-    return database.supportAccessGrant.update({ where: { id: input.accessId }, data: { status: input.status, approvedByIdentityId: input.status === "APPROVED" ? context.userId : undefined, approvedAt: input.status === "APPROVED" ? new Date() : undefined, revokedAt: input.status === "REVOKED" ? new Date() : undefined } });
+    const reason = input.reason?.trim() ?? "";
+    if (reason.length < 8) throw new WonFlowApiError(400, "support-access-reason-required", "Enter a clear reason of at least 8 characters.");
+    const expiresAt = new Date(input.expiresAt);
+    const maxExpiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    if (Number.isNaN(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) throw new WonFlowApiError(400, "support-access-expiry-invalid", "The expiry must be in the future.");
+    if (expiresAt.getTime() > maxExpiresAt.getTime()) throw new WonFlowApiError(400, "support-access-expiry-too-long", "Support access cannot be granted for more than 24 hours at a time.");
+    return database.$transaction(async (transaction) => {
+      const tenant = await transaction.tenant.findFirst({ where: { id: input.tenantId, archivedAt: null } });
+      if (!tenant) throw new WonFlowApiError(404, "tenant-not-found", "Support access cannot be created for an archived tenant backup.");
+      const grant = await transaction.supportAccessGrant.create({ data: { tenantId: input.tenantId, requestedByIdentityId: context.userId, reason, permissionCodes: input.permissionCodes ?? [], expiresAt } });
+      await transaction.auditEvent.create({ data: { tenantId: input.tenantId, requestId: context.requestId, action: "platform.support-access.granted", entityType: "support-access-grant", entityId: grant.id, severity: "WARNING", reason, sourceApplication: context.sourceApplication } });
+      return grant;
+    });
+  }
+
+  async updateSupportAccess(context: WonFlowPlatformRequestContext, input: { accessId: string; status: "APPROVED" | "ACTIVE" | "REVOKED" | "REJECTED"; reason?: string }) {
+    requirePermission(context, "platform.support-access.manage");
+    const reason = input.reason?.trim() ?? "";
+    if (input.status === "REVOKED" && reason.length < 4) throw new WonFlowApiError(400, "support-access-reason-required", "Enter a reason for revoking this grant.");
+    // An already-expired grant must never be reactivated — that would let a
+    // 24-hour-capped window be extended indefinitely by re-approving it.
+    if (input.status === "APPROVED" || input.status === "ACTIVE") {
+      const existing = await database.supportAccessGrant.findUnique({ where: { id: input.accessId }, select: { expiresAt: true } });
+      if (existing && existing.expiresAt.getTime() <= Date.now()) throw new WonFlowApiError(409, "support-access-expired", "This grant has already expired and cannot be reactivated. Create a new one instead.");
+    }
+    return database.$transaction(async (transaction) => {
+      const grant = await transaction.supportAccessGrant.update({ where: { id: input.accessId }, data: { status: input.status, approvedByIdentityId: input.status === "APPROVED" ? context.userId : undefined, approvedAt: input.status === "APPROVED" ? new Date() : undefined, revokedAt: input.status === "REVOKED" ? new Date() : undefined } });
+      await transaction.auditEvent.create({ data: { tenantId: grant.tenantId, requestId: context.requestId, action: `platform.support-access.${input.status.toLowerCase()}`, entityType: "support-access-grant", entityId: grant.id, severity: input.status === "REVOKED" ? "WARNING" : "INFORMATION", reason: reason || null, sourceApplication: context.sourceApplication } });
+      return grant;
+    });
+  }
+
+  /** Self-healing expiry: any ACTIVE grant past its expiresAt is revoked the moment anyone next lists support access — never left "active" waiting for a human to notice. */
+  private async expireStaleSupportAccessGrants() {
+    await database.supportAccessGrant.updateMany({ where: { status: { in: ["APPROVED", "ACTIVE"] }, expiresAt: { lt: new Date() } }, data: { status: "REVOKED", revokedAt: new Date() } });
   }
 
   async getDashboard(context: WonFlowPlatformRequestContext) {
@@ -519,6 +790,7 @@ export class PlatformAdministrationService {
           entitlements: { where: { enabled: true }, select: { id: true } },
           _count: { select: { branches: true, memberships: true } },
         },
+        take: 500,
       }),
       database.supportAccessGrant.findMany({
         where: {
@@ -526,6 +798,7 @@ export class PlatformAdministrationService {
           tenant: { slug: { not: internalDevelopmentTenantSlug } },
         },
         select: { status: true, expiresAt: true },
+        take: 500,
       }),
       database.auditEvent.findMany({
         where: {
@@ -536,6 +809,7 @@ export class PlatformAdministrationService {
           ],
         },
         select: { createdAt: true, severity: true },
+        take: 10_000,
       }),
       database.auditEvent.findMany({
         where: {
@@ -664,6 +938,7 @@ export class PlatformAdministrationService {
 
   async listSupportAccess(context: WonFlowPlatformRequestContext) {
     requirePermission(context, "platform.support-access.manage");
+    await this.expireStaleSupportAccessGrants();
     return database.supportAccessGrant.findMany({
       orderBy: { createdAt: "desc" },
       take: 200,

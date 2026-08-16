@@ -27,10 +27,10 @@ import {
 } from "./platform-administration-ui";
 import {
   usePlatformAdministration,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 import type {
   CreatePlatformTenantInput,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 
 const EMPTY_FORM: CreatePlatformTenantInput = {
   organizationName: "",
@@ -191,7 +191,7 @@ export function PlatformTenantCreateForm() {
             label: "Add tenant",
           },
         ]}
-        description="Create an empty tenant configuration. Branches, users, subscription and entitlements remain unconfigured until entered."
+        description="Branches, users, subscription and entitlements are configured after activation."
         eyebrow="Tenant Provisioning"
         leading={
           <Building2
@@ -199,13 +199,21 @@ export function PlatformTenantCreateForm() {
             size={20}
           />
         }
-        metadata={
-          <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700 ring-1 ring-blue-100">
-            No automatic sample data
-          </span>
-        }
-        title="Add Tenant Organization"
+        title="Add Tenant"
       />
+
+      <div className="rounded-xl bg-indigo-50 border border-indigo-200 p-4 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm font-semibold text-indigo-900">New: Guided Setup Flow</p>
+          <p className="text-xs text-indigo-700 mt-1">Follow a step-by-step wizard to register tenant, select entitlements, configure subscription, and set credentials.</p>
+        </div>
+        <Link
+          className="inline-flex h-9 items-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-700"
+          href="/platform/organizations/new/flow"
+        >
+          Try Guided Flow
+        </Link>
+      </div>
 
       <form
         className="space-y-6"
@@ -213,7 +221,6 @@ export function PlatformTenantCreateForm() {
         onSubmit={handleSubmit}
       >
         <PlatformPanel
-          description="Only the organization name and unique slug are required to create the draft."
           title="Organization identity"
         >
           <div className="grid gap-5 md:grid-cols-2">
@@ -291,7 +298,6 @@ export function PlatformTenantCreateForm() {
         </PlatformPanel>
 
         <PlatformPanel
-          description="These fields remain empty until the hospital provides its responsible contact."
           title="Primary contact"
         >
           <div className="grid gap-5 md:grid-cols-2">

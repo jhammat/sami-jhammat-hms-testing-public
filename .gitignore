@@ -72,3 +72,8 @@ zero-baseline-audit.txt
 # Local temporary exports
 *.local-export.json
 *.local-audit.txt
+
+# Ad-hoc manual QA screenshot dumps (not release documentation —
+# docs/release/screenshots/ is the intentional, committed evidence set)
+/samitestingscreenshots/
+/final things/

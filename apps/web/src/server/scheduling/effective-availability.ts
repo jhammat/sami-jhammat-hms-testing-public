@@ -242,11 +242,11 @@ export async function checkDoctorBookable(
     : { ok: false, reason: "That time is outside the doctor's scheduled hours." };
 }
 
-function formatMinute(value: number): string {
+export function formatMinute(value: number): string {
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
 
-function localMinuteOfDay(value: Date, timezone: string): number {
+export function localMinuteOfDay(value: Date, timezone: string): number {
   const parts = new Intl.DateTimeFormat("en-GB", {
     timeZone: timezone,
     hour: "2-digit",
@@ -255,4 +255,45 @@ function localMinuteOfDay(value: Date, timezone: string): number {
   }).formatToParts(value);
   const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
   return Number(lookup.hour) * 60 + Number(lookup.minute);
+}
+
+/**
+ * Inverse of localMinuteOfDay: the UTC instant for a given wall-clock
+ * date+minute in `timezone`. Slots are generated server-side as local
+ * minutes-of-day, and this is how they become the exact `startsAt`/`endsAt`
+ * instants the client echoes back to book — no client-side timezone math.
+ *
+ * Standard round-trip-through-Intl technique: guess the instant assuming
+ * UTC, read back what wall-clock time that guess represents in `timezone`,
+ * then correct by the difference. Correct for all IANA zones without a
+ * date library, DST included.
+ */
+export function localWallTimeToInstant(dateIso: string, minuteOfDay: number, timezone: string): Date {
+  const guess = new Date(`${dateIso}T00:00:00.000Z`);
+  guess.setUTCMinutes(guess.getUTCMinutes() + minuteOfDay);
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(guess);
+  const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  const asUtcIfLocalWereUtc = Date.UTC(
+    Number(lookup.year),
+    Number(lookup.month) - 1,
+    Number(lookup.day),
+    Number(lookup.hour),
+    Number(lookup.minute),
+    Number(lookup.second),
+  );
+
+  const offsetMs = guess.getTime() - asUtcIfLocalWereUtc;
+
+  return new Date(guess.getTime() + offsetMs);
 }

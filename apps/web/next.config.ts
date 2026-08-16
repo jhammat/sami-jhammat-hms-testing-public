@@ -54,13 +54,38 @@ const securityHeaders = [
     : []),
 ];
 
+/**
+ * The public booking widget at /book/:tenantSlug is meant to be embedded in
+ * an <iframe> on a hospital or doctor's own external website — that is its
+ * whole purpose, so the site-wide "never frame this app" default above would
+ * silently break it. It is excluded from the general security-headers match
+ * below (rather than given a second, overriding header block) because
+ * browsers enforce multiple same-name CSP headers as an intersection, not a
+ * replacement — a second, looser frame-ancestors would not actually widen
+ * the first, stricter one. This route carries no session, shows no other
+ * patient's data, and every write is rate-limited and server-validated in
+ * public-registration-service.ts regardless of where the request came from.
+ */
+const publicBookingContentSecurityPolicy = contentSecurityPolicy.replace("frame-ancestors 'none'", "frame-ancestors *");
+const publicBookingHeaders = [
+  { key: "Content-Security-Policy", value: publicBookingContentSecurityPolicy },
+  { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
+  ...(isProduction
+    ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }]
+    : []),
+];
+
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: workspaceRoot,
   poweredByHeader: false,
   async headers() {
     return [
-      { source: "/:path*", headers: securityHeaders },
+      { source: "/((?!book/|api/v1/public-registration/).*)", headers: securityHeaders },
+      { source: "/api/v1/public-registration/:path*", headers: publicBookingHeaders },
+      { source: "/book/:path*", headers: publicBookingHeaders },
       {
         /**
          * Patient data must never sit in a shared cache. Scoped away from

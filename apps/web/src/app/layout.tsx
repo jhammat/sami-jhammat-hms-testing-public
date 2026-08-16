@@ -11,7 +11,11 @@ import {
 
 import {
   PlatformAdministrationProvider,
-} from "@/components/platform/platform-administration-store";
+} from "@/components/platform/platform-administration-context";
+
+import {
+  ClientStorageGuard,
+} from "@/components/dev/client-storage-guard";
 
 import {
   readSession,
@@ -65,9 +69,10 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        <ClientStorageGuard />
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{const marker="wonflow-data-cleanup-v1";if(localStorage.getItem(marker)!=="complete"){for(let index=localStorage.length-1;index>=0;index-=1){const key=localStorage.key(index);if(key?.startsWith("wonflow-demo-")){localStorage.removeItem(key)}}for(let index=sessionStorage.length-1;index>=0;index-=1){const key=sessionStorage.key(index);if(key?.startsWith("wonflow-demo-")){sessionStorage.removeItem(key)}}localStorage.setItem(marker,"complete")}}catch{}`,
+            __html: `try{const marker="wonflow-data-cleanup-v1";const stalePrefix="wonflow-demo"+"-";if(localStorage.getItem(marker)!=="complete"){for(let index=localStorage.length-1;index>=0;index-=1){const key=localStorage.key(index);if(key?.startsWith(stalePrefix)){localStorage.removeItem(key)}}for(let index=sessionStorage.length-1;index>=0;index-=1){const key=sessionStorage.key(index);if(key?.startsWith(stalePrefix)){sessionStorage.removeItem(key)}}localStorage.setItem(marker,"complete")}}catch{}`,
           }}
         />
         <script

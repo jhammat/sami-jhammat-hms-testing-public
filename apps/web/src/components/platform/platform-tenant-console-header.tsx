@@ -1,8 +1,5 @@
 import Link from "next/link";
-import {
-  Building2,
-  Plus,
-} from "lucide-react";
+import { Archive, Building2, Plus } from "lucide-react";
 
 import {
   WonFlowPageHeader,
@@ -11,18 +8,7 @@ import {
 export function PlatformTenantConsoleHeader() {
   return (
     <WonFlowPageHeader
-      actions={
-        <Link
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-semibold text-white transition hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200"
-          href="/platform/organizations/new"
-        >
-          <Plus
-            aria-hidden="true"
-            size={17}
-          />
-          Add tenant
-        </Link>
-      }
+      actions={<><Link className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50" href="/platform/deleted-tenants"><Archive aria-hidden size={17} />Deleted tenants</Link><Link className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-700 px-4 text-sm font-semibold text-white transition hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200" href="/platform/organizations/new"><Plus aria-hidden size={17} />Add tenant</Link></>}
       breadcrumbs={[
         {
           label: "Platform Administration",

@@ -1,5 +1,10 @@
-FROM node:20-bookworm-slim AS base
-ENV PNPM_HOME="/pnpm" PATH="$PNPM_HOME:$PATH"
+FROM node:22-bookworm-slim AS base
+ENV PNPM_HOME="/pnpm" PATH="$PNPM_HOME:$PATH" CI=true
+# git: tooling/scripts/check-demo-storage-strings.mjs shells out to `git
+# ls-files` to enumerate tracked files, and pnpm build runs that check.
+# openssl: without it Prisma can't detect a libssl version and silently
+# defaults to one that may not match what's actually installed.
+RUN apt-get update && apt-get install -y --no-install-recommends git openssl && rm -rf /var/lib/apt/lists/*
 RUN corepack enable && corepack prepare pnpm@11.15.1 --activate
 FROM base AS dependencies
 WORKDIR /app
@@ -31,7 +36,7 @@ ENV NEXT_PUBLIC_WONFLOW_APP_NAME=$NEXT_PUBLIC_WONFLOW_APP_NAME \
     NEXT_PUBLIC_WONFLOW_BUILD_ID=$NEXT_PUBLIC_WONFLOW_BUILD_ID \
     WONFLOW_ENVIRONMENT=$WONFLOW_ENVIRONMENT
 RUN pnpm --filter @wonflow/database db:generate && pnpm build
-FROM node:20-bookworm-slim AS web
+FROM node:22-bookworm-slim AS web
 ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
 WORKDIR /app
 COPY --from=builder /app/apps/web/.next/standalone ./

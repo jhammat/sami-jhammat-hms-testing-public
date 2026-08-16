@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import {
+  useCallback,
   useMemo,
   useState,
 } from "react";
@@ -485,11 +486,13 @@ function HospitalOperationsDashboardContent({
       [projection.practitioners],
     );
 
-  const matchesSelectedBranch = (
-    branchId: string,
-  ): boolean =>
-    selectedBranchId === "all" ||
-    branchId === selectedBranchId;
+  const matchesSelectedBranch =
+    useCallback(
+      (branchId: string): boolean =>
+        selectedBranchId === "all" ||
+        branchId === selectedBranchId,
+      [selectedBranchId],
+    );
 
   const branchPatients =
     useMemo(
@@ -519,8 +522,8 @@ function HospitalOperationsDashboardContent({
               ),
           ),
       [
+        matchesSelectedBranch,
         projection.todayAppointments,
-        selectedBranchId,
       ],
     );
 
@@ -534,8 +537,8 @@ function HospitalOperationsDashboardContent({
             ),
         ),
       [
+        matchesSelectedBranch,
         projection.liveQueue,
-        selectedBranchId,
       ],
     );
 
@@ -551,8 +554,8 @@ function HospitalOperationsDashboardContent({
               ),
           ),
       [
+        matchesSelectedBranch,
         projection.activeAdmissions,
-        selectedBranchId,
       ],
     );
 
@@ -587,8 +590,8 @@ function HospitalOperationsDashboardContent({
               ),
           ),
       [
+        matchesSelectedBranch,
         projection.outstandingInvoices,
-        selectedBranchId,
       ],
     );
 

@@ -1,0 +1,706 @@
+[
+  {
+    "role": "patient",
+    "route": "/patient",
+    "status": 200,
+    "loadMs": 4848,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "patient",
+    "route": "/patient/care",
+    "status": 200,
+    "loadMs": 1827,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "patient",
+    "route": "/patient/reports",
+    "status": 200,
+    "loadMs": 932,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "patient",
+    "route": "/patient/billing",
+    "status": 200,
+    "loadMs": 934,
+    "hasHeading": true,
+    "errorText": "PATIENT ACCESS\nHome\nAppointments\nCare\nReports\nBilling\nProfile\nPATIENT ACCESS\nBilling\n/\nPatient Access\nSearch WonFlow\nK\nPA\nPatient\nWonFlow Development Hospital\nMY WONFLOW CARE\nMy billing\n\nMedical record DEV-0001 · securely connected with your hospital care team.\n\nBook appointment\nRefresh\nInvoices and"
+  },
+  {
+    "role": "patient",
+    "route": "/patient/profile",
+    "status": 200,
+    "loadMs": 1122,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "patient",
+    "route": "/patient/appointments",
+    "status": 200,
+    "loadMs": 1601,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "patient",
+    "route": "/patient/appointments/book",
+    "status": 200,
+    "loadMs": 1347,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "patient",
+    "route": "/patient/documents",
+    "status": 200,
+    "loadMs": 1490,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "patient",
+    "route": "/patient/messages",
+    "status": 200,
+    "loadMs": 1163,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor",
+    "status": 200,
+    "loadMs": 2129,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/consultations",
+    "status": 200,
+    "loadMs": 1359,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/countersignatures",
+    "status": 200,
+    "loadMs": 1446,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/documents",
+    "status": 200,
+    "loadMs": 1543,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/fees",
+    "status": 200,
+    "loadMs": 1524,
+    "hasHeading": true,
+    "errorText": "DOCTOR WORKSPACE\nDashboard\nMy Patients\nAppointments\nResults\nProfile\nFees & Services\nDOCTOR WORKSPACE\nFees & Services\n/\nDoctor Workspace\nSearch WonFlow\nK\nDO\nDoctor\nWonFlow Development Hospital\n\nDOCTOR WORKSPACE\n\nPractice Configuration\n\nConfigure your consultation services, fees, booking access and we"
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/follow-ups",
+    "status": 200,
+    "loadMs": 1439,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/history",
+    "status": 200,
+    "loadMs": 1413,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/inbox",
+    "status": 200,
+    "loadMs": 1436,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/messages",
+    "status": 200,
+    "loadMs": 1346,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/patients",
+    "status": 200,
+    "loadMs": 1399,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/policies",
+    "status": 200,
+    "loadMs": 1569,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/profile",
+    "status": 200,
+    "loadMs": 1396,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/radiology-results",
+    "status": 200,
+    "loadMs": 1633,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/results",
+    "status": 200,
+    "loadMs": 1539,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/schedule",
+    "status": 200,
+    "loadMs": 1487,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/settings",
+    "status": 200,
+    "loadMs": 1410,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/team",
+    "status": 200,
+    "loadMs": 1507,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/appointments",
+    "status": 200,
+    "loadMs": 2176,
+    "hasHeading": true,
+    "errorText": "DOCTOR WORKSPACE\nDashboard\nMy Patients\nAppointments\nResults\nProfile\nFees & Services\nDOCTOR WORKSPACE\nAppointments\n/\nDoctor Workspace\nSearch WonFlow\nK\nDO\nDoctor\nWonFlow Development Hospital\nDOCTOR PORTAL\nNO SITTING\nMy appointments\n\nIn-person and online consultations booked against your live schedule."
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/setup",
+    "status": 200,
+    "loadMs": 1353,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/locations",
+    "status": 200,
+    "loadMs": 968,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/doctor/services",
+    "status": 200,
+    "loadMs": 1264,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "doctor",
+    "route": "/workspace",
+    "status": 200,
+    "loadMs": 1568,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "reception",
+    "route": "/operations",
+    "status": 200,
+    "loadMs": 1406,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "reception",
+    "route": "/operations/reception",
+    "status": 200,
+    "loadMs": 2295,
+    "hasHeading": false,
+    "errorText": null
+  },
+  {
+    "role": "reception",
+    "route": "/operations/appointments",
+    "status": 200,
+    "loadMs": 1508,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "reception",
+    "route": "/operations/appointments/new",
+    "status": 200,
+    "loadMs": 1436,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "reception",
+    "route": "/operations/patients",
+    "status": 200,
+    "loadMs": 1140,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "reception",
+    "route": "/operations/patients/register",
+    "status": 200,
+    "loadMs": 1388,
+    "hasHeading": false,
+    "errorText": null
+  },
+  {
+    "role": "reception",
+    "route": "/operations/billing",
+    "status": 404,
+    "loadMs": 1216,
+    "hasHeading": true,
+    "errorText": "RECEPTION\nReception Desk\nToday’s Appointments\nPatient Directory\nHOSPITAL OPERATIONS\nHospital Operations\n/\nHospital Operations\nSearch WonFlow\nK\nRO\nReception Officer\nWonFlow Development Hospital\n404\nThis page could not be found."
+  },
+  {
+    "role": "reception",
+    "route": "/operations/billing/new",
+    "status": 200,
+    "loadMs": 1257,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "reception",
+    "route": "/operations/billing/refunds",
+    "status": 200,
+    "loadMs": 1624,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "laboratory",
+    "route": "/operations/laboratory",
+    "status": 200,
+    "loadMs": 1651,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "laboratory",
+    "route": "/operations/laboratory/collection",
+    "status": 200,
+    "loadMs": 1298,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "laboratory",
+    "route": "/operations/laboratory/processing",
+    "status": 200,
+    "loadMs": 1361,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "laboratory",
+    "route": "/operations/laboratory/release",
+    "status": 200,
+    "loadMs": 1258,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "laboratory",
+    "route": "/operations/laboratory/released",
+    "status": 200,
+    "loadMs": 1237,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "laboratory",
+    "route": "/operations/laboratory/critical",
+    "status": 200,
+    "loadMs": 1240,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "radiology",
+    "route": "/operations/radiology",
+    "status": 200,
+    "loadMs": 1474,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "radiology",
+    "route": "/operations/radiology/processing",
+    "status": 200,
+    "loadMs": 1294,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "radiology",
+    "route": "/operations/radiology/release",
+    "status": 200,
+    "loadMs": 1264,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "radiology",
+    "route": "/operations/radiology/released",
+    "status": 200,
+    "loadMs": 1318,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "radiology",
+    "route": "/operations/radiology/critical",
+    "status": 200,
+    "loadMs": 1287,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "pharmacy",
+    "route": "/operations/pharmacy",
+    "status": 200,
+    "loadMs": 1722,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "pharmacy",
+    "route": "/operations/pharmacy/inventory",
+    "status": 200,
+    "loadMs": 1497,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "pharmacy",
+    "route": "/operations/pharmacy/returns",
+    "status": 200,
+    "loadMs": 1546,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "billing",
+    "route": "/operations/billing",
+    "status": 404,
+    "loadMs": 1115,
+    "hasHeading": true,
+    "errorText": "BILLING\nNew Invoice\nRefunds\nHOSPITAL OPERATIONS\nHospital Operations\n/\nHospital Operations\nSearch WonFlow\nK\nBO\nBilling Officer\nWonFlow Development Hospital\n404\nThis page could not be found."
+  },
+  {
+    "role": "billing",
+    "route": "/operations/billing/new",
+    "status": 200,
+    "loadMs": 894,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "billing",
+    "route": "/operations/billing/refunds",
+    "status": 200,
+    "loadMs": 929,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin",
+    "status": 200,
+    "loadMs": 1972,
+    "hasHeading": true,
+    "errorText": "HOSPITAL OVERVIEW\nDashboard\nHospital Setup\nPEOPLE & LOCATIONS\nBranches & Locations\nTeam & Permissions\nDepartments\nDoctors & Clinical Staff\nSchedules\nSERVICES & GOVERNANCE\nServices & Prices\nPolicies & Content\nAudit Trail\nHOSPITAL OVERVIEW\nDashboard\n/\nHospital Administration\nSearch WonFlow\nK\nHA\nHospit"
+  },
+  {
+    "role": "admin",
+    "route": "/admin/setup",
+    "status": 200,
+    "loadMs": 1401,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/settings",
+    "status": 200,
+    "loadMs": 1911,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/locations",
+    "status": 200,
+    "loadMs": 1465,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/team",
+    "status": 200,
+    "loadMs": 1576,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/users",
+    "status": 200,
+    "loadMs": 1588,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/staff",
+    "status": 200,
+    "loadMs": 1584,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/departments",
+    "status": 200,
+    "loadMs": 1583,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/doctors",
+    "status": 200,
+    "loadMs": 1716,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/schedules",
+    "status": 200,
+    "loadMs": 1603,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/services",
+    "status": 200,
+    "loadMs": 1859,
+    "hasHeading": true,
+    "errorText": "HOSPITAL OVERVIEW\nDashboard\nHospital Setup\nPEOPLE & LOCATIONS\nBranches & Locations\nTeam & Permissions\nDepartments\nDoctors & Clinical Staff\nSchedules\nSERVICES & GOVERNANCE\nServices & Prices\nPolicies & Content\nAudit Trail\nSERVICES & GOVERNANCE\nServices & Prices\n/\nHospital Administration\nSearch WonFlow"
+  },
+  {
+    "role": "admin",
+    "route": "/admin/catalogue",
+    "status": 200,
+    "loadMs": 2612,
+    "hasHeading": true,
+    "errorText": "HOSPITAL OVERVIEW\nDashboard\nHospital Setup\nPEOPLE & LOCATIONS\nBranches & Locations\nTeam & Permissions\nDepartments\nDoctors & Clinical Staff\nSchedules\nSERVICES & GOVERNANCE\nServices & Prices\nPolicies & Content\nAudit Trail\nSERVICES & GOVERNANCE\nServices & Prices\n/\nHospital Administration\nSearch WonFlow"
+  },
+  {
+    "role": "admin",
+    "route": "/admin/policies",
+    "status": 200,
+    "loadMs": 8518,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/content",
+    "status": 200,
+    "loadMs": 1433,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/admin/audit",
+    "status": 200,
+    "loadMs": 1585,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/organization",
+    "status": 200,
+    "loadMs": 1346,
+    "hasHeading": true,
+    "errorText": "HOSPITAL OVERVIEW\nDashboard\nHospital Setup\nPEOPLE & LOCATIONS\nBranches & Locations\nTeam & Permissions\nDepartments\nDoctors & Clinical Staff\nSchedules\nSERVICES & GOVERNANCE\nServices & Prices\nPolicies & Content\nAudit Trail\nORGANIZATION ADMINISTRATION\nOrganization Administration\n/\nOrganization Administr"
+  },
+  {
+    "role": "admin",
+    "route": "/organization/catalogue",
+    "status": 200,
+    "loadMs": 1483,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/organization/policies",
+    "status": 200,
+    "loadMs": 1331,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/organization/services",
+    "status": 200,
+    "loadMs": 1542,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/organization/settings",
+    "status": 200,
+    "loadMs": 1417,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/organization/staff",
+    "status": 200,
+    "loadMs": 1913,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "admin",
+    "route": "/organization/team",
+    "status": 200,
+    "loadMs": 885,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "management",
+    "route": "/management",
+    "status": 200,
+    "loadMs": 1825,
+    "hasHeading": true,
+    "errorText": "MANAGEMENT\nPerformance\nMANAGEMENT\nPerformance\n/\nManagement Portal\nSearch WonFlow\nK\nHM\nHospital Manager\nWonFlow Development Hospital\nManagement dashboard\n\nWonFlow Development Hospital — figures below are your own organization only.\n\nFrom\nTo\nBranch\nAll branches\nMain Hospital\n\nPATIENTS\n\n26\n\nAPPOINTMENT"
+  },
+  {
+    "role": "platform",
+    "route": "/platform",
+    "status": 200,
+    "loadMs": 2189,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "platform",
+    "route": "/platform/audit",
+    "status": 200,
+    "loadMs": 1603,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "platform",
+    "route": "/platform/entitlements",
+    "status": 200,
+    "loadMs": 1476,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "platform",
+    "route": "/platform/organizations",
+    "status": 200,
+    "loadMs": 1537,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "platform",
+    "route": "/platform/organizations/new",
+    "status": 200,
+    "loadMs": 1536,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "platform",
+    "route": "/platform/settings",
+    "status": 200,
+    "loadMs": 1444,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "platform",
+    "route": "/platform/subscriptions",
+    "status": 200,
+    "loadMs": 1450,
+    "hasHeading": true,
+    "errorText": null
+  },
+  {
+    "role": "platform",
+    "route": "/platform/support",
+    "status": 200,
+    "loadMs": 1442,
+    "hasHeading": true,
+    "errorText": null
+  }
+]

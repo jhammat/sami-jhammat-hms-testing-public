@@ -17,7 +17,7 @@ import {
   PracticeServiceCatalogueManagement,
 } from "@/components/services";
 
-import { LiveDoctorAppointments } from "@/components/doctor/live-doctor-appointments";
+import { DoctorAppointmentsPanel } from "@/components/doctor/doctor-portal-workflow";
 
 export default function DoctorSectionPage() {
   const params =
@@ -50,7 +50,7 @@ export default function DoctorSectionPage() {
   }
 
   if (section === "appointments") {
-    return <LiveDoctorAppointments />;
+    return <DoctorAppointmentsPanel />;
   }
 
   /**

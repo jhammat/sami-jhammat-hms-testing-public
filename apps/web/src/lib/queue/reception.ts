@@ -75,22 +75,6 @@ export interface DemoReceptionQueueSnapshot {
   };
 }
 
-export interface CreateDemoReceptionQueueEntryInput {
-  patientId: string;
-  branchId: string;
-  practitionerId: string;
-  businessDate: string;
-  serviceName: string;
-  priority: DemoQueuePriority;
-  sourceReference: string;
-  notes: string;
-  doctorSittingId?: string;
-  roomId?: string;
-  roomLabel?: string;
-  averageConsultationMinutes?: number;
-  snapshot: DemoReceptionQueueSnapshot;
-}
-
 export interface QueueRoomOption {
   id: string;
   label: string;
@@ -147,14 +131,17 @@ export interface DemoQueueEntry {
   snapshot?: DemoReceptionQueueSnapshot;
 }
 
-const DEMO_QUEUE_STORAGE_KEY =
-  "wonflow-demo-reception-queue";
-
 export const QUEUE_UPDATED_EVENT =
   "wonflow:demo-queue-changed";
 
 export const QUEUE_ROOMS_CHANGED_EVENT = "wonflow:queue-rooms-changed";
-const CUSTOM_QUEUE_ROOMS_STORAGE_KEY = "wonflow-custom-queue-rooms";
+
+// In-memory, session-lived state: the doctor's live queue call/skip/finish
+// panel still runs on this demo model (no queue-status-transition endpoints
+// exist yet — see FIX-19 report), so it keeps working, but nothing here
+// survives a reload or is shared across users, unlike real persisted data.
+let demoQueueEntries: DemoQueueEntry[] = [];
+let customQueueRooms: QueueRoomOption[] = [];
 
 export const QUEUE_ROOM_OPTIONS:
   readonly QueueRoomOption[] = [
@@ -201,13 +188,7 @@ export const QUEUE_ROOM_OPTIONS:
   ];
 
 export function readQueueRoomOptions(): QueueRoomOption[] {
-  if (typeof window === "undefined") return [...QUEUE_ROOM_OPTIONS];
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(CUSTOM_QUEUE_ROOMS_STORAGE_KEY) ?? "[]") as QueueRoomOption[];
-    return [...QUEUE_ROOM_OPTIONS, ...stored.filter((room) => room.id && room.label && room.category)];
-  } catch {
-    return [...QUEUE_ROOM_OPTIONS];
-  }
+  return [...QUEUE_ROOM_OPTIONS, ...customQueueRooms];
 }
 
 export function addCustomConsultationRoom(labelInput: string): QueueRoomOption {
@@ -221,9 +202,8 @@ export function addCustomConsultationRoom(labelInput: string): QueueRoomOption {
     label,
     category: "consultation",
   };
-  const customRooms = [...rooms.filter((item) => item.id.startsWith("custom-room-")), room];
-  window.localStorage.setItem(CUSTOM_QUEUE_ROOMS_STORAGE_KEY, JSON.stringify(customRooms));
-  window.dispatchEvent(new Event(QUEUE_ROOMS_CHANGED_EVENT));
+  customQueueRooms = [...customQueueRooms, room];
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(QUEUE_ROOMS_CHANGED_EVENT));
   return room;
 }
 
@@ -288,63 +268,22 @@ function getNextQueueSequence(
 
 export function readDemoQueueEntries():
   DemoQueueEntry[] {
-  if (
-    typeof window === "undefined"
-  ) {
-    return [];
-  }
-
-  const storedValue =
-    window.localStorage.getItem(
-      DEMO_QUEUE_STORAGE_KEY,
-    );
-
-  if (storedValue === null) {
-    return [];
-  }
-
-  try {
-    const parsedValue:
-      unknown =
-      JSON.parse(storedValue);
-
-    if (
-      !Array.isArray(
-        parsedValue,
-      )
-    ) {
-      return [];
-    }
-
-    return parsedValue as
-      DemoQueueEntry[];
-  } catch {
-    return [];
-  }
+  return demoQueueEntries;
 }
 
 export function writeDemoQueueEntries(
   entries:
     readonly DemoQueueEntry[],
 ): void {
-  if (
-    typeof window === "undefined"
-  ) {
-    return;
+  demoQueueEntries = entries.slice(0, 500);
+
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new Event(
+        QUEUE_UPDATED_EVENT,
+      ),
+    );
   }
-
-  window.localStorage.setItem(
-    DEMO_QUEUE_STORAGE_KEY,
-    JSON.stringify(
-      entries.slice(0, 500),
-    ),
-  );
-
-  window.dispatchEvent(
-    new Event(
-      QUEUE_UPDATED_EVENT,
-    ),
-  );
 }
 
 export function createDemoQueueEntryFromAppointment(
@@ -431,79 +370,6 @@ export function createDemoQueueEntryFromAppointment(
     notes: "",
 
     source: "appointment",
-  };
-
-  writeDemoQueueEntries([
-    entry,
-    ...entries,
-  ]);
-
-  return entry;
-}
-
-export function createDemoQueueEntryFromReception(
-  input: CreateDemoReceptionQueueEntryInput,
-): DemoQueueEntry {
-  const entries = readDemoQueueEntries();
-  const normalizedReference =
-    input.sourceReference.trim();
-  const existingEntry = entries.find(
-    (entry) =>
-      entry.sourceReference === normalizedReference &&
-      entry.status !== "cancelled",
-  );
-
-  if (existingEntry !== undefined) {
-    return existingEntry;
-  }
-
-  const sequenceNumber = getNextQueueSequence(
-    entries,
-    input.branchId,
-    input.businessDate,
-  );
-  const waitingAhead = entries.filter(
-    (item) =>
-      item.practitionerId === input.practitionerId &&
-      item.branchId === input.branchId &&
-      item.businessDate === input.businessDate &&
-      (
-        item.status === "waiting" ||
-        item.status === "called" ||
-        item.status === "serving"
-      ),
-  ).length;
-  const estimatedStartAt = input.averageConsultationMinutes === undefined
-    ? undefined
-    : new Date(
-        Date.now() +
-          waitingAhead * input.averageConsultationMinutes * 60_000,
-      ).toISOString();
-
-  const entry: DemoQueueEntry = {
-    id: createQueueIdentifier(),
-    tokenNumber: `Q-${padQueueSequence(sequenceNumber)}`,
-    sequenceNumber,
-    businessDate: input.businessDate,
-    appointmentId: normalizedReference,
-    patientId: input.patientId,
-    branchId: input.branchId,
-    practitionerId: input.practitionerId,
-    serviceName: input.serviceName,
-    priority: input.priority,
-    status: "waiting",
-
-    checkedInAt: new Date().toISOString(),
-    notes: input.notes.trim(),
-    doctorSittingId: input.doctorSittingId,
-    roomId: input.roomId,
-    roomLabel: input.roomLabel,
-    estimatedStartAt,
-    averageConsultationMinutes:
-      input.averageConsultationMinutes,
-    source: "reception-desk",
-    sourceReference: normalizedReference,
-    snapshot: input.snapshot,
   };
 
   writeDemoQueueEntries([

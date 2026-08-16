@@ -57,10 +57,17 @@ export class WonFlowRequestContextError
   readonly code:
     WonFlowRequestContextErrorCode;
 
+  // Carried so the HTTP layer can write a denial to the audit log without
+  // every one of requirePermission's call sites doing it themselves — see
+  // handleApiRoute in apps/web/src/server/http/route-handler.ts.
+  readonly context?: WonFlowRequestContext;
+  readonly permissionCode?: string;
+
   constructor(
     code:
       WonFlowRequestContextErrorCode,
     message: string,
+    detail?: { context?: WonFlowRequestContext; permissionCode?: string },
   ) {
     super(
       message,
@@ -71,6 +78,9 @@ export class WonFlowRequestContextError
 
     this.code =
       code;
+
+    this.context = detail?.context;
+    this.permissionCode = detail?.permissionCode;
   }
 }
 
@@ -248,6 +258,7 @@ export function requirePermission(
     throw new WonFlowRequestContextError(
       "permission-required",
       `Permission "${permissionCode}" is required.`,
+      { context, permissionCode },
     );
   }
 }

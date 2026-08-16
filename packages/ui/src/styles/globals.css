@@ -52,7 +52,16 @@
   *, *::before, *::after { box-sizing: border-box; border-color: var(--line); }
   html { background: var(--surface); color: var(--ink-700); font-family: var(--font-sans); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
   body { min-height: 100%; margin: 0; background: var(--surface); color: var(--ink-700); font: inherit; }
-  h1, h2, h3, h4, h5, h6 { color: var(--ink-900); font-weight: 600; line-height: 1.25; }
+  /* `inherit`, not a hardcoded dark color: many screens put a heading
+     directly inside a dark gradient banner and set `text-white` on that
+     wrapper, expecting it to cascade down. A fixed color here silently wins
+     over that inherited value regardless of the wrapper's own color, which
+     made every such heading render near-invisible (dark-on-dark). `body`
+     above already provides the default dark color for the common case
+     (headings on a plain light background), so this still inherits that
+     correctly — only a wrapper that explicitly opts into a different color
+     changes anything. */
+  h1, h2, h3, h4, h5, h6 { color: inherit; font-weight: 600; line-height: 1.25; }
   button, input, textarea, select { font: inherit; }
   button:not(:disabled), [role="button"]:not([aria-disabled="true"]) { cursor: pointer; }
   ::placeholder { color: var(--ink-400); }

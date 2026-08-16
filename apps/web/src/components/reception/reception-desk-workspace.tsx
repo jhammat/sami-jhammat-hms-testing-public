@@ -19,6 +19,7 @@ import {
   bookReceptionAppointment,
   checkInReceptionAppointment,
   createReceptionDiagnosticOrders,
+  getReceptionOverview,
   registerReceptionPatient,
   searchReceptionPatients,
 } from "@/lib/api/reception-api";
@@ -26,17 +27,8 @@ import type { ReceptionPatient } from "@/lib/api/reception-api";
 import { phaseOneApi } from "@/lib/api/phase-one-api";
 
 import {
-  createDemoQueueEntryFromReception,
-  readDemoQueueEntries,
-} from "@/lib/queue";
-
-import {
   useWonFlowAsyncData,
 } from "@/lib/data";
-
-import type {
-  DemoQueuePriority,
-} from "@/lib/queue";
 
 import {
   DOCTOR_SITTINGS_CHANGED_EVENT,
@@ -181,6 +173,7 @@ interface AdditionalService {
   custom?: boolean;
   doctorId?: string | null;
   branchId?: string | null;
+  consultationMode?: "IN_PERSON" | "ONLINE";
 }
 
 interface RecentAppointment {
@@ -1021,6 +1014,13 @@ export function ReceptionDeskWorkspace() {
     selectedDoctorId,
     setSelectedDoctorId,
   ] = useState("");
+
+  /** "Do you want an online consultation or in person?" — asked before the service list, since it decides which services are even eligible. */
+  const [
+    consultationMode,
+    setConsultationMode,
+  ] = useState<"IN_PERSON" | "ONLINE">("IN_PERSON");
+
   const [roomRevision, setRoomRevision] = useState(0);
 
   useEffect(() => {
@@ -1337,7 +1337,12 @@ export function ReceptionDeskWorkspace() {
     );
   }, [directories.data?.services, selectedDoctor]);
   const doctorServices = availableServices.filter(
-    (service) => selectedDoctor !== null && service.doctorId === selectedDoctor.id,
+    (service) =>
+      selectedDoctor !== null &&
+      service.doctorId === selectedDoctor.id &&
+      // Services without a recorded mode predate this field and are treated
+      // as in-person-only rather than silently matching either choice.
+      (service.consultationMode ?? "IN_PERSON") === consultationMode,
   );
 
   const isDiagnosticCategory = (category: string) => {
@@ -1396,7 +1401,6 @@ export function ReceptionDeskWorkspace() {
   const selectedConsultationService = selectedServices.find(
     (service) => selectedDoctor !== null && service.doctorId === selectedDoctor.id,
   );
-  const consultationType = selectedConsultationService?.name ?? "Consultation";
 
   const billingItems =
     useMemo(
@@ -2266,13 +2270,6 @@ export function ReceptionDeskWorkspace() {
       return;
     }
 
-    const priority: DemoQueuePriority = "routine";
-    const paymentStatus =
-      paymentMethod === "Unpaid"
-        ? "unpaid"
-        : balance > 0
-          ? "partial"
-          : "paid";
     const businessDate =
       visitPurpose === "OPD Walk-in"
         ? getToday()
@@ -2324,13 +2321,44 @@ export function ReceptionDeskWorkspace() {
         endsAt: endsAt.toISOString(),
         reason: consultationReason.trim() || undefined,
         source: "reception",
+        consultationMode,
         idempotencyKey: nextSourceReference,
       });
-      await checkInReceptionAppointment(appointment.id, {
+      const { queueEntry: bookedQueueEntry } = await checkInReceptionAppointment(appointment.id, {
         queueDate: businessDate,
         priority: 0,
         notes: billingNotes || undefined,
       });
+
+      // The real queue row already exists (created above, inside the check-in
+      // transaction). Reload the branch's queue for this date to compute this
+      // patient's position among the doctor's still-waiting entries — the
+      // same ordering (priority desc, token asc) the server itself uses.
+      const { overview } = await getReceptionOverview(businessDate);
+      const doctorQueue = overview.queue
+        .filter(
+          (entry) =>
+            entry.appointment?.doctorId === selectedDoctor.id &&
+            entry.status === "WAITING",
+        )
+        .sort(
+          (left, right) =>
+            right.priority - left.priority || left.tokenNumber - right.tokenNumber,
+        );
+      const position = Math.max(
+        1,
+        doctorQueue.findIndex((entry) => entry.id === bookedQueueEntry.id) + 1,
+      );
+
+      setQueueSourceReference(nextSourceReference);
+      setCreatedQueueEntryId(bookedQueueEntry.id);
+      setIssuedToken(`Q-${String(bookedQueueEntry.tokenNumber).padStart(3, "0")}`);
+      setQueuePosition(position);
+      setEstimatedWaitMinutes(
+        Math.max(0, position - 1) *
+          (activeSitting?.averageConsultationMinutes ?? 0),
+      );
+      setIssuedRoomLabel(activeSitting?.roomLabel ?? "");
     } catch (caught) {
       setActionError(
         caught instanceof Error
@@ -2341,98 +2369,6 @@ export function ReceptionDeskWorkspace() {
       return;
     }
     setIsBookingLive(false);
-
-    const queueEntry =
-      createDemoQueueEntryFromReception({
-        patientId: selectedPatient.id,
-        branchId: selectedDoctor.primaryBranchId,
-        practitionerId: selectedDoctor.id,
-        businessDate,
-        serviceName: [
-          visitPurpose,
-          consultationType,
-        ].join(" · "),
-        priority,
-        sourceReference: nextSourceReference,
-        notes: billingNotes,
-        doctorSittingId: activeSitting?.id,
-        roomId: activeSitting?.roomId,
-        roomLabel: activeSitting?.roomLabel,
-        averageConsultationMinutes:
-          activeSitting?.averageConsultationMinutes,
-        snapshot: {
-          patient: {
-            displayName: selectedPatient.fullName,
-            mrNumber: selectedPatient.mrNumber,
-            identityType: selectedPatient.identityType,
-            identityNumber: selectedPatient.identityNumber,
-            mobileNumber: selectedPatient.mobile,
-            gender: selectedPatient.gender,
-            ageYears: selectedPatient.age,
-            dateOfBirth: selectedPatient.dateOfBirth,
-            ageIsEstimated: useEstimatedAge,
-            bloodGroup: selectedPatient.bloodGroup,
-            allergies: selectedPatient.allergies,
-            medicalAlert: selectedPatient.medicalAlert,
-          },
-          practitioner: {
-            displayName: selectedDoctor.name,
-            specialtyName: selectedDoctor.specialty,
-          },
-          visit: {
-            purpose: visitPurpose,
-            consultationType,
-            reasonForVisit: consultationReason.trim(),
-            appointmentDate: businessDate,
-            appointmentTime,
-            services: billingItems.map((item) => ({
-              id: item.id,
-              name: item.name,
-              category: item.category,
-              price: item.price,
-            })),
-          },
-          billing: {
-            currencyCode: "PKR",
-            subtotal,
-            discount: calculatedDiscount,
-            total: totalPayable,
-            received,
-            balance,
-            change,
-            paymentMethod,
-            paymentStatus,
-          },
-        },
-      });
-
-    setQueueSourceReference(nextSourceReference);
-    setCreatedQueueEntryId(queueEntry.id);
-    setIssuedToken(queueEntry.tokenNumber);
-    const doctorQueue = readDemoQueueEntries()
-      .filter(
-        (entry) =>
-          entry.practitionerId === selectedDoctor.id &&
-          entry.businessDate === businessDate &&
-          entry.status !== "completed" &&
-          entry.status !== "cancelled",
-      )
-      .sort(
-        (left, right) =>
-          left.sequenceNumber - right.sequenceNumber,
-      );
-    const position = Math.max(
-      1,
-      doctorQueue.findIndex(
-        (entry) => entry.id === queueEntry.id,
-      ) + 1,
-    );
-    setQueuePosition(position);
-    setEstimatedWaitMinutes(
-      Math.max(0, position - 1) *
-        (activeSitting?.averageConsultationMinutes ?? 0),
-    );
-    setIssuedRoomLabel(queueEntry.roomLabel ?? "");
     setActionError("");
     setAppointmentPrepared(true);
     setConfirmationOpen(true);
@@ -3567,6 +3503,51 @@ export function ReceptionDeskWorkspace() {
                     </div>
                   ) : null}
               
+                  {requiresDoctorRouting &&
+                  visitPurpose !== "Admission / IPD" ? (
+                    <div className="mt-3 wf-form-field block min-w-0">
+                      {/*
+                        Not Field/<label>: two independent toggle buttons
+                        wrapped in one <label> produced a single merged
+                        accessible name across both buttons instead of two
+                        distinct ones. A labelled radiogroup keeps the same
+                        look with a screen reader announcing each button
+                        correctly.
+                      */}
+                      <span className="wf-field-label mb-1.5 flex items-center gap-1 text-[10px] font-extrabold text-slate-700" id="consultation-type-label">
+                        Consultation type
+                      </span>
+                      <div aria-labelledby="consultation-type-label" className="grid grid-cols-2 gap-2" role="radiogroup">
+                        <button
+                          aria-checked={consultationMode === "IN_PERSON"}
+                          className={`h-9 rounded-xl border text-[11px] font-black transition ${consultationMode === "IN_PERSON" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
+                          onClick={() => {
+                            setConsultationMode("IN_PERSON");
+                            setSelectedServiceIds([]);
+                            setAppointmentPrepared(false);
+                          }}
+                          role="radio"
+                          type="button"
+                        >
+                          In person
+                        </button>
+                        <button
+                          aria-checked={consultationMode === "ONLINE"}
+                          className={`h-9 rounded-xl border text-[11px] font-black transition ${consultationMode === "ONLINE" ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300"}`}
+                          onClick={() => {
+                            setConsultationMode("ONLINE");
+                            setSelectedServiceIds([]);
+                            setAppointmentPrepared(false);
+                          }}
+                          role="radio"
+                          type="button"
+                        >
+                          Online video
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
+
                   {requiresDoctorRouting &&
                   visitPurpose !==
                     "OPD Walk-in" ? (

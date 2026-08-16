@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { DOCTOR_SITTINGS_CHANGED_EVENT } from "./sittings";
+import { DOCTOR_SITTINGS_CHANGED_EVENT } from "./legacy-local-sitting-cache";
 
 export interface LiveDoctorSitting {
   id: string;

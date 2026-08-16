@@ -1,3 +1,5 @@
+import type { RegisterPatientInput } from "@/lib/api/patients";
+
 export type PatientRegistrationGender =
   | "female"
   | "male"
@@ -73,6 +75,12 @@ export type PatientRegistrationErrors =
     >
   >;
 
+/**
+ * A saved patient, as every patient screen renders it — the shape returned
+ * for a newly registered patient, and the shape every patient in the
+ * directory is mapped into. `id` and `mrNumber` are always server-assigned;
+ * nothing in this codebase generates them in the browser.
+ */
 export interface DemoPatientRegistrationResult {
   id: string;
   mrNumber: string;
@@ -84,9 +92,6 @@ export interface DemoPatientRegistrationResult {
   draft:
     PatientRegistrationDraft;
 }
-
-const DEMO_PATIENT_STORAGE_KEY =
-  "wonflow-demo-patient-registrations";
 
 export function createInitialPatientRegistrationDraft(
   branchId: string,
@@ -395,180 +400,131 @@ export function validatePatientRegistration(
   return errors;
 }
 
-function generatePatientIdentifier():
-  string {
-  if (
-    typeof globalThis.crypto
-      ?.randomUUID === "function"
-  ) {
-    return globalThis.crypto
-      .randomUUID();
-  }
+/**
+ * The Patient record has separate givenName/familyName columns, but this
+ * form (like the reception quick-add flow) collects one combined identity
+ * name with no dedicated surname field. The last word of the combined name
+ * becomes the family name, matching the convention already used at
+ * reception; a single-word name has no family name.
+ */
+function splitPatientName(
+  displayName: string,
+): { givenName: string; familyName: string } {
+  const parts = displayName
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
 
-  return [
-    "demo-patient",
-    Date.now(),
-    Math.random()
-      .toString(36)
-      .slice(2),
-  ].join("-");
-}
+  const givenName =
+    parts.shift() ?? "";
 
-function generateMrNumber():
-  string {
-  const year =
-    new Date().getFullYear();
+  const familyName =
+    parts.length > 0
+      ? (parts.pop() as string)
+      : "";
 
-  const randomPart =
-    Math.floor(
-      100000 +
-      Math.random() * 900000,
-    );
-
-  return `MR-${year}-${randomPart}`;
-}
-
-export function createDemoPatientRegistration(
-  draft:
-    PatientRegistrationDraft,
-): DemoPatientRegistrationResult {
   return {
-    id:
-      generatePatientIdentifier(),
-
-    mrNumber:
-      generateMrNumber(),
-
-    displayName:
-      buildPatientDisplayName(
-        draft,
-      ),
-
-    registeredAt:
-      new Date().toISOString(),
-
-    draft: {
-      ...draft,
-
-      cnicNumber:
-        formatPatientCnic(
-          draft.cnicNumber,
-        ),
-
-      mobileNumber:
-        normalizePatientPhone(
-          draft.mobileNumber,
-        ),
-
-      alternateMobileNumber:
-        normalizePatientPhone(
-          draft
-            .alternateMobileNumber,
-        ),
-
-      emergencyContactPhone:
-        normalizePatientPhone(
-          draft
-            .emergencyContactPhone,
-        ),
-    },
+    givenName:
+      [givenName, ...parts]
+        .filter(Boolean)
+        .join(" "),
+    familyName,
   };
 }
 
-export function persistDemoPatientRegistration(
-  registration:
-    DemoPatientRegistrationResult,
-): void {
-  if (
-    typeof window === "undefined"
-  ) {
-    return;
-  }
-
-  const existingValue =
-    window.localStorage.getItem(
-      DEMO_PATIENT_STORAGE_KEY,
+/**
+ * Shapes the registration form into the POST body. All persistence,
+ * patient-number generation and duplicate detection happen server-side —
+ * this function only normalizes and reorganizes what the person typed.
+ */
+export function buildRegisterPatientPayload(
+  draft:
+    PatientRegistrationDraft,
+): RegisterPatientInput {
+  const { givenName, familyName } =
+    splitPatientName(
+      buildPatientDisplayName(draft),
     );
 
-  let registrations:
-    DemoPatientRegistrationResult[] =
-    [];
+  return {
+    givenName,
+    familyName,
+    middleName:
+      draft.middleName.trim() ||
+      undefined,
 
-  if (existingValue !== null) {
-    try {
-      const parsedValue:
-        unknown =
-        JSON.parse(
-          existingValue,
-        );
+    dateOfBirth:
+      draft.dateOfBirth || undefined,
 
-      if (
-        Array.isArray(
-          parsedValue,
-        )
-      ) {
-        registrations =
-          parsedValue as
-            DemoPatientRegistrationResult[];
-      }
-    } catch {
-      registrations = [];
-    }
-  }
+    sex:
+      draft.gender === "unknown"
+        ? undefined
+        : draft.gender,
 
-  const updatedRegistrations =
-    [
-      registration,
-      ...registrations,
-    ].slice(0, 50);
-
-  window.localStorage.setItem(
-    DEMO_PATIENT_STORAGE_KEY,
-    JSON.stringify(
-      updatedRegistrations,
+    phone: normalizePatientPhone(
+      draft.mobileNumber,
     ),
-  );
 
-  window.dispatchEvent(
-    new Event(
-      "wonflow:demo-patients-changed",
-    ),
-  );
-}
+    alternateMobileNumber:
+      draft.alternateMobileNumber ===
+      ""
+        ? undefined
+        : normalizePatientPhone(
+            draft.alternateMobileNumber,
+          ),
 
-export function readDemoPatientRegistrations():
-  DemoPatientRegistrationResult[] {
-  if (
-    typeof window === "undefined"
-  ) {
-    return [];
-  }
+    email:
+      draft.emailAddress || undefined,
 
-  const storedValue =
-    window.localStorage.getItem(
-      DEMO_PATIENT_STORAGE_KEY,
-    );
+    fatherName: draft.fatherName,
 
-  if (storedValue === null) {
-    return [];
-  }
+    bloodGroup:
+      draft.bloodGroup || undefined,
 
-  try {
-    const parsedValue:
-      unknown =
-      JSON.parse(storedValue);
+    patientCategory:
+      draft.patientCategory,
 
-    if (
-      !Array.isArray(
-        parsedValue,
-      )
-    ) {
-      return [];
-    }
+    preferredLanguage:
+      draft.preferredLanguage,
 
-    return parsedValue as
-      DemoPatientRegistrationResult[];
-  } catch {
-    return [];
-  }
+    city: draft.city || undefined,
+
+    addressLine:
+      draft.addressLine || undefined,
+
+    emergencyContactName:
+      draft.emergencyContactName ||
+      undefined,
+
+    emergencyContactRelation:
+      draft.emergencyContactRelation ||
+      undefined,
+
+    emergencyContactPhone:
+      draft.emergencyContactPhone ===
+      ""
+        ? undefined
+        : normalizePatientPhone(
+            draft.emergencyContactPhone,
+          ),
+
+    referralSource:
+      draft.referralSource,
+
+    notes: draft.notes || undefined,
+
+    consentToContact:
+      draft.consentToContact,
+
+    identifiers: [
+      {
+        type: "cnic",
+        system: "cnic",
+        value: formatPatientCnic(
+          draft.cnicNumber,
+        ),
+        isPrimary: true,
+      },
+    ],
+  };
 }

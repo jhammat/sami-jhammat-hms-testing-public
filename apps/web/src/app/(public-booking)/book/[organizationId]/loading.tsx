@@ -1,1 +1,0 @@
-export default function Loading(){return <main aria-busy="true" aria-label="Loading booking options" className="mx-auto max-w-4xl space-y-5 px-4 py-6"><div className="h-44 animate-pulse rounded-[1.75rem] bg-slate-900"/><div className="h-12 animate-pulse rounded-xl bg-slate-200"/><div className="h-96 animate-pulse rounded-2xl bg-slate-200"/></main>}

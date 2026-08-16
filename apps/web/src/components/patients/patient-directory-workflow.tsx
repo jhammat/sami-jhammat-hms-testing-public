@@ -13,6 +13,12 @@ import type {
 } from "@wonflow/mock-data";
 
 import {
+  DataEmpty,
+  DataError,
+  DataLoading,
+} from "@wonflow/ui";
+
+import {
   useWonFlowHospitalService,
 } from "@/app/_providers";
 
@@ -34,13 +40,23 @@ import {
 } from "@/lib/data";
 
 import {
-  calculatePatientDirectoryStatistics,
+  useApiResource,
+} from "@/lib/api";
+
+import type {
+  ListPatientsQuery,
+} from "@/lib/api/patients";
+
+import {
   createInitialPatientDirectoryFilters,
-  filterAndSortPatientRegistrations,
-  fetchDirectoryPatients,
+  fetchDirectoryPage,
   getDemoPatientRegistrationAge,
-  readDemoPatientRegistrations,
+  primeLegacyPatientDirectoryCache,
   removeDirectoryPatient,
+} from "@/lib/patients";
+
+import type {
+  DirectoryPage,
 } from "@/lib/patients";
 
 import type {
@@ -300,13 +316,6 @@ function PatientDirectoryContent({
   branches,
 }: PatientDirectoryContentProps) {
   const [
-    registrations,
-    setRegistrations,
-  ] = useState<
-    DemoPatientRegistrationResult[]
-  >([]);
-
-  const [
     filters,
     setFilters,
   ] = useState<
@@ -315,51 +324,91 @@ function PatientDirectoryContent({
     createInitialPatientDirectoryFilters,
   );
 
+  // Debounced so the server is queried after typing pauses, not on every
+  // keystroke.
+  const [
+    debouncedQuery,
+    setDebouncedQuery,
+  ] = useState("");
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedQuery(filters.query);
+    }, 300);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [filters.query]);
+
+  const [page, setPage] = useState(1);
+  const pageSize = 25;
+
+  // A changed search term or filter always starts back at page 1.
+  useEffect(() => {
+    queueMicrotask(() => {
+      setPage(1);
+    });
+  }, [
+    debouncedQuery,
+    filters.gender,
+    filters.minimumAge,
+    filters.maximumAge,
+    filters.sort,
+  ]);
+
   const [
     selectedPatientId,
     setSelectedPatientId,
-  ] = useState("");
+  ] = useState(
+    () =>
+      typeof window === "undefined"
+        ? ""
+        : new URLSearchParams(window.location.search).get("patientId") ?? "",
+  );
 
   const [removingId, setRemovingId] = useState("");
   const [removeError, setRemoveError] = useState("");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const { confirm, dialog: confirmDialog } = useWonFlowConfirm();
 
+  const listQuery = useMemo<ListPatientsQuery>(
+    () => ({
+      query: debouncedQuery.trim() || undefined,
+      gender: filters.gender === "all" ? undefined : filters.gender,
+      minimumAge: filters.minimumAge.trim() === "" ? undefined : Number(filters.minimumAge),
+      maximumAge: filters.maximumAge.trim() === "" ? undefined : Number(filters.maximumAge),
+      sort: filters.sort,
+      page,
+      pageSize,
+    }),
+    [
+      debouncedQuery,
+      filters.gender,
+      filters.maximumAge,
+      filters.minimumAge,
+      filters.sort,
+      page,
+    ],
+  );
+
+  const directory = useApiResource<DirectoryPage>({
+    key: `patient-directory:${JSON.stringify(listQuery)}`,
+    tags: ["patients"],
+    fetcher: (signal) => fetchDirectoryPage(listQuery, signal),
+    isEmpty: (result) => result.patients.length === 0,
+  });
+
+  const registrations = directory.data?.patients ?? [];
+  const directoryData = directory.data;
+
+  // Screens not yet wired to the live API (billing, diagnostics, pharmacy)
+  // resolve a patient by id from this in-memory cache; keep it warm.
   useEffect(() => {
-    const reloadPatients = () => {
-      // Live tenant records first; demo registrations remain a fallback for
-      // workspaces still running on browser-stored data.
-      void fetchDirectoryPatients()
-        .then(setRegistrations)
-        .catch(() => setRegistrations(readDemoPatientRegistrations()));
-    };
-
-    queueMicrotask(
-      reloadPatients,
-    );
-
-    window.addEventListener(
-      "wonflow:demo-patients-changed",
-      reloadPatients,
-    );
-
-    window.addEventListener(
-      "storage",
-      reloadPatients,
-    );
-
-    return () => {
-      window.removeEventListener(
-        "wonflow:demo-patients-changed",
-        reloadPatients,
-      );
-
-      window.removeEventListener(
-        "storage",
-        reloadPatients,
-      );
-    };
-  }, []);
+    if (directoryData !== undefined && directoryData.patients.length > 0) {
+      primeLegacyPatientDirectoryCache(directoryData.patients);
+    }
+  }, [directoryData]);
 
   const branchesById =
     useMemo(
@@ -375,39 +424,12 @@ function PatientDirectoryContent({
       [branches],
     );
 
-  const filteredRegistrations =
-    useMemo(
-      () =>
-        filterAndSortPatientRegistrations(
-          registrations,
-          filters,
-        ),
-      [
-        filters,
-        registrations,
-      ],
-    );
-
-  const statistics =
-    useMemo(
-      () =>
-        calculatePatientDirectoryStatistics(
-          registrations,
-          filteredRegistrations,
-        ),
-      [
-        filteredRegistrations,
-        registrations,
-      ],
-    );
-
   const selectedPatient =
     registrations.find(
       (registration) =>
         registration.id ===
         selectedPatientId,
     ) ??
-    filteredRegistrations[0] ??
     registrations[0];
 
   function updateFilter<
@@ -432,12 +454,6 @@ function PatientDirectoryContent({
     );
   }
 
-  function reloadPatients() {
-    void fetchDirectoryPatients()
-      .then(setRegistrations)
-      .catch(() => setRegistrations(readDemoPatientRegistrations()));
-  }
-
   async function removePatient(patient: DemoPatientRegistrationResult) {
     const confirmed = await confirm({
       title: "Remove patient",
@@ -449,8 +465,8 @@ function PatientDirectoryContent({
     setRemoveError("");
     try {
       await removeDirectoryPatient(patient.id);
-      setRegistrations((current) => current.filter((entry) => entry.id !== patient.id));
       setSelectedPatientId("");
+      directory.reload();
     } catch (caught) {
       setRemoveError(caught instanceof Error ? caught.message : "The patient could not be removed.");
     } finally {
@@ -501,11 +517,11 @@ function PatientDirectoryContent({
                   the table below. */}
               {filters.query.trim() !== "" ? (
                 <div className="absolute left-0 right-0 top-full z-20 mt-1.5 overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-[0_18px_44px_rgba(79,70,229,0.16)]">
-                  {filteredRegistrations.length === 0 ? (
+                  {registrations.length === 0 ? (
                     <p className="px-4 py-3 text-xs font-semibold text-slate-500">No patient matches “{filters.query.trim()}”.</p>
                   ) : (
                     <ul className="max-h-72 overflow-y-auto">
-                      {filteredRegistrations.slice(0, 8).map((registration) => (
+                      {registrations.slice(0, 8).map((registration) => (
                         <li key={registration.id}>
                           <button
                             className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-indigo-50 ${registration.id === selectedPatientId ? "bg-indigo-50/70" : ""}`}
@@ -528,9 +544,9 @@ function PatientDirectoryContent({
                       ))}
                     </ul>
                   )}
-                  {filteredRegistrations.length > 8 ? (
+                  {registrations.length > 8 ? (
                     <p className="border-t border-slate-100 px-4 py-2 text-[10px] font-bold text-slate-500">
-                      Showing 8 of {filteredRegistrations.length} matches — refine the search or use the list below.
+                      Showing 8 of {registrations.length} matches — refine the search or use the list below.
                     </p>
                   ) : null}
                 </div>
@@ -578,7 +594,7 @@ function PatientDirectoryContent({
           <WonFlowActionButton
             icon={<RefreshIcon />}
             onClick={
-              reloadPatients
+              directory.reload
             }
             variant="primary"
           >
@@ -603,7 +619,7 @@ function PatientDirectoryContent({
           </>
         }
         summary={
-          `${statistics.filteredPatients} of ${statistics.totalPatients} patients`
+          `${directory.data?.total ?? 0} of ${directory.data?.summary.totalPatients ?? 0} patients`
         }
         title="Patient Search"
       />
@@ -763,11 +779,10 @@ function PatientDirectoryContent({
       {/* A single strip instead of four cards: the same counts, one row tall. */}
       <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-indigo-100 bg-white/80 px-3 py-2 shadow-sm">
         {[
-          { label: "Total", value: statistics.totalPatients, tone: "text-indigo-700 bg-indigo-50" },
-          { label: "Matching", value: statistics.filteredPatients, tone: "text-violet-700 bg-violet-50" },
-          { label: "Male", value: statistics.malePatients, tone: "text-emerald-700 bg-emerald-50" },
-          { label: "Female", value: statistics.femalePatients, tone: "text-rose-700 bg-rose-50" },
-          { label: "Insured / corporate", value: statistics.insurancePatients, tone: "text-sky-700 bg-sky-50" },
+          { label: "Total", value: directory.data?.summary.totalPatients ?? 0, tone: "text-indigo-700 bg-indigo-50" },
+          { label: "Matching", value: directory.data?.total ?? 0, tone: "text-violet-700 bg-violet-50" },
+          { label: "Male", value: directory.data?.summary.malePatients ?? 0, tone: "text-emerald-700 bg-emerald-50" },
+          { label: "Female", value: directory.data?.summary.femalePatients ?? 0, tone: "text-rose-700 bg-rose-50" },
         ].map((stat) => (
           <span className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-bold ${stat.tone}`} key={stat.label}>
             {stat.label}
@@ -776,24 +791,56 @@ function PatientDirectoryContent({
         ))}
       </div>
 
-      {registrations.length ===
-      0 ? (
+      {directory.status ===
+      "loading" ? (
+        <WonFlowOperationalPanel
+          description="Loading the patient directory."
+          title="Registered Patients"
+          tone="blue"
+        >
+          <DataLoading
+            label="Loading patients"
+            rows={8}
+            shape="table"
+          />
+        </WonFlowOperationalPanel>
+      ) : directory.status ===
+        "error" ? (
+        <DataError
+          detail={
+            directory.error
+              ?.message
+          }
+          onRetry={
+            directory.reload
+          }
+          what="the patient directory"
+        />
+      ) : directory.status ===
+          "empty" &&
+        (
+          directory.data
+            ?.summary
+            .totalPatients ??
+          0
+        ) === 0 ? (
         <WonFlowOperationalPanel
           description="No patients are registered for this hospital yet."
           title="No Registered Patients"
           tone="amber"
         >
-          <WonFlowEmptyState
-            description="Register a patient first to create the patient directory."
+          <DataEmpty
+            action={
+              <Link
+                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700"
+                href="/operations/patients/register"
+              >
+                Register First Patient
+              </Link>
+            }
+            itemLabel="patients"
             title="No patient records"
           />
-
-          <Link
-            className="mt-4 inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700"
-            href="/operations/patients/register"
-          >
-            Register First Patient
-          </Link>
         </WonFlowOperationalPanel>
       ) : (
         <div className="wf-workflow-split">
@@ -804,16 +851,23 @@ function PatientDirectoryContent({
             status={
               <StatusBadge
                 className="bg-blue-50 text-blue-700 ring-blue-100"
-                label={`${filteredRegistrations.length} records`}
+                label={`${registrations.length} records`}
               />
             }
             title="Registered Patients"
             tone="blue"
           >
-            {filteredRegistrations.length ===
+            {registrations.length ===
             0 ? (
-              <WonFlowEmptyState
+              <DataEmpty
+                action={{
+                  label:
+                    "Clear filters",
+                  onClick:
+                    clearFilters,
+                }}
                 description="No patient matches the selected search and filters."
+                itemLabel="matching patients"
                 title="No matching patients"
               />
             ) : (
@@ -859,7 +913,7 @@ function PatientDirectoryContent({
                     </thead>
 
                     <tbody>
-                      {filteredRegistrations.map(
+                      {registrations.map(
                         (
                           registration,
                         ) => {
@@ -1021,7 +1075,7 @@ function PatientDirectoryContent({
                 </div>
 
                 <div className="max-h-[26rem] space-y-3 overflow-auto lg:hidden">
-                  {filteredRegistrations.map(
+                  {registrations.map(
                     (
                       registration,
                     ) => {
@@ -1150,6 +1204,72 @@ function PatientDirectoryContent({
               </>
             )}
             </WonFlowOperationalPanel>
+
+            {directory.data !==
+              undefined &&
+            directory.data.total >
+              pageSize ? (
+              <nav
+                aria-label="Patient directory pagination"
+                className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-indigo-100 bg-white/80 px-3 py-2 text-xs font-bold text-slate-600 shadow-sm"
+              >
+                <button
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={
+                    page <= 1
+                  }
+                  onClick={() => {
+                    setPage(
+                      (current) =>
+                        Math.max(
+                          1,
+                          current -
+                            1,
+                        ),
+                    );
+                  }}
+                  type="button"
+                >
+                  Previous
+                </button>
+
+                <span>
+                  Page {directory.data.page} of{" "}
+                  {Math.max(
+                    1,
+                    Math.ceil(
+                      directory
+                        .data
+                        .total /
+                        pageSize,
+                    ),
+                  )}
+                </span>
+
+                <button
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={
+                    directory
+                      .data
+                      .page *
+                      pageSize >=
+                    directory
+                      .data
+                      .total
+                  }
+                  onClick={() => {
+                    setPage(
+                      (current) =>
+                        current +
+                        1,
+                    );
+                  }}
+                  type="button"
+                >
+                  Next
+                </button>
+              </nav>
+            ) : null}
           </div>
 
           <aside className="wf-workflow-aside space-y-3 xl:sticky xl:top-4 xl:self-start">

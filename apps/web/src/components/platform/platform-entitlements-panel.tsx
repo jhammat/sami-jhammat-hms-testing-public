@@ -17,7 +17,7 @@ import {
 import {
   PLATFORM_MODULE_CATALOG,
   usePlatformAdministration,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 import {
   PlatformEmptyState,
   PlatformLoadingState,

@@ -10,6 +10,8 @@ import {
   Send,
   Stethoscope,
   TestTube,
+  Trash2,
+  Upload,
   UserRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -31,6 +33,17 @@ export interface DiagnosticResult {
   delivery: { patient: boolean; clinician: boolean };
 }
 
+export interface DiagnosticAttachment {
+  id: string;
+  title: string;
+  contentType: string;
+  sizeBytes: string;
+  objectStatus: string;
+  uploadedByMembershipId: string | null;
+  uploadedByPatient: boolean;
+  createdAt: string;
+}
+
 export interface DiagnosticOrder {
   id: string;
   accessionNumber: string | null;
@@ -44,6 +57,7 @@ export interface DiagnosticOrder {
   patient: { patientNumber: string; givenName: string; middleName: string | null; familyName: string };
   specimens: Array<{ id: string; specimenType: string; accessionNumber: string }>;
   results: DiagnosticResult[];
+  attachments: DiagnosticAttachment[];
 }
 
 export const patientNameOf = (patient: DiagnosticOrder["patient"]) =>
@@ -95,6 +109,119 @@ export function DeliveryBadges({ result }: { result: DiagnosticResult }) {
         {result.delivery.clinician ? "Sent to doctor" : "Doctor pending"}
       </Pill>
     </span>
+  );
+}
+
+function formatBytes(sizeBytes: string): string {
+  const bytes = Number(sizeBytes);
+  if (!Number.isFinite(bytes) || bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
+ * Scan images, photos of a printed report, or PDFs attached to this order --
+ * uploaded by the ordering doctor, lab/radiology staff, or the patient
+ * (`uploadedByPatient`). Shared by the staff result-entry screen (which can
+ * delete) and the doctor's own results view (which can only add and view).
+ */
+export function DiagnosticAttachmentsPanel({
+  orderId,
+  attachments,
+  canDelete,
+  onChange,
+}: {
+  orderId: string;
+  attachments: DiagnosticAttachment[];
+  canDelete: boolean;
+  onChange: () => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [localError, setLocalError] = useState("");
+
+  const upload = useCallback(async (file: File) => {
+    setUploading(true);
+    setLocalError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(`/api/v1/diagnostics/orders/${encodeURIComponent(orderId)}/attachments`, { method: "POST", credentials: "same-origin", body: form });
+      if (!response.ok) throw new Error(await readApiError(response));
+      const body = await response.json() as { scanResult?: string };
+      if (body.scanResult === "INFECTED") throw new Error("This file failed a security scan and was not attached.");
+      onChange();
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : "The file could not be attached.");
+    } finally {
+      setUploading(false);
+    }
+  }, [orderId, onChange]);
+
+  async function remove(documentId: string) {
+    setBusyId(documentId);
+    setLocalError("");
+    try {
+      const response = await fetch(`/api/v1/diagnostics/orders/${encodeURIComponent(orderId)}/attachments/${encodeURIComponent(documentId)}`, { method: "DELETE", credentials: "same-origin" });
+      if (!response.ok) throw new Error(await readApiError(response));
+      onChange();
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : "The attachment could not be removed.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="text-lg font-black text-slate-900">Images and files</h2>
+      <p className="mt-1 text-sm text-slate-500">Scan images, photos of a printed report, or PDFs — from the ordering doctor, this department, or the patient.</p>
+      {attachments.length ? (
+        <ul className="mt-3 space-y-2">
+          {attachments.map((attachment) => (
+            <li className="flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" key={attachment.id}>
+              <a
+                className="min-w-0 truncate font-bold text-blue-700 underline-offset-2 hover:underline"
+                href={`/api/v1/diagnostics/orders/${encodeURIComponent(orderId)}/attachments/${encodeURIComponent(attachment.id)}/file`}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {attachment.title}
+              </a>
+              <span className="flex shrink-0 items-center gap-2 text-xs text-slate-500">
+                {formatBytes(attachment.sizeBytes)} · {attachment.uploadedByPatient ? "patient" : "care team"}
+                {canDelete ? (
+                  <button
+                    aria-label={`Remove ${attachment.title}`}
+                    className="rounded-lg p-1 text-red-500 transition hover:bg-red-50 disabled:opacity-50"
+                    disabled={busyId === attachment.id}
+                    onClick={() => void remove(attachment.id)}
+                    type="button"
+                  >
+                    <Trash2 aria-hidden className="size-3.5" />
+                  </button>
+                ) : null}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 rounded-xl border border-dashed border-slate-200 bg-slate-50 p-4 text-center text-sm text-slate-500">No files attached yet.</p>
+      )}
+      <label className="mt-3 flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-blue-300 bg-blue-50 px-3 text-sm font-bold text-blue-700 transition hover:bg-blue-100">
+        <Upload aria-hidden className="size-4" />
+        {uploading ? "Uploading…" : "Attach a photo or PDF"}
+        <input
+          accept="application/pdf,image/jpeg,image/png,image/webp"
+          capture="environment"
+          className="sr-only"
+          disabled={uploading}
+          onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void upload(file); }}
+          type="file"
+        />
+      </label>
+      {localError ? <p className="mt-2 text-xs font-bold text-red-600">{localError}</p> : null}
+    </section>
   );
 }
 

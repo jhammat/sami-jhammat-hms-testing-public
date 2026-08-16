@@ -11,7 +11,6 @@ import {
 
 import {
   History,
-  Pill,
   RotateCcw,
 } from "lucide-react";
 

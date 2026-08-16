@@ -31,9 +31,26 @@ function createClient(): PrismaClient {
         requireDatabaseUrl(),
     });
 
-  return new PrismaClient({
+  const isProduction = process.env.NODE_ENV === "production";
+
+  const client = new PrismaClient({
     adapter,
+    // FIX-22: every query logged in development so a list screen's N+1s
+    // are visible by just watching the server console while loading it —
+    // never enabled in production.
+    ...(isProduction ? {} : { log: [{ level: "query", emit: "event" }] }),
   });
+
+  if (!isProduction) {
+    (client as unknown as { $on: (event: "query", callback: (event: { query: string; params: string; duration: number }) => void) => void }).$on(
+      "query",
+      (event) => {
+        console.log(`[prisma] ${event.duration}ms  ${event.query}  ${event.params}`);
+      },
+    );
+  }
+
+  return client;
 }
 
 export const database =

@@ -15,6 +15,8 @@ export interface AvailableLoginContext {
 export interface AuthenticatedAccount {
   identityId: string; email: string; displayName: string;
   contexts: AvailableLoginContext[]; requiresMfa: boolean; mustChangePassword: boolean;
+  /** Set when every one of this identity's memberships belongs to a suspended organization — the login route surfaces this distinctly rather than a generic "no access" message. */
+  suspendedOrganizationLabel: string | null;
 }
 
 const workspaceRoles: Record<WorkspaceCode, WonFlowRole> = {
@@ -42,9 +44,13 @@ export async function authenticateAccount(email: string, password: string): Prom
   }
   await database.identity.update({ where: { id: identity.id }, data: { failedLoginCount: 0, lockedUntil: null, lastAuthenticatedAt: new Date() } });
   const contexts: AvailableLoginContext[] = [];
+  let suspendedOrganizationLabel: string | null = null;
   if (identity.isPlatformAdministrator) contexts.push({ membershipId: null, tenantId: null, organizationId: null, branchId: null, workspace: null, role: "platform", organizationLabel: "WonFlow Platform", branchLabel: null, homePath: homePathForRole("platform") });
   for (const membership of identity.memberships) {
-    if (membership.tenant.status !== "ACTIVE") continue;
+    if (membership.tenant.status !== "ACTIVE") {
+      if (membership.tenant.status === "SUSPENDED") suspendedOrganizationLabel = membership.organization.displayName;
+      continue;
+    }
     for (const workspace of membership.workspaceCodes) {
       const role = workspaceRoles[workspace];
       contexts.push({ membershipId: membership.id, tenantId: membership.tenantId, organizationId: membership.organizationId,
@@ -53,5 +59,6 @@ export async function authenticateAccount(email: string, password: string): Prom
     }
   }
   return { identityId: identity.id, email: identity.email, displayName: identity.memberships[0]?.displayName ?? identity.email,
-    contexts, requiresMfa: identity.mfaCredentials.length > 0, mustChangePassword: identity.mustChangePassword };
+    contexts, requiresMfa: identity.mfaCredentials.length > 0, mustChangePassword: identity.mustChangePassword,
+    suspendedOrganizationLabel: contexts.length === 0 ? suspendedOrganizationLabel : null };
 }

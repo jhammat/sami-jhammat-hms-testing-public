@@ -8,7 +8,14 @@ interface NewAppointmentPageProps {
       patientId?:
         string |
         string[];
+      doctorId?:
+        string |
+        string[];
     }>;
+}
+
+function firstValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
 }
 
 export default async function NewAppointmentPage({
@@ -17,20 +24,13 @@ export default async function NewAppointmentPage({
   const resolvedSearchParams =
     await searchParams;
 
-  const patientId =
-    Array.isArray(
-      resolvedSearchParams
-        .patientId,
-    )
-      ? resolvedSearchParams
-          .patientId[0]
-      : resolvedSearchParams
-          .patientId;
-
   return (
     <AppointmentBookingWorkflow
+      initialDoctorId={
+        firstValue(resolvedSearchParams.doctorId)
+      }
       initialPatientId={
-        patientId
+        firstValue(resolvedSearchParams.patientId)
       }
     />
   );

@@ -18,11 +18,11 @@ import type {
 
 import {
   usePlatformAdministration,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 import type {
   CreatePlatformSupportAccessInput,
   PlatformSupportAccessStatus,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 import {
   PlatformEmptyState,
   PlatformLoadingState,
@@ -133,11 +133,13 @@ export function PlatformSupportAccessPanel() {
   async function updateStatus(
     accessId: string,
     status: PlatformSupportAccessStatus,
+    reason: string,
   ) {
     try {
       await setSupportAccessStatus(
         accessId,
         status,
+        reason,
       );
       setMessage(
         `Support access marked ${status}.`,
@@ -328,6 +330,7 @@ export function PlatformSupportAccessPanel() {
                               updateStatus(
                                 record.id,
                                 "active",
+                                "Approved from the platform console.",
                               )
                             }
                             type="button"
@@ -341,12 +344,10 @@ export function PlatformSupportAccessPanel() {
                         record.status ===
                           "active" ? (
                           <PlatformSecondaryButton
-                            onClick={() =>
-                              updateStatus(
-                                record.id,
-                                "revoked",
-                              )
-                            }
+                            onClick={() => {
+                              const reason = window.prompt("Reason for revoking this support access grant (required):")?.trim();
+                              if (reason) updateStatus(record.id, "revoked", reason);
+                            }}
                             type="button"
                           >
                             Revoke

@@ -44,11 +44,14 @@ services:
       NODE_ENV: development
       WONFLOW_ENVIRONMENT: staging
       DATABASE_URL: ${DATABASE_URL}
+      WONFLOW_APP_DB_PASSWORD: ${WONFLOW_APP_DB_PASSWORD}
       SESSION_SECRET: ${SESSION_SECRET}
       AUTH_ENCRYPTION_KEY: ${AUTH_ENCRYPTION_KEY}
       WONFLOW_DEVELOPMENT_PASSWORD: ${WONFLOW_DEVELOPMENT_PASSWORD}
     command: >
       sh -c "pnpm --filter @wonflow/database db:deploy &&
+             pnpm db:provision-roles &&
+             pnpm db:repair-access &&
              pnpm db:seed:dev"
 
   web:
@@ -72,7 +75,9 @@ services:
       WONFLOW_ENVIRONMENT: staging
       PORT: "3000"
       HOSTNAME: 0.0.0.0
-      DATABASE_URL: ${DATABASE_URL}
+      # The running app connects with the restricted wonflow_app role, not
+      # the schema owner — see WONFLOW_APP_DATABASE_URL above.
+      DATABASE_URL: ${WONFLOW_APP_DATABASE_URL}
       SESSION_SECRET: ${SESSION_SECRET}
       AUTH_ENCRYPTION_KEY: ${AUTH_ENCRYPTION_KEY}
       ALLOW_MOCK_DATA: "false"

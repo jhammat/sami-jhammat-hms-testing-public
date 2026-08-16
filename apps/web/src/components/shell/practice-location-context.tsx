@@ -62,17 +62,10 @@ export interface PracticeLocationContextState {
 const PracticeLocationContext =
   createContext<PracticeLocationContextState | undefined>(undefined);
 
-const PRACTICE_LOCATION_STORAGE_PREFIX =
-  "wonflow:practice-location";
-
-function getLocationStorageKey(
-  organizationId: WonFlowId,
-): string {
-  return [
-    PRACTICE_LOCATION_STORAGE_PREFIX,
-    organizationId,
-  ].join(":");
-}
+// In-memory, session-lived: which location is selected for viewing is
+// interface state, not user data, so it never claims to persist across a
+// reload — it is simply remembered for the rest of this browser tab's life.
+const rememberedLocationByOrganization = new Map<WonFlowId, PracticeLocationSelection>();
 
 export function PracticeLocationProvider({
   children,
@@ -111,13 +104,13 @@ export function PracticeLocationProvider({
         const selectable = nextLocations.items
           .filter((location) => location.status === "active")
           .sort((left, right) => left.name.localeCompare(right.name));
-        const stored = window.sessionStorage.getItem(
-          getLocationStorageKey(tenant.scope.organizationId),
+        const remembered = rememberedLocationByOrganization.get(
+          tenant.scope.organizationId,
         );
-        const restored = stored !== null && selectable.some(
-          (location) => location.id === stored,
+        const restored = remembered !== undefined && selectable.some(
+          (location) => location.id === remembered,
         )
-          ? stored
+          ? remembered
           : selectable.length === 1
             ? selectable[0]!.id
             : ALL_PRACTICE_LOCATIONS;
@@ -149,10 +142,7 @@ export function PracticeLocationProvider({
 
   useEffect(() => {
     if (organizationId === undefined || loading) return;
-    window.sessionStorage.setItem(
-      getLocationStorageKey(organizationId),
-      selectedLocationId,
-    );
+    rememberedLocationByOrganization.set(organizationId, selectedLocationId);
   }, [loading, organizationId, selectedLocationId]);
 
   const selectedLocation = locations.find(

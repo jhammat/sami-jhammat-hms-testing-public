@@ -17,6 +17,7 @@ import { WonFlowPageHeader } from "@/components/workspace";
 import {
   DEPARTMENTS,
   DeliveryBadges,
+  DiagnosticAttachmentsPanel,
   Pill,
   patientNameOf,
   readApiError,
@@ -240,6 +241,8 @@ export function DiagnosticsResultWorkspace({ orderId, type }: { orderId: string;
         </section>
 
         <div className="space-y-4">
+          <DiagnosticAttachmentsPanel attachments={order.attachments} canDelete={true} onChange={() => void load()} orderId={order.id} />
+
           <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-black text-slate-900">{config.usesSpecimens ? "Specimens" : "Study"}</h2>
             {!config.usesSpecimens ? (

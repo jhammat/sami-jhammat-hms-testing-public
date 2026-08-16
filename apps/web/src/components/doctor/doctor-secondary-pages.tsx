@@ -434,7 +434,7 @@ function buildInboxItems(
   );
 }
 
-function PatientAvatar({ patient }: { patient: ConnectedPatient }) {
+function PatientAvatar({ patient }: { patient: { displayName: string } }) {
   return (
     <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 text-xs font-black text-indigo-700 ring-1 ring-indigo-200">
       {getInitials(patient.displayName)}
@@ -529,15 +529,56 @@ type PatientFilter =
   | "previous"
   | "unread";
 
+interface RealConnectedPatient {
+  id: string;
+  displayName: string;
+  mrNumber: string;
+  identityNumber: string;
+  mobileNumber: string;
+  gender: string;
+  age?: number;
+  referralSource?: string;
+  lastActivityAt?: string;
+  lastDiagnosis: string | null;
+  nextAppointment?: { appointmentDate: string; slotStart: string; serviceName: string };
+  encounterCount: number;
+  unreadReports: number;
+}
+
+const REFERRAL_SOURCE_LABELS: Record<string, string> = {
+  "walk-in": "Walk-in",
+  "doctor-referral": "Doctor referral",
+  "hospital-referral": "Hospital referral",
+  "online-booking": "Website booking",
+  emergency: "Emergency",
+  corporate: "Corporate",
+};
+
+function useMyConnectedPatients() {
+  const [patients, setPatients] = useState<RealConnectedPatient[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const reload = useCallback(async () => {
+    try {
+      const response = await fetch("/api/v1/doctor/patients", { cache: "no-store" });
+      const body = await response.json() as { patients?: RealConnectedPatient[] };
+      if (response.ok && body.patients) setPatients(body.patients);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => { void reload(); });
+  }, [reload]);
+
+  return { patients, loading, reload };
+}
+
 export function DoctorPatientsPage() {
-  const { doctorId } = useDoctorPortalContext();
-  const data = useDoctorSecondaryData();
+  const { patients, loading } = useMyConnectedPatients();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PatientFilter>("all");
-  const patients = useMemo(
-    () => buildConnectedPatients(doctorId, data),
-    [data, doctorId],
-  );
   const today = todayValue();
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visiblePatients = patients.filter((patient) => {
@@ -553,22 +594,15 @@ export function DoctorPatientsPage() {
 
     if (filter === "today") {
       return (
-        patient.appointments.some((record) => record.appointmentDate === today) ||
-        patient.queueEntries.some((record) => record.businessDate === today) ||
-        patient.encounters.some((record) => record.startedAt.slice(0, 10) === today)
+        patient.nextAppointment?.appointmentDate === today ||
+        patient.lastActivityAt?.slice(0, 10) === today
       );
     }
     if (filter === "upcoming") return patient.nextAppointment !== undefined;
     if (filter === "follow-ups") {
-      return (
-        patient.appointments.some((record) =>
-          record.serviceName.toLocaleLowerCase().includes("follow-up"),
-        ) || patient.encounters.some((record) => record.encounterType === "follow-up")
-      );
+      return patient.nextAppointment?.serviceName.toLocaleLowerCase().includes("follow-up") ?? false;
     }
-    if (filter === "previous") {
-      return patient.encounters.some((record) => record.status === "completed");
-    }
+    if (filter === "previous") return patient.encounterCount > 0;
     if (filter === "unread") return patient.unreadReports > 0;
     return true;
   });
@@ -672,11 +706,13 @@ export function DoctorPatientsPage() {
         <StatusPill tone="indigo">Doctor-scoped records</StatusPill>
       </div>
 
-      {visiblePatients.length === 0 ? (
+      {loading ? (
+        <p className="p-6 text-center text-xs font-bold text-slate-500">Loading connected patients…</p>
+      ) : visiblePatients.length === 0 ? (
         <EmptyState
           description={
             patients.length === 0
-              ? "No patients are connected to this doctor through current appointments, queue records or encounters."
+              ? "No patients are connected to this doctor through current appointments yet."
               : "No connected patient matches the current search and filter."
           }
           icon={<UserRound size={19} />}
@@ -685,12 +721,6 @@ export function DoctorPatientsPage() {
       ) : (
         <div className="grid gap-3 xl:grid-cols-2">
           {visiblePatients.map((patient) => {
-            const latestQueueEntry = [...patient.queueEntries].sort(
-              (left, right) =>
-                new Date(right.checkedInAt).getTime() -
-                new Date(left.checkedInAt).getTime(),
-            )[0];
-
             return (
               <article
                 className="group relative isolate scroll-mt-24 overflow-hidden rounded-[20px] border border-indigo-100/80 bg-gradient-to-br from-white via-white to-indigo-50/55 p-4 shadow-[0_12px_30px_rgba(79,70,229,0.07)] transition duration-300 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-[0_18px_42px_rgba(79,70,229,0.14)] focus:outline-none focus:ring-2 focus:ring-indigo-400 target:border-indigo-300 target:ring-2 target:ring-indigo-100"
@@ -721,6 +751,11 @@ export function DoctorPatientsPage() {
                       {patient.age === undefined ? "Age not recorded" : `${patient.age} years`} ·{" "}
                       {humanize(patient.gender)} · {patient.mobileNumber || "No mobile"}
                     </p>
+                    {patient.referralSource ? (
+                      <span className="mt-1.5 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-600">
+                        Source: {REFERRAL_SOURCE_LABELS[patient.referralSource] ?? humanize(patient.referralSource)}
+                      </span>
+                    ) : null}
                   </div>
                 </div>
 
@@ -755,28 +790,15 @@ export function DoctorPatientsPage() {
 
                 <div className="mt-3 flex items-center justify-between gap-3">
                   <span className="text-[10px] font-semibold text-slate-500">
-                    {patient.encounters.length} encounter
-                    {patient.encounters.length === 1 ? "" : "s"}
+                    {patient.encounterCount} encounter
+                    {patient.encounterCount === 1 ? "" : "s"}
                   </span>
-                  {latestQueueEntry ? (
-                    <Link
-                      className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-indigo-600 px-3 text-[11px] font-black text-white hover:bg-indigo-700"
-                      href={`/doctor/consultations?queueEntryId=${encodeURIComponent(
-                        latestQueueEntry.id,
-                      )}`}
-                    >
-                      Open Profile <ChevronRight size={13} />
-                    </Link>
-                  ) : (
-                    <button
-                      className="min-h-9 cursor-not-allowed rounded-xl bg-slate-100 px-3 text-[11px] font-black text-slate-400"
-                      disabled
-                      title="A dedicated doctor patient profile route is planned for the next milestone."
-                      type="button"
-                    >
-                      Open Profile
-                    </button>
-                  )}
+                  <Link
+                    className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-indigo-600 px-3 text-[11px] font-black text-white hover:bg-indigo-700"
+                    href={`/operations/appointments/new?patientId=${encodeURIComponent(patient.id)}`}
+                  >
+                    Book appointment <ChevronRight size={13} />
+                  </Link>
                 </div>
               </article>
             );
@@ -1634,7 +1656,6 @@ interface DoctorPortalPreferences {
   mobileCompactActions: boolean;
 }
 
-const DOCTOR_PREFERENCES_KEY = "wonflow-doctor-portal-preferences";
 const DEFAULT_PREFERENCES: DoctorPortalPreferences = {
   notificationsEnabled: true,
   queueSoundEnabled: true,
@@ -1643,34 +1664,12 @@ const DEFAULT_PREFERENCES: DoctorPortalPreferences = {
   mobileCompactActions: true,
 };
 
+// In-memory, session-lived: display preferences only (no clinical or
+// business data), so this never claims to persist across a reload.
+let doctorPreferences: DoctorPortalPreferences = DEFAULT_PREFERENCES;
+
 function readDoctorPreferences(): DoctorPortalPreferences {
-  try {
-    const rawValue = window.localStorage.getItem(DOCTOR_PREFERENCES_KEY);
-    if (rawValue === null) return DEFAULT_PREFERENCES;
-    const parsed = JSON.parse(rawValue) as Partial<DoctorPortalPreferences>;
-    return {
-      notificationsEnabled:
-        typeof parsed.notificationsEnabled === "boolean"
-          ? parsed.notificationsEnabled
-          : DEFAULT_PREFERENCES.notificationsEnabled,
-      queueSoundEnabled:
-        typeof parsed.queueSoundEnabled === "boolean"
-          ? parsed.queueSoundEnabled
-          : DEFAULT_PREFERENCES.queueSoundEnabled,
-      defaultAppointmentDuration:
-        typeof parsed.defaultAppointmentDuration === "string"
-          ? parsed.defaultAppointmentDuration
-          : DEFAULT_PREFERENCES.defaultAppointmentDuration,
-      displayDensity:
-        parsed.displayDensity === "comfortable" ? "comfortable" : "compact",
-      mobileCompactActions:
-        typeof parsed.mobileCompactActions === "boolean"
-          ? parsed.mobileCompactActions
-          : DEFAULT_PREFERENCES.mobileCompactActions,
-    };
-  } catch {
-    return DEFAULT_PREFERENCES;
-  }
+  return doctorPreferences;
 }
 
 export function DoctorSettingsPage() {
@@ -1694,9 +1693,9 @@ export function DoctorSettingsPage() {
   }
 
   function savePreferences(): void {
-    window.localStorage.setItem(DOCTOR_PREFERENCES_KEY, JSON.stringify(preferences));
+    doctorPreferences = preferences;
     window.dispatchEvent(new Event("wonflow:doctor-portal-preferences-changed"));
-    setSavedMessage("Doctor Portal preferences saved in this browser.");
+    setSavedMessage("Doctor Portal preferences saved for this session.");
   }
 
   return (

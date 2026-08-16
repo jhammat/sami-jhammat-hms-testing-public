@@ -1,4 +1,3 @@
-export * from "./doctor-workspace-dashboard";
 export * from "./doctor-consultation-hub";
 export * from "./clinical-consultation-documentation";
 export * from "./compact-doctor-portal";

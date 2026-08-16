@@ -46,6 +46,9 @@ export const PHASE_ONE_PERMISSIONS = [
   "pharmacy.inventory.read",
   "pharmacy.inventory.manage",
   "pharmacy.dispensing.manage",
+  "pharmacy.suppliers.manage",
+  "pharmacy.purchase-receipts.manage",
+  "pharmacy.returns.manage",
 
   "billing.invoices.read",
   "billing.invoices.manage",

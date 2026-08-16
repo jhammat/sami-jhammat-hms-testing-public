@@ -24,8 +24,11 @@ import {
   ChevronRight,
   CircleHelp,
   Command,
+  FileClock,
+  FileText,
   FlaskConical,
   HeartPulse,
+  History,
   LayoutDashboard,
   ListOrdered,
   LogOut,
@@ -381,11 +384,25 @@ const receptionNavigationGroups:
             "Search, register, appoint and bill patients in one workspace",
         },
         {
+          label: "Register Patient",
+          href: "/operations/patients/register",
+          icon: UserPlus,
+          description:
+            "Register a new patient at the hospital counter",
+        },
+        {
           label: "Today’s Appointments",
           href: "/operations/appointments",
           icon: CalendarDays,
           description:
             "View and manage today’s appointment schedule",
+        },
+        {
+          label: "New Appointment",
+          href: "/operations/appointments/new",
+          icon: CalendarPlus,
+          description:
+            "Book a patient into a doctor’s available slot",
         },
         {
           label: "Patient Directory",
@@ -600,11 +617,42 @@ const doctorNavigationGroups:
             "Recent, follow-up and assigned patients",
         },
         {
+          label: "Register Patient",
+          href: "/doctor/register-patient",
+          icon: UserPlus,
+          description:
+            "Register a walk-in or a patient bringing previous records",
+        },
+        {
           label: "Appointments",
           href: "/doctor/appointments",
           icon: CalendarDays,
           description:
             "Doctor appointment schedule and patient queue",
+        },
+        {
+          label: "My Schedule",
+          href: "/doctor/schedule",
+          icon: CalendarPlus,
+          description:
+            "Weekly rostered hours patients and reception book against",
+        },
+      ],
+    },
+    {
+      label: "Clinical",
+
+      items: [
+        {
+          label: "Consultations",
+          href: "/doctor/consultations",
+          icon: Activity,
+          description:
+            "Active and completed consultations",
+
+          activePrefixes: [
+            "/doctor/encounters",
+          ],
         },
         {
           label: "Results",
@@ -618,6 +666,37 @@ const doctorNavigationGroups:
           ],
         },
         {
+          label: "Documents",
+          href: "/doctor/documents",
+          icon: FileText,
+          description:
+            "Patient records, uploads and shared reports",
+        },
+        {
+          label: "Follow-ups",
+          href: "/doctor/follow-ups",
+          icon: FileClock,
+          description:
+            "Patients due a follow-up visit",
+        },
+        {
+          label: "History",
+          href: "/doctor/history",
+          icon: History,
+          description:
+            "Past consultation and encounter history",
+        },
+        // Messaging (/doctor/messages, /patient/messages) is deliberately not
+        // linked: it has no database tables and no API routes, so both screens
+        // render a "no identity was inferred" notice even to a signed-in user.
+        // Link them once messaging is actually implemented server-side.
+      ],
+    },
+    {
+      label: "Account",
+
+      items: [
+        {
           label: "Profile",
           href: "/doctor/profile",
           icon: UserRound,
@@ -630,6 +709,13 @@ const doctorNavigationGroups:
           icon: BadgeDollarSign,
           description:
             "Manage consultation services when hospital access allows it",
+        },
+        {
+          label: "Settings",
+          href: "/doctor/settings",
+          icon: Settings,
+          description:
+            "Notification and workspace preferences",
         },
       ],
     },
@@ -668,6 +754,20 @@ const patientNavigationGroups:
           icon: ScanLine,
           description:
             "View released laboratory and radiology reports",
+        },
+        {
+          label: "Documents",
+          href: "/patient/documents",
+          icon: FileText,
+          description:
+            "Upload and share your previous records with your doctor",
+        },
+        {
+          label: "Billing",
+          href: "/patient/billing",
+          icon: ReceiptText,
+          description:
+            "Invoices, payments and outstanding balance",
         },
         {
           label: "Profile",
@@ -809,6 +909,12 @@ const platformNavigationGroups:
           ],
         },
         {
+          label: "Deleted Tenants",
+          href: "/platform/deleted-tenants",
+          icon: History,
+          description: "Retained backup records for deleted tenant organizations",
+        },
+        {
           label: "Entitlements",
           href: "/platform/entitlements",
           icon: ShieldCheck,
@@ -934,7 +1040,62 @@ function getNavigationGroupsForPath(
     return platformNavigationGroups;
   }
 
+  /*
+   * Fall back to the signed-in workspace's own navigation. Returning
+   * fullNavigationGroups here exposed every workspace's menu (reception,
+   * pharmacy, laboratory, billing, doctor…) to whoever landed on an
+   * unmatched path — including the brief render of "/" before it redirects
+   * to /login. Only an unrecognised path with no workspace at all gets the
+   * combined menu now.
+   */
+  const workspaceFallback = workspace
+    ? workspaceNavigationGroups[workspace]
+    : undefined;
+
+  if (workspaceFallback) {
+    return workspaceFallback;
+  }
+
+  if (workspace === "DOCTOR") return doctorNavigationGroups;
+  if (workspace === "PATIENT") return patientNavigationGroups;
+  if (workspace === "ADMIN") return adminNavigationGroups;
+
   return fullNavigationGroups;
+}
+
+/**
+ * Where the sidebar logo should link. This used to be hardcoded to
+ * `/operations/reception` for every workspace, so a patient or doctor
+ * clicking the logo was sent to a reception page they have no permission to
+ * open. Mirrors getNavigationGroupsForPath so the logo always returns to the
+ * home of the workspace whose navigation is currently on screen.
+ */
+function getHomePathForPath(
+  pathname: string,
+  workspace?: WorkspaceCode | null,
+): string {
+  if (pathname.startsWith("/doctor")) return "/doctor";
+  if (pathname.startsWith("/patient")) return "/patient";
+  if (pathname.startsWith("/admin") || pathname.startsWith("/organization")) return "/admin";
+  if (pathname.startsWith("/platform")) return "/platform";
+  if (pathname.startsWith("/management")) return "/management";
+
+  if (pathname.startsWith("/operations")) {
+    switch (workspace) {
+      case "LABORATORY":
+        return "/operations/laboratory";
+      case "RADIOLOGY":
+        return "/operations/radiology";
+      case "PHARMACY":
+        return "/operations/pharmacy";
+      case "BILLING":
+        return "/operations/billing/new";
+      default:
+        return "/operations/reception";
+    }
+  }
+
+  return "/";
 }
 
 function getInitials(name: string | undefined): string {
@@ -1027,7 +1188,7 @@ function getWorkspaceName(
       "/organization",
    )
  ) {
-   return "Organization Administration";
+   return "Organization";
  }
 
   if (
@@ -1090,7 +1251,10 @@ function SidebarNavigation({
               ? "justify-center"
               : "",
           ].join(" ")}
-          href="/operations/reception"
+          href={getHomePathForPath(
+            pathname,
+            session?.workspace,
+          )}
           onClick={
             onNavigate
           }
@@ -1489,8 +1653,13 @@ function useSignedInAvatar(identityId: string | undefined): string | null {
         if (!response.ok) return;
         const body = await response.json() as { avatarUrl?: string | null };
         setAvatarUrl(body.avatarUrl ?? null);
-      } catch {
-        // A missing avatar is not worth surfacing; initials remain.
+      } catch (error) {
+        // An aborted fetch (unmount, or identity changed mid-request) is
+        // expected, not a failure -- a missing avatar otherwise isn't worth
+        // surfacing either way; initials remain in both cases. No custom
+        // abort reason is passed to controller.abort() below, so this is
+        // always the standard AbortError DOMException, never a raw value.
+        if (error instanceof DOMException && error.name === "AbortError") return;
       }
     };
     void load();
@@ -1762,6 +1931,18 @@ export function PremiumApplicationShell({
       >
         <header className="wfg-topbar sticky top-0 z-40">
           <div className="flex min-h-[76px] items-center gap-3 px-4 sm:px-6 xl:px-8">
+            <button
+              aria-label="Go back"
+              className="wfg-control flex h-10 w-10 shrink-0 items-center justify-center text-slate-600"
+              onClick={() => {
+                router.back();
+              }}
+              title="Go back"
+              type="button"
+            >
+              <ChevronLeft size={19} />
+            </button>
+
             <button
               aria-label="Open navigation"
               className="wfg-control flex h-10 w-10 shrink-0 items-center justify-center text-slate-600 lg:hidden"

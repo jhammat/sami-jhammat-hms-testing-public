@@ -26,6 +26,7 @@ export async function POST(request: Request): Promise<NextResponse | Response> {
     return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
   }
 
+  if (account.suspendedOrganizationLabel) return NextResponse.json({ error: `${account.suspendedOrganizationLabel}'s access has been suspended. Contact your platform administrator.`, code: "organization-suspended" }, { status: 403 });
   if (!account.contexts.length) return NextResponse.json({ error: "No active workspace is assigned to this account." }, { status: 403 });
   if (account.requiresMfa) return NextResponse.json({ error: "MFA verification is required.", requiresMfa: true }, { status: 403 });
   if (account.contexts.length > 1) return NextResponse.json({ requiresContextSelection: true, contexts: account.contexts }, { status: 409 });

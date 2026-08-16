@@ -50,7 +50,22 @@ export async function readSession(): Promise<WonFlowSessionPayload | null> {
   if (!rawToken) return null;
   const session = await database.authSession.findUnique({ where: { tokenHash: tokenHash(rawToken) },
     include: { identity: true, membership: { include: { organization: true, primaryBranch: true } } } });
-  if (!session || session.status !== "ACTIVE" || session.expiresAt <= new Date()) {
+  /*
+   * A tenant suspended mid-session must not keep working on the strength of
+   * an already-issued cookie — the very next request revokes the session,
+   * so the user is bounced to login and sees the real reason there, not
+   * left able to keep using a suspended organization until they next sign
+   * in on their own.
+   */
+  let tenantSuspended = false;
+  if (session?.tenantId && session.status === "ACTIVE") {
+    const tenant = await database.tenant.findUnique({ where: { id: session.tenantId }, select: { status: true } });
+    if (tenant && tenant.status !== "ACTIVE") {
+      tenantSuspended = true;
+      await database.authSession.update({ where: { id: session.id }, data: { status: "REVOKED", revokedAt: new Date(), revocationReason: `tenant-${tenant.status.toLowerCase()}` } });
+    }
+  }
+  if (!session || session.status !== "ACTIVE" || session.expiresAt <= new Date() || tenantSuspended) {
     /*
      * A stale cookie is dropped opportunistically. readSession is also called
      * while rendering (the root layout reads it), and cookies may only be

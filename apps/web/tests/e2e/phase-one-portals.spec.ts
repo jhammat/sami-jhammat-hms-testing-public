@@ -23,7 +23,10 @@ for (const portal of portals) {
     expect(loginResponse.status(), `${portal.email} could not authenticate`).toBe(200);
     expect((await loginResponse.json()).homePath).toBe(portal.home);
 
-    for (const route of portal.routes) {
+    // The declared homePath itself must actually load — a string match
+    // above is not proof of that; a login landing page 404ing (as
+    // /operations/billing once did) would pass the check above unnoticed.
+    for (const route of [portal.home, ...portal.routes]) {
       const response = await page.goto(route, { waitUntil: "networkidle" });
       expect(response, `${route} did not return a document response`).not.toBeNull();
       expect(response?.status(), `${route} returned an HTTP error`).toBeLessThan(400);
@@ -183,26 +186,33 @@ test("a patient books through the portal and reception sees the appointment", as
 
   const dateInput = page.locator("input[type='date']").first();
   const scheduleSelect = page.locator("select").first();
+  // The select itself (with just its placeholder option) must render before
+  // anything else here can work -- this only confirms the page loaded, not
+  // that the default date has a published service (a specific weekday can
+  // legitimately have none, e.g. a doctor with no Sunday clinic).
   await expect
     .poll(async () => scheduleSelect.locator("option").count(), {
-      message: "the booking catalogue never published a schedule option",
+      message: "the booking page never rendered a schedule selector",
       timeout: 20_000,
     })
-    .toBeGreaterThan(1);
+    .toBeGreaterThan(0);
 
   /**
-   * Several services can be published and earlier tests consume slots, so walk
-   * forward through days and options until an available time is found rather
-   * than assuming tomorrow's first schedule is free.
+   * Several services can be published and earlier tests consume slots, and a
+   * given weekday may have no published service at all, so walk forward
+   * through days (starting from today's default date) until an available
+   * time is found rather than assuming tomorrow's first schedule is free.
    */
   const slotButton = page.getByRole("button", { name: /^\d{1,2}:\d{2}\s?(AM|PM)$/i });
   let bookedTime = "";
   let bookingDate = await dateInput.inputValue();
 
-  for (let dayOffset = 1; dayOffset <= 7 && !bookedTime; dayOffset += 1) {
-    bookingDate = new Date(Date.now() + dayOffset * 86_400_000).toISOString().slice(0, 10);
-    await dateInput.fill(bookingDate);
-    await page.waitForTimeout(600);
+  for (let dayOffset = 0; dayOffset <= 7 && !bookedTime; dayOffset += 1) {
+    if (dayOffset > 0) {
+      bookingDate = new Date(Date.now() + dayOffset * 86_400_000).toISOString().slice(0, 10);
+      await dateInput.fill(bookingDate);
+      await page.waitForTimeout(600);
+    }
 
     const optionCount = await scheduleSelect.locator("option").count();
     for (let index = 1; index < optionCount; index += 1) {

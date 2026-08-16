@@ -6,12 +6,15 @@ import type {
 import {
   AlertTriangle,
   Bell,
+  CalendarClock,
   CalendarDays,
   CheckCircle2,
+  Clock,
   Clock3,
   FileClock,
   HeartPulse,
   ListFilter,
+  MapPin,
   Pause,
   Play,
   Plus,
@@ -20,21 +23,12 @@ import {
   Square,
   Stethoscope,
   UserRound,
+  Video,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
-import { readDemoClinicalEncounters } from "@/lib/clinical";
-import {
-  deleteDemoDoctorSchedule,
-  saveDemoDoctorSchedule,
-  setDemoDoctorScheduleActive,
-} from "@/lib/doctor-schedules";
-import type {
-  DemoDoctorSchedule,
-  DemoDoctorScheduleDay,
-} from "@/lib/doctor-schedules";
 import {
   saveDemoDoctorSitting,
   updateDemoDoctorSittingStatus,
@@ -74,6 +68,10 @@ const DAYS = [
 ] as const;
 const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0] as const;
 
+function formatMinuteOfDay(value: number): string {
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+}
+
 const fieldClass =
   "h-9 w-full rounded-xl border border-slate-200 bg-white px-3 text-[11px] font-semibold text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
 const buttonClass =
@@ -94,45 +92,6 @@ function useConsultationRooms() {
   return rooms;
 }
 
-interface DoctorScheduleLocation { id: string; name: string; custom: boolean }
-const CUSTOM_DOCTOR_LOCATIONS_KEY = "wonflow-doctor-custom-locations";
-const CUSTOM_DOCTOR_LOCATIONS_EVENT = "wonflow:doctor-custom-locations-changed";
-
-function readCustomDoctorLocations(): DoctorScheduleLocation[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const value = JSON.parse(window.localStorage.getItem(CUSTOM_DOCTOR_LOCATIONS_KEY) ?? "[]") as DoctorScheduleLocation[];
-    return value.filter((location) => location.id && location.name && location.custom);
-  } catch { return []; }
-}
-
-function addCustomDoctorLocation(nameInput: string): DoctorScheduleLocation {
-  const name = nameInput.trim();
-  if (name.length < 2) throw new Error("Enter a clinic or location name.");
-  const locations = readCustomDoctorLocations();
-  const existing = locations.find((location) => location.name.toLowerCase() === name.toLowerCase());
-  if (existing) return existing;
-  const location = { id: `external-clinic-${crypto.randomUUID()}`, name, custom: true };
-  window.localStorage.setItem(CUSTOM_DOCTOR_LOCATIONS_KEY, JSON.stringify([...locations, location]));
-  window.dispatchEvent(new Event(CUSTOM_DOCTOR_LOCATIONS_EVENT));
-  return location;
-}
-
-function useDoctorScheduleLocations(branches: { id: string; name: string }[]) {
-  const [customLocations, setCustomLocations] = useState<DoctorScheduleLocation[]>([]);
-  useEffect(() => {
-    const reload = () => setCustomLocations(readCustomDoctorLocations());
-    queueMicrotask(reload);
-    window.addEventListener(CUSTOM_DOCTOR_LOCATIONS_EVENT, reload);
-    window.addEventListener("storage", reload);
-    return () => {
-      window.removeEventListener(CUSTOM_DOCTOR_LOCATIONS_EVENT, reload);
-      window.removeEventListener("storage", reload);
-    };
-  }, []);
-  return [...branches.map((branch) => ({ ...branch, custom: false })), ...customLocations];
-}
-
 export interface DoctorWorkflowModel {
   doctor: DoctorPortalIdentity;
   doctors: readonly DoctorPortalIdentity[];
@@ -143,7 +102,7 @@ export interface DoctorWorkflowModel {
   doctorId: string;
   businessDate: string;
   sitting?: DemoDoctorSitting;
-  schedules: readonly DemoDoctorSchedule[];
+  roster: readonly { id: string; branch: { id: string; name: string }; weekday: number; startsMinute: number; endsMinute: number; capacity: number; serviceId: string | null }[];
   entries: readonly DemoQueueEntry[];
   activeEntries: readonly DemoQueueEntry[];
   message?: string;
@@ -560,7 +519,8 @@ function PatientCard({
   selected = false,
   onSelect,
 }: PatientCardProps) {
-  const encounter = readDemoClinicalEncounters().find(
+  const { encounters } = useDoctorPortalContext();
+  const encounter = encounters.find(
     (item) => item.queueEntryId === entry.id && item.status !== "cancelled",
   );
   const urgent = entry.priority === "urgent" || entry.priority === "emergency";
@@ -768,6 +728,7 @@ function CurrentConsultation({
   model: DoctorWorkflowModel;
 }) {
   const [renderedAt] = useState(() => Date.now());
+  const { encounters } = useDoctorPortalContext();
 
   if (entry === undefined) {
     const next = model.entries.find((item) => item.status === "waiting");
@@ -844,16 +805,20 @@ function CurrentConsultation({
           />
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          {readDemoClinicalEncounters().find(
-            (item) => item.queueEntryId === entry.id && item.status !== "cancelled",
-          ) ? (
-            <Link
-              className={`${buttonClass} bg-indigo-600 text-white hover:bg-indigo-700`}
-              href={`/doctor/encounters/${readDemoClinicalEncounters().find((item) => item.queueEntryId === entry.id && item.status !== "cancelled")?.id}`}
-            >
-              Continue Consultation
-            </Link>
-          ) : null}
+          {(() => {
+            const activeEncounter = encounters.find(
+              (item) => item.queueEntryId === entry.id && item.status !== "cancelled",
+            );
+
+            return activeEncounter !== undefined ? (
+              <Link
+                className={`${buttonClass} bg-indigo-600 text-white hover:bg-indigo-700`}
+                href={`/doctor/encounters/${activeEncounter.id}`}
+              >
+                Continue Consultation
+              </Link>
+            ) : null;
+          })()}
           <button
             className={`${buttonClass} bg-rose-50 text-rose-700 hover:bg-rose-100`}
             onClick={() => model.finishConsultation(entry)}
@@ -918,11 +883,8 @@ function SectionHeading({
 export function DoctorTodayPanel({ model }: { model: DoctorWorkflowModel }) {
   const current = model.entries.find((entry) => entry.status === "serving");
   const next = model.entries.find((entry) => entry.status === "waiting");
-  const daySchedule = model.schedules.filter(
-    (schedule) =>
-      schedule.practitionerId === model.doctor.id &&
-      schedule.dayOfWeek === new Date(`${model.businessDate}T12:00:00`).getDay() &&
-      schedule.active,
+  const dayRoster = model.roster.filter(
+    (item) => item.weekday === new Date(`${model.businessDate}T12:00:00`).getDay(),
   );
 
   return (
@@ -991,11 +953,11 @@ export function DoctorTodayPanel({ model }: { model: DoctorWorkflowModel }) {
           icon={CalendarDays}
           label="Today's Schedule"
           value={
-            daySchedule.length
-              ? daySchedule
-                  .map((item) => `${item.startTime}–${item.endTime}`)
+            dayRoster.length
+              ? dayRoster
+                  .map((item) => `${formatMinuteOfDay(item.startsMinute)}–${formatMinuteOfDay(item.endsMinute)}`)
                   .join(", ")
-              : "No weekly block configured"
+              : "No rostered hours today"
           }
         />
         <SupportCard
@@ -1039,6 +1001,7 @@ function SupportCard({
 }
 
 export function DoctorQueuePanel({ model }: { model: DoctorWorkflowModel }) {
+  const { encounters } = useDoctorPortalContext();
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<DemoQueueStatus | "all">("all");
   const [priority, setPriority] = useState<DemoQueuePriority | "all">("all");
@@ -1072,7 +1035,7 @@ export function DoctorQueuePanel({ model }: { model: DoctorWorkflowModel }) {
     ? model.entries.findIndex((entry) => entry.id === selected.id) + 1
     : 0;
   const lastEncounter = selected
-    ? readDemoClinicalEncounters()
+    ? encounters
         .filter(
           (encounter) =>
             encounter.patientId === selected.patientId &&
@@ -1284,404 +1247,217 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 export function DoctorSchedulePanel({ model, embedded = false }: { model: DoctorWorkflowModel; embedded?: boolean }) {
-  const portal = useDoctorPortalContext();
-  const rooms = useConsultationRooms();
-  const scheduleLocations = useDoctorScheduleLocations(portal.branches);
-  const formRef = useRef<HTMLElement>(null);
-  const [editing, setEditing] = useState<DemoDoctorSchedule>();
-  const [formOpen, setFormOpen] = useState(false);
-  const [day, setDay] = useState<DemoDoctorScheduleDay>(1);
-  const [start, setStart] = useState("09:00");
-  const [end, setEnd] = useState("13:00");
-  const [duration, setDuration] = useState("15");
-  const [maximum, setMaximum] = useState("18");
-  const [walkIns, setWalkIns] = useState(true);
-  const [selectedLocationId, setSelectedLocationId] = useState(
-    model.doctor.primaryBranchId ?? "",
+  const roster = [...model.roster].sort(
+    (left, right) =>
+      WEEK_ORDER.indexOf(left.weekday as (typeof WEEK_ORDER)[number]) -
+        WEEK_ORDER.indexOf(right.weekday as (typeof WEEK_ORDER)[number]) ||
+      left.startsMinute - right.startsMinute,
   );
-  const [addingLocation, setAddingLocation] = useState(false);
-  const [customLocationName, setCustomLocationName] = useState("");
-  const [preferredRoomId, setPreferredRoomId] = useState("");
-  const [addingRoom, setAddingRoom] = useState(false);
-  const [customRoomName, setCustomRoomName] = useState("");
-  const [error, setError] = useState<string>();
-
-  useEffect(() => {
-    if (editing === undefined) {
-      queueMicrotask(() => setSelectedLocationId(model.doctor.primaryBranchId ?? ""));
-    }
-  }, [editing, model.doctor.primaryBranchId]);
-
-  const schedules = model.schedules
-    .filter((item) => item.practitionerId === model.doctor.id)
-    .sort(
-      (left, right) =>
-        WEEK_ORDER.indexOf(left.dayOfWeek as (typeof WEEK_ORDER)[number]) -
-          WEEK_ORDER.indexOf(right.dayOfWeek as (typeof WEEK_ORDER)[number]) ||
-        left.startTime.localeCompare(right.startTime),
-    );
-
-  function openForm(item?: DemoDoctorSchedule): void {
-    setEditing(item);
-    setDay(item?.dayOfWeek ?? 1);
-    setStart(item?.startTime ?? "09:00");
-    setEnd(item?.endTime ?? "13:00");
-    setDuration(String(item?.appointmentDurationMinutes ?? 15));
-    setMaximum(String(item?.maximumPatients ?? 18));
-    setWalkIns(item?.allowWalkIns ?? true);
-    setSelectedLocationId(
-      item === undefined
-        ? model.doctor.primaryBranchId ?? ""
-        : item.branchId,
-    );
-    setPreferredRoomId(item?.preferredRoomId ?? "");
-    setError(undefined);
-    setFormOpen(true);
-    queueMicrotask(() => formRef.current?.scrollIntoView({ behavior: "smooth" }));
-  }
-
-  function save(): void {
-    const selectedLocation = scheduleLocations.find(
-      (location) => location.id === selectedLocationId,
-    );
-    if (selectedLocation === undefined) {
-      setError("Choose a hospital branch or external clinic.");
-      return;
-    }
-    try {
-      saveDemoDoctorSchedule({
-        id: editing?.id,
-        practitionerId: model.doctor.id,
-        branchId: selectedLocation.id,
-        dayOfWeek: day,
-        startTime: start,
-        endTime: end,
-        appointmentDurationMinutes: Number(duration),
-        maximumPatients: Number(maximum),
-        allowWalkIns: walkIns,
-        preferredRoomId: preferredRoomId || undefined,
-        active: editing?.active ?? true,
-      });
-      setEditing(undefined);
-      setFormOpen(false);
-      setError(undefined);
-      model.reload();
-      model.setMessage("Weekly schedule block saved.");
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Unable to save schedule.");
-    }
-  }
 
   return (
     <div className="space-y-3">
       {!embedded ? <DoctorPageHeader
-        actions={
-          <button
-            className={`${buttonClass} bg-indigo-600 text-white`}
-            onClick={() => openForm()}
-            type="button"
-          >
-            <Plus size={13} /> Add Schedule
-          </button>
-        }
-        description="Manage recurring weekly availability without overlapping blocks."
+        description="Your recurring weekly availability, as booked by reception and patients."
         title="My Schedule"
       /> : null}
       {!embedded ? <PortalFilters model={model} /> : null}
       {!embedded ? <DoctorConsultationFeeCard /> : null}
       <Message value={model.message} />
 
-      <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <section className="space-y-2">
-          {WEEK_ORDER.map((dayNumber) => {
-            const daySchedules = schedules.filter(
-              (item) => item.dayOfWeek === dayNumber,
-            );
-            return (
-              <div
-                className="rounded-2xl border border-slate-200 bg-white p-3"
-                key={DAYS[dayNumber]}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="grid h-8 w-8 place-items-center rounded-xl bg-indigo-50 text-indigo-700">
-                      <CalendarDays size={15} />
-                    </span>
-                    <div>
-                      <h2 className="text-[11px] font-black text-slate-950">
-                        {DAYS[dayNumber]}
-                      </h2>
-                      <p className="text-[9px] text-slate-500">
-                        {daySchedules.length
-                          ? `${daySchedules.length} schedule block${daySchedules.length === 1 ? "" : "s"}`
-                          : "No recurring availability"}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    aria-label={`Add ${DAYS[dayNumber]} schedule`}
-                    className="grid h-8 w-8 place-items-center rounded-lg bg-slate-50 text-slate-500 hover:bg-indigo-50 hover:text-indigo-700"
-                    onClick={() => {
-                      openForm();
-                      setDay(dayNumber as DemoDoctorScheduleDay);
-                    }}
-                    type="button"
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
-                {daySchedules.length ? (
-                  <div className="mt-2 grid gap-2 lg:grid-cols-2">
-                    {daySchedules.map((schedule) => {
-                      const room = rooms.find(
-                        (item) => item.id === schedule.preferredRoomId,
-                      );
-                      return (
-                        <article
-                          className={`rounded-xl border p-3 ${
-                            schedule.active
-                              ? "border-indigo-100 bg-indigo-50/40"
-                              : "border-slate-200 bg-slate-50 opacity-65"
-                          }`}
-                          key={schedule.id}
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <p className="text-[11px] font-black text-slate-950">
-                                {schedule.startTime}–{schedule.endTime}
-                              </p>
-                              <p className="mt-1 text-[9px] font-semibold text-slate-500">
-                                {scheduleLocations.find((location) => location.id === schedule.branchId)?.name ?? "Unavailable location"}
-                              </p>
-                            </div>
-                            <StatusPill status={schedule.active ? "active" : "inactive"} />
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-1.5 text-[9px] font-semibold text-slate-600">
-                            <span>{schedule.appointmentDurationMinutes}-minute visits</span>
-                            <span>·</span>
-                            <span>{schedule.maximumPatients} patients</span>
-                            <span>·</span>
-                            <span>{schedule.allowWalkIns ? "Walk-ins allowed" : "Appointments only"}</span>
-                          </div>
-                          <p className="mt-1 text-[9px] text-slate-500">
-                            Preferred room: {room?.label ?? "Not selected"}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            <button
-                              className={`${buttonClass} border border-slate-200 bg-white text-slate-700`}
-                              onClick={() => openForm(schedule)}
-                              type="button"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              className={`${buttonClass} bg-amber-50 text-amber-700`}
-                              onClick={() => {
-                                setDemoDoctorScheduleActive(schedule.id, !schedule.active);
-                                model.reload();
-                              }}
-                              type="button"
-                            >
-                              {schedule.active ? "Disable" : "Enable"}
-                            </button>
-                            <button
-                              className={`${buttonClass} bg-rose-50 text-rose-700`}
-                              onClick={() => {
-                                deleteDemoDoctorSchedule(schedule.id);
-                                model.reload();
-                              }}
-                              type="button"
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                ) : null}
-              </div>
-            );
-          })}
-        </section>
+      <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3 text-[10px] font-bold text-blue-900">
+        These hours are set by hospital administration and are what reception and patients book against. Contact administration to request a change.
+      </div>
 
-        <aside
-          className={`${formOpen ? "block" : "hidden xl:block"} xl:sticky xl:top-3`}
-          ref={formRef}
-        >
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-[0_12px_32px_rgba(15,23,42,0.07)]">
-            <div className="flex items-center justify-between">
-              <div>
-                <h2 className="text-xs font-black text-slate-950">
-                  {editing ? "Edit Schedule Block" : "Add Schedule Block"}
-                </h2>
-                <p className="mt-1 text-[9px] text-slate-500">
-                  Recurring weekly availability
-                </p>
+      <section className="space-y-2">
+        {WEEK_ORDER.map((dayNumber) => {
+          const dayRoster = roster.filter((item) => item.weekday === dayNumber);
+          return (
+            <div
+              className="rounded-2xl border border-slate-200 bg-white p-3"
+              key={DAYS[dayNumber]}
+            >
+              <div className="flex items-center gap-2">
+                <span className="grid h-8 w-8 place-items-center rounded-xl bg-indigo-50 text-indigo-700">
+                  <CalendarDays size={15} />
+                </span>
+                <div>
+                  <h2 className="text-[11px] font-black text-slate-950">
+                    {DAYS[dayNumber]}
+                  </h2>
+                  <p className="text-[9px] text-slate-500">
+                    {dayRoster.length
+                      ? `${dayRoster.length} rostered window${dayRoster.length === 1 ? "" : "s"}`
+                      : "No rostered hours"}
+                  </p>
+                </div>
               </div>
-              <button
-                className="text-[10px] font-black text-slate-500 xl:hidden"
-                onClick={() => setFormOpen(false)}
-                type="button"
-              >
-                Close
-              </button>
-            </div>
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <FormField className="col-span-2" label="Practice location">
-                <select
-                  className={fieldClass}
-                  onChange={(event) => {
-                    if (event.target.value === "__custom__") {
-                      setAddingLocation(true);
-                      return;
-                    }
-                    setSelectedLocationId(event.target.value);
-                  }}
-                  value={selectedLocationId}
-                >
-                  <option value="">Select a practice location</option>
-                  <optgroup label="Hospital branches">
-                    {scheduleLocations.filter((location) => !location.custom).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
-                  </optgroup>
-                  {scheduleLocations.some((location) => location.custom) ? <optgroup label="External clinics">
-                    {scheduleLocations.filter((location) => location.custom).map((location) => <option key={location.id} value={location.id}>{location.name}</option>)}
-                  </optgroup> : null}
-                  <option value="__custom__">+ Add an external clinic</option>
-                </select>
-              </FormField>
-              {addingLocation ? <div className="col-span-2 rounded-xl border border-cyan-100 bg-cyan-50/60 p-3"><label className="text-[9px] font-black uppercase text-slate-500">Clinic or location name<input autoFocus className={fieldClass} onChange={(event) => setCustomLocationName(event.target.value)} placeholder="e.g. City Medical Clinic" value={customLocationName} /></label><div className="mt-2 flex gap-2"><button className={`${buttonClass} bg-cyan-600 text-white`} onClick={() => { try { const location = addCustomDoctorLocation(customLocationName); setSelectedLocationId(location.id); setCustomLocationName(""); setAddingLocation(false); } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to add location."); } }} type="button"><Plus size={13} /> Add clinic</button><button className={`${buttonClass} bg-white text-slate-600`} onClick={() => setAddingLocation(false)} type="button">Cancel</button></div></div> : null}
-              <FormField className="col-span-2" label="Day">
-                <select
-                  className={fieldClass}
-                  onChange={(event) =>
-                    setDay(Number(event.target.value) as DemoDoctorScheduleDay)
-                  }
-                  value={day}
-                >
-                  {WEEK_ORDER.map((dayNumber) => (
-                    <option key={DAYS[dayNumber]} value={dayNumber}>
-                      {DAYS[dayNumber]}
-                    </option>
+              {dayRoster.length ? (
+                <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                  {dayRoster.map((item) => (
+                    <article
+                      className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3"
+                      key={item.id}
+                    >
+                      <p className="text-[11px] font-black text-slate-950">
+                        {formatMinuteOfDay(item.startsMinute)}–{formatMinuteOfDay(item.endsMinute)}
+                      </p>
+                      <p className="mt-1 text-[9px] font-semibold text-slate-500">
+                        {item.branch.name}
+                      </p>
+                      <p className="mt-1 text-[9px] text-slate-500">
+                        {item.capacity} slot{item.capacity === 1 ? "" : "s"}
+                      </p>
+                    </article>
                   ))}
-                </select>
-              </FormField>
-              <FormField label="Start time">
-                <input
-                  className={fieldClass}
-                  onChange={(event) => setStart(event.target.value)}
-                  type="time"
-                  value={start}
-                />
-              </FormField>
-              <FormField label="End time">
-                <input
-                  className={fieldClass}
-                  onChange={(event) => setEnd(event.target.value)}
-                  type="time"
-                  value={end}
-                />
-              </FormField>
-              <FormField label="Duration (minutes)">
-                <input
-                  className={fieldClass}
-                  max={120}
-                  min={5}
-                  onChange={(event) => setDuration(event.target.value)}
-                  type="number"
-                  value={duration}
-                />
-              </FormField>
-              <FormField label="Maximum patients">
-                <input
-                  className={fieldClass}
-                  min={1}
-                  onChange={(event) => setMaximum(event.target.value)}
-                  type="number"
-                  value={maximum}
-                />
-              </FormField>
-              <FormField className="col-span-2" label="Preferred room">
-                <select
-                  className={fieldClass}
-                  onChange={(event) => {
-                    if (event.target.value === "__custom__") {
-                      setAddingRoom(true);
-                      return;
-                    }
-                    setPreferredRoomId(event.target.value);
-                  }}
-                  value={preferredRoomId}
-                >
-                  <option value="">No preferred room</option>
-                  {rooms.map((room) => (
-                    <option key={room.id} value={room.id}>
-                      {room.label}
-                    </option>
-                  ))}
-                  <option value="__custom__">+ Add a custom room</option>
-                </select>
-              </FormField>
-              {addingRoom ? (
-                <div className="col-span-2 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
-                  <label className="text-[9px] font-black uppercase text-slate-500">New room<input autoFocus className={fieldClass} onChange={(event) => setCustomRoomName(event.target.value)} placeholder="e.g. OPD Room 7" value={customRoomName} /></label>
-                  <div className="mt-2 flex gap-2"><button className={`${buttonClass} bg-indigo-600 text-white`} onClick={() => { try { const room = addCustomConsultationRoom(customRoomName); setPreferredRoomId(room.id); setCustomRoomName(""); setAddingRoom(false); } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to add room."); } }} type="button"><Plus size={13} /> Add room</button><button className={`${buttonClass} bg-white text-slate-600`} onClick={() => setAddingRoom(false)} type="button">Cancel</button></div>
                 </div>
               ) : null}
-              <label className="col-span-2 flex h-9 items-center gap-2 rounded-xl bg-slate-50 px-3 text-[10px] font-bold text-slate-700">
-                <input
-                  checked={walkIns}
-                  onChange={(event) => setWalkIns(event.target.checked)}
-                  type="checkbox"
-                />
-                Allow walk-in patients
-              </label>
             </div>
-            {error ? (
-              <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-[10px] font-bold text-rose-700">
-                {error}
-              </p>
-            ) : null}
-            <div className="mt-3 flex gap-2">
-              <button
-                className={`${buttonClass} bg-indigo-600 text-white`}
-                onClick={save}
-                type="button"
-              >
-                {editing ? "Update Schedule" : "Save Schedule"}
-              </button>
-              <button
-                className={`${buttonClass} border border-slate-200 bg-white text-slate-700`}
-                onClick={() => {
-                  setEditing(undefined);
-                  setFormOpen(false);
-                  setError(undefined);
-                }}
-                type="button"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </aside>
-      </div>
+          );
+        })}
+      </section>
     </div>
   );
 }
 
-function FormField({
-  children,
-  className = "",
-  label,
-}: {
-  children: ReactNode;
-  className?: string;
-  label: string;
-}) {
+interface DoctorAppointmentRecord {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  status: string;
+  consultationMode: "IN_PERSON" | "ONLINE";
+  reason: string | null;
+  patient: { givenName: string; familyName: string; patientNumber: string };
+  service: { name: string } | null;
+  branch: { name: string; timezone: string };
+}
+
+/** Absorbed from the former live-doctor-appointments.tsx: in-person and online consultations booked against the doctor's real schedule. */
+export function DoctorAppointmentsPanel() {
+  const [appointments, setAppointments] = useState<DoctorAppointmentRecord[]>([]);
+  const [error, setError] = useState("");
+  const [now, setNow] = useState(0);
+
+  const load = useCallback(async () => {
+    try {
+      const response = await fetch("/api/v1/doctor/appointments", { cache: "no-store" });
+      const body = (await response.json()) as { appointments?: DoctorAppointmentRecord[]; error?: string };
+      if (!response.ok || !body.appointments) throw new Error(body.error ?? "Appointments could not be loaded.");
+      setAppointments(body.appointments);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Appointments could not be loaded.");
+    }
+  }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      setNow(Date.now());
+      void load();
+    });
+  }, [load]);
+
+  const upcoming = useMemo(
+    () => appointments.filter((item) => new Date(item.endsAt).getTime() >= now && !["CANCELLED", "NO_SHOW"].includes(item.status)),
+    [appointments, now],
+  );
+  const previous = useMemo(() => appointments.filter((item) => !upcoming.includes(item)), [appointments, upcoming]);
+
   return (
-    <label className={`text-[9px] font-black uppercase text-slate-500 ${className}`}>
-      {label}
-      {children}
-    </label>
+    <div className="space-y-4">
+      <DoctorPageHeader
+        description="In-person and online consultations booked against your live schedule."
+        icon={<CalendarDays size={18} />}
+        title="My appointments"
+      />
+
+      {error ? <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-bold text-red-700">{error}</div> : null}
+
+      {([["Upcoming", upcoming], ["Previous", previous]] as const).map(([label, items]) => (
+        <section
+          className="overflow-hidden rounded-[22px] border border-indigo-200/80 bg-gradient-to-br from-white via-white to-indigo-50/40 shadow-[0_16px_42px_rgba(79,70,229,0.12)]"
+          key={label}
+        >
+          <header className="relative flex flex-wrap items-center justify-between gap-2 overflow-hidden bg-gradient-to-r from-indigo-100 via-violet-50 to-cyan-100 px-4 py-3">
+            <div className="pointer-events-none absolute -right-8 -top-12 h-28 w-28 rounded-full bg-cyan-300/30 blur-2xl" />
+            <div className="relative flex items-center gap-2">
+              <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/20">
+                <CalendarClock size={15} />
+              </span>
+              <div>
+                <h2 className="text-[11px] font-black text-slate-950">{label} appointments</h2>
+                <p className="text-[9px] text-slate-500">
+                  {items.length} {items.length === 1 ? "appointment" : "appointments"}
+                </p>
+              </div>
+            </div>
+          </header>
+
+          <div className="p-4">
+            {items.length ? (
+              <div className="grid gap-3 xl:grid-cols-2">
+                {items.map((appointment) => (
+                  <article
+                    className="rounded-2xl border border-indigo-100/80 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-indigo-200 hover:shadow-md"
+                    key={appointment.id}
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                      <div>
+                        <h3 className="font-black text-slate-900">
+                          {appointment.patient.givenName} {appointment.patient.familyName}
+                        </h3>
+                        <p className="text-xs font-semibold text-slate-500">
+                          {appointment.patient.patientNumber} · {appointment.service?.name ?? "Consultation"}
+                        </p>
+                      </div>
+                      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.08em] text-indigo-700">
+                        {appointment.status.replaceAll("_", " ")}
+                      </span>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-600">
+                      <span className="inline-flex items-center gap-1">
+                        <Clock className="size-3.5 text-indigo-500" />
+                        {new Intl.DateTimeFormat("en-PK", { dateStyle: "medium", timeStyle: "short", timeZone: appointment.branch.timezone }).format(
+                          new Date(appointment.startsAt),
+                        )}
+                      </span>
+                      <span className="inline-flex items-center gap-1">
+                        <MapPin className="size-3.5 text-indigo-500" />
+                        {appointment.consultationMode === "ONLINE" ? "Online" : appointment.branch.name}
+                      </span>
+                    </div>
+
+                    {appointment.reason ? <p className="mt-3 text-sm text-slate-600">{appointment.reason}</p> : null}
+
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {appointment.consultationMode === "ONLINE" && !["CANCELLED", "NO_SHOW"].includes(appointment.status) ? (
+                        <Link
+                          className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 px-4 py-2.5 text-xs font-black text-white shadow-lg shadow-indigo-500/25 transition hover:-translate-y-0.5"
+                          href={`/doctor/appointments/${appointment.id}/video`}
+                        >
+                          <Video className="size-4" />
+                          Open video consultation
+                        </Link>
+                      ) : (
+                        <Link
+                          className="inline-flex items-center gap-2 rounded-xl border border-indigo-200 bg-white px-4 py-2.5 text-xs font-black text-indigo-700 transition hover:bg-indigo-50"
+                          href="/doctor/consultations"
+                        >
+                          <Stethoscope className="size-4" />
+                          Open clinical workspace
+                        </Link>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/40 p-8 text-center text-sm font-semibold text-slate-500">
+                No {label.toLowerCase()} appointments.
+              </p>
+            )}
+          </div>
+        </section>
+      ))}
+    </div>
   );
 }

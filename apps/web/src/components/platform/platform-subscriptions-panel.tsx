@@ -15,10 +15,10 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 import {
   usePlatformAdministration,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 import type {
   PlatformTenantSubscription,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 import {
   PlatformEmptyState,
   PlatformLoadingState,

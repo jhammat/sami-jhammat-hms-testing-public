@@ -1,7 +1,7 @@
-import { LivePatientPortal } from "@/components/patient/live-patient-portal";
+import { PatientAccessDashboard } from "@/components/patient/patient-access-dashboard";
 
 export default function PatientAccessPage() {
   return (
-    <LivePatientPortal section="home" />
+    <PatientAccessDashboard section="home" />
   );
 }

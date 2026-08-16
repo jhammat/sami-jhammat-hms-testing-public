@@ -8,16 +8,17 @@ import { WonFlowAsyncDataBoundary, WonFlowEmptyState, useWonFlowConfirm } from "
 import { phaseOneApi } from "@/lib/api/phase-one-api";
 import { useWonFlowAsyncData } from "@/lib/data";
 import { useDoctorPortalContext } from "./doctor-portal-shell";
-import { CompactDoctorPortal } from "./compact-doctor-portal";
 
 const DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"] as const;
 
+function formatMinuteOfDay(value: number): string {
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
+}
+
 function PracticeSchedulePanel() {
-  const { schedules, branches } = useDoctorPortalContext();
-  const [editingSchedule, setEditingSchedule] = useState(false);
-  const branchNames = new Map(branches.map((branch) => [branch.id, branch.name]));
-  const orderedSchedules = [...schedules].sort(
-    (left, right) => left.dayOfWeek - right.dayOfWeek || left.startTime.localeCompare(right.startTime),
+  const { roster } = useDoctorPortalContext();
+  const orderedRoster = [...roster].sort(
+    (left, right) => left.weekday - right.weekday || left.startsMinute - right.startsMinute,
   );
 
   return (
@@ -25,16 +26,14 @@ function PracticeSchedulePanel() {
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-indigo-50 via-white to-cyan-50 px-5 py-4">
         <div className="flex items-center gap-3">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/20"><CalendarDays size={18} /></span>
-          <div><h2 className="font-bold text-slate-950">Consultation schedule</h2><p className="mt-0.5 text-xs text-slate-500">Configure your weekly hours, appointment duration and patient capacity.</p></div>
+          <div><h2 className="font-bold text-slate-950">Consultation schedule</h2><p className="mt-0.5 text-xs text-slate-500">Your weekly hours, set by hospital administration and bookable by reception and patients.</p></div>
         </div>
-        <button className="inline-flex min-h-10 items-center rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white transition hover:bg-indigo-700" onClick={() => setEditingSchedule((current) => !current)} type="button">{editingSchedule ? "Close schedule editor" : "Configure schedule"}</button>
       </div>
-      {orderedSchedules.length === 0 ? (
-        <div className="m-5 rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/40 p-7 text-center"><p className="text-sm font-bold text-slate-800">No consultation hours configured</p><p className="mt-1 text-xs text-slate-500">Add your weekly availability before accepting appointments.</p><button className="mt-4 inline-flex min-h-10 items-center rounded-xl border border-indigo-200 bg-white px-4 text-xs font-bold text-indigo-700" onClick={() => setEditingSchedule(true)} type="button">Set up my schedule</button></div>
+      {orderedRoster.length === 0 ? (
+        <div className="m-5 rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/40 p-7 text-center"><p className="text-sm font-bold text-slate-800">No consultation hours configured</p><p className="mt-1 text-xs text-slate-500">Ask hospital administration to add your weekly availability.</p></div>
       ) : (
-        <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">{orderedSchedules.map((schedule) => <article className={`rounded-2xl border p-4 ${schedule.active ? "border-indigo-100 bg-indigo-50/50" : "border-slate-200 bg-slate-50 opacity-65"}`} key={schedule.id}><div className="flex items-center justify-between gap-2"><h3 className="text-sm font-bold text-slate-900">{DAY_NAMES[schedule.dayOfWeek]}</h3><span className={`rounded-full px-2 py-1 text-[9px] font-bold ${schedule.active ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-600"}`}>{schedule.active ? "ACTIVE" : "INACTIVE"}</span></div><p className="mt-3 text-sm font-bold text-indigo-700">{schedule.startTime}–{schedule.endTime}</p><p className="mt-1 text-xs text-slate-500">{branchNames.get(schedule.branchId) ?? "Hospital branch"} · {schedule.appointmentDurationMinutes} min · {schedule.maximumPatients} patients</p></article>)}</div>
+        <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">{orderedRoster.map((item) => <article className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4" key={item.id}><h3 className="text-sm font-bold text-slate-900">{DAY_NAMES[item.weekday]}</h3><p className="mt-3 text-sm font-bold text-indigo-700">{formatMinuteOfDay(item.startsMinute)}–{formatMinuteOfDay(item.endsMinute)}</p><p className="mt-1 text-xs text-slate-500">{item.branch.name} · {item.capacity} slot{item.capacity === 1 ? "" : "s"}</p></article>)}</div>
       )}
-      {editingSchedule ? <div className="border-t border-slate-100 bg-slate-50/50 p-5"><CompactDoctorPortal embedded screen="schedule" /></div> : null}
     </section>
   );
 }

@@ -74,46 +74,74 @@ export function WonFlowApplicationProvider({
   children,
 }: WonFlowApplicationProviderProps) {
   const runtime = useMemo(
-    () =>
-      getWonFlowFrontendDataRuntime(
-        configuration,
-      ),
+    () => {
+      try {
+        return getWonFlowFrontendDataRuntime(
+          configuration,
+        );
+      } catch (error) {
+        // Every page mounts this provider, but only a handful of
+        // not-yet-migrated components ever read `runtime` — most of the
+        // app gets its data from real /api/v1 routes instead. Failing to
+        // construct the legacy mock runtime (e.g. in API data mode, where
+        // it isn't implemented) must not take down every page; it should
+        // only break the specific screen that actually reaches for it.
+        return new Proxy(
+          {} as WonFlowFrontendDataRuntime,
+          {
+            get() {
+              throw error;
+            },
+          },
+        );
+      }
+    },
     [configuration],
   );
 
   const contextValue = useMemo<
     WonFlowApplicationContextValue
   >(
-    () => ({
-      configuration,
+    () =>
+      // Getters, not eager values: `runtime` may be the throwing proxy
+      // above, and reading e.g. `.service` off it here (as a plain
+      // property value) would trigger that throw for every page again,
+      // regardless of whether anything ever reads `hospitalService`.
+      ({
+        configuration,
 
-      runtime,
+        runtime,
 
-      hospitalService:
-        runtime.service,
+        get hospitalService() {
+          return runtime.service;
+        },
 
-      practiceService:
-        runtime.practiceService,
+        get practiceService() {
+          return runtime.practiceService;
+        },
 
-      practiceTenant:
-        runtime.practiceTenant,
+        get practiceTenant() {
+          return runtime.practiceTenant;
+        },
 
-      environment:
-        configuration
-          .application
-          .environment,
+        environment:
+          configuration
+            .application
+            .environment,
 
-      locale:
-        configuration
-          .application
-          .defaultLocale,
+        locale:
+          configuration
+            .application
+            .defaultLocale,
 
-      fictionalData:
-        runtime.fictional,
+        get fictionalData() {
+          return runtime.fictional;
+        },
 
-      demoScenario:
-        runtime.scenario,
-    }),
+        get demoScenario() {
+          return runtime.scenario;
+        },
+      }),
     [
       configuration,
       runtime,

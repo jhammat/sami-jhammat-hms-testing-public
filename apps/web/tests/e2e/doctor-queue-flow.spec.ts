@@ -51,7 +51,7 @@ function laterTodayStartTime(): Date {
   return candidate > todayEnd ? todayEnd : candidate;
 }
 
-test("a patient reception checks in appears in the doctor's real queue and can be called, started and completed", async ({ page, request }) => {
+test("a patient reception checks in appears in the doctor's real queue and can be called, started and completed", async ({ request }) => {
   await loginAs(request, "reception@wonflow.local");
 
   const catalog = await (await request.get("/api/v1/reception/catalog")).json() as {

@@ -15,6 +15,9 @@ interface ApplicationShellBoundaryProps {
 
 function isPublicOrAccessRoute(pathname: string): boolean {
   return (
+    // "/" only ever redirects to /login. Rendering the application shell for
+    // it flashed the full every-workspace sidebar before the redirect landed.
+    pathname === "/" ||
     pathname === "/login" ||
     pathname === "/unauthorized" ||
     pathname === "/patient/register" ||

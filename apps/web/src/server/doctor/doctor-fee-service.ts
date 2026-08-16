@@ -70,7 +70,7 @@ export class DoctorFeeService {
       }),
       database.serviceDefinition.findMany({
         where: { tenantId: context.tenantId, doctorId: doctor.id, isActive: true },
-        include: { branch: true },
+        include: { branch: true, feeHistory: { orderBy: { changedAt: "desc" }, take: 10 } },
         orderBy: [{ isActive: "desc" }, { name: "asc" }],
       }),
     ]);
@@ -128,24 +128,29 @@ export class DoctorFeeService {
     if (input.branchId && !branch) {
       throw new WonFlowApiError(400, "invalid-service-branch", "The selected branch is unavailable.");
     }
-    const entity = await database.serviceDefinition.create({
-      data: {
-        tenantId: context.tenantId,
-        branchId: branch?.id ?? null,
-        doctorId: doctor.id,
-        code: `DR-${doctor.id.slice(0, 8)}-${input.code.trim()}`.toUpperCase(),
-        name: input.name.trim(),
-        category: "CONSULTATION",
-        description: input.description?.trim() || null,
-        durationMinutes: input.durationMinutes,
-        priceMinorUnits: input.priceMinorUnits,
-        currencyCode: branch?.currencyCode ?? context.currencyCode,
-        publiclyBookable: input.publiclyBookable ?? false,
-        consultationMode: input.consultationMode ?? "IN_PERSON",
-        handlerMembershipId: doctor.staffProfile.membershipId,
-        billingOwner: "DOCTOR",
-      },
-      include: { branch: true },
+    const currencyCode = branch?.currencyCode ?? context.currencyCode;
+    const entity = await database.$transaction(async (tx) => {
+      const created = await tx.serviceDefinition.create({
+        data: {
+          tenantId: context.tenantId,
+          branchId: branch?.id ?? null,
+          doctorId: doctor.id,
+          code: `DR-${doctor.id.slice(0, 8)}-${input.code.trim()}`.toUpperCase(),
+          name: input.name.trim(),
+          category: "CONSULTATION",
+          description: input.description?.trim() || null,
+          durationMinutes: input.durationMinutes,
+          priceMinorUnits: input.priceMinorUnits,
+          currencyCode,
+          publiclyBookable: input.publiclyBookable ?? false,
+          consultationMode: input.consultationMode ?? "IN_PERSON",
+          handlerMembershipId: doctor.staffProfile.membershipId,
+          billingOwner: "DOCTOR",
+        },
+        include: { branch: true },
+      });
+      await tx.serviceFeeHistory.create({ data: { tenantId: context.tenantId, serviceId: created.id, priceMinorUnits: input.priceMinorUnits, currencyCode, changedByMembershipId: context.membershipId! } });
+      return created;
     });
     await audit(context, "doctor.consultation-service.created", entity.id);
     return entity;
@@ -186,14 +191,20 @@ export class DoctorFeeService {
     if (input.priceMinorUnits !== undefined && existing.billingOwner !== "DOCTOR") {
       throw new WonFlowApiError(403, "hospital-controls-fee", existing.billingOwner === "DEPARTMENT" ? "This fee is controlled by the department that owns the service." : "This fee is controlled by hospital administration.");
     }
-    const entity = await database.serviceDefinition.update({
-      where: { id: existing.id, tenantId: context.tenantId },
-      data: {
-        ...input,
-        name: input.name?.trim(),
-        description: input.description === undefined ? undefined : input.description.trim() || null,
-      },
-      include: { branch: true },
+    const entity = await database.$transaction(async (tx) => {
+      const updated = await tx.serviceDefinition.update({
+        where: { id: existing.id, tenantId: context.tenantId },
+        data: {
+          ...input,
+          name: input.name?.trim(),
+          description: input.description === undefined ? undefined : input.description.trim() || null,
+        },
+        include: { branch: true },
+      });
+      if (input.priceMinorUnits !== undefined && input.priceMinorUnits !== existing.priceMinorUnits) {
+        await tx.serviceFeeHistory.create({ data: { tenantId: context.tenantId, serviceId: updated.id, priceMinorUnits: input.priceMinorUnits, currencyCode: updated.currencyCode, changedByMembershipId: context.membershipId! } });
+      }
+      return updated;
     });
     await audit(context, "doctor.consultation-service.updated", entity.id);
     return entity;

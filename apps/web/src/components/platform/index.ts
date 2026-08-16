@@ -1,20 +1,15 @@
-export * from "./platform-administration-store";
+export * from "./platform-administration-context";
 export * from "./platform-administration-ui";
 export * from "./platform-admin-dashboard";
 export * from "./platform-tenant-console-header";
 export * from "./platform-tenant-registry";
+export * from "./platform-deleted-tenants";
 export * from "./platform-tenant-create-form";
 export * from "./platform-tenant-details";
+export { PlatformTenantSettingsPanel } from "./platform-tenant-settings";
+export * from "./platform-tenant-flow-wizard";
 export * from "./platform-entitlements-panel";
 export * from "./platform-subscriptions-panel";
 export * from "./platform-support-access-panel";
 export * from "./platform-audit-panel";
 export * from "./platform-system-settings";
-
-export * from "./platform-support-access";
-export * from "./platform-tenant-controls";
-export * from "./platform-tenant-safety";
-export * from "./destructive-platform-action";
-export * from "./support-access-status";
-export * from "./platform-tenant-scope";
-export * from "./platform-audit-trail";

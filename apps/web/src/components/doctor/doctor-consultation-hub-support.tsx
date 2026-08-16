@@ -12,7 +12,6 @@ import type {
   DemoClinicalDocumentation,
   DemoClinicalEncounter,
   DemoClinicalPrescriptionItem,
-  StartDemoClinicalConsultationError,
 } from "@/lib/clinical";
 import {
   getDemoPatientRegistrationAge,
@@ -698,30 +697,6 @@ export function PatientLink({
       {label}
     </Link>
   );
-}
-
-export function startErrorMessage(
-  error: StartDemoClinicalConsultationError,
-  conflictingQueueEntry?: DemoQueueEntry,
-): string {
-  switch (error) {
-    case "queue-entry-not-found":
-      return "The queue record is no longer available.";
-    case "queue-entry-outside-context":
-      return "This patient belongs to a different doctor, branch, or business date.";
-    case "sitting-not-available":
-      return "Start an available doctor sitting on Today before beginning the consultation.";
-    case "sitting-on-break":
-      return "Resume the doctor sitting before beginning the consultation.";
-    case "patient-not-called":
-      return "Call the patient from Todayâ€™s Queue before beginning the consultation.";
-    case "another-consultation-serving":
-      return `${conflictingQueueEntry?.tokenNumber ?? "Another patient"} is already in consultation. Finish it before starting another.`;
-    case "encounter-already-completed":
-      return "This queue record is linked to a completed encounter.";
-    case "queue-entry-closed":
-      return "This queue record is not available to start.";
-  }
 }
 
 export function requestedQueueMessage(

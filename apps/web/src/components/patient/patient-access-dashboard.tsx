@@ -1,1328 +1,718 @@
 "use client";
 
 import Link from "next/link";
-
 import {
-  useMemo,
-  useState,
-} from "react";
+  CalendarDays,
+  CalendarPlus,
+  ClipboardList,
+  FileText,
+  FlaskConical,
+  HeartPulse,
+  Pill,
+  ReceiptText,
+  RefreshCw,
+  ShieldAlert,
+  Stethoscope,
+  Upload,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
-import type {
-  MockAdmission,
-  MockAppointment,
-  MockInvoiceSummary,
-  MockPatient,
-} from "@wonflow/mock-data";
+import { WONFLOW_AVATAR_CHANGED_EVENT } from "@/components/shell";
+import { WonFlowPageHeader } from "@/components/workspace";
 
-import {
-  useWonFlowHospitalService,
-} from "@/app/_providers";
+type Section = "home" | "care" | "reports" | "billing";
 
-import {
-  WonFlowAsyncDataBoundary,
-  WonFlowEmptyState,
-} from "@/components/feedback";
+interface PatientHome {
+  patient: { id: string; patientNumber: string; givenName: string; middleName: string | null; familyName: string; dateOfBirth: string | null; sex: string | null; phone: string | null; email: string | null };
+  appointments: Array<{ id: string; startsAt: string; status: string; service: { name: string }; branch: { name: string } }>;
+  prescriptions: Array<{ id: string; status: string; instructions: string | null; items: Array<{ id: string; dosage: string | null; frequency: string | null; duration: string | null; medication: { genericName: string; brandName: string | null; strength: string | null } }> }>;
+  diagnosticOrders: Array<{
+    id: string;
+    type: string;
+    code: string;
+    name: string;
+    status: string;
+    results: Array<{ id: string; reportText: string | null; resultData: unknown; critical: boolean; releasedAt: string | null }>;
+    attachments: Array<{ id: string; title: string; contentType: string; sizeBytes: string; objectStatus: string; uploadedByPatient: boolean; createdAt: string }>;
+  }>;
+  documents: Array<{ id: string; category: string; title: string; status: string; createdAt: string }>;
+  invoices: Array<{
+    id: string;
+    invoiceNumber: string;
+    status: string;
+    currencyCode: string;
+    totalMinor: number;
+    paidMinor: number;
+    issuedAt: string | null;
+    createdAt: string;
+    lines: Array<{ id: string; description: string; quantity: number; totalMinor: number }>;
+    payments: Array<{ id: string; status: string; method: string; amountMinor: number; completedAt: string | null; createdAt: string }>;
+  }>;
+}
 
-import {
-  WonFlowActionBar,
-  WonFlowActionButton,
-  WonFlowKpiCard,
-  WonFlowOperationalPanel,
-  WonFlowPageHeader,
-} from "@/components/workspace";
+const formatMoney = (minor: number, currencyCode: string) =>
+  new Intl.NumberFormat("en-PK", { style: "currency", currency: currencyCode }).format(minor / 100);
 
-import {
-  useWonFlowAsyncData,
-} from "@/lib/data";
+const formatDate = (value: string | null) =>
+  value
+    ? new Intl.DateTimeFormat("en-PK", { dateStyle: "medium", ...(value.includes("T") ? { timeStyle: "short" as const } : {}) }).format(new Date(value))
+    : "Not provided";
 
-import {
-  formatWonFlowDashboardDateTime,
-  formatWonFlowDashboardMoney,
-  formatWonFlowDashboardTime,
-  useWonFlowPatientDashboard,
-} from "@/lib/dashboard";
+const formatTime = (value: string) => new Intl.DateTimeFormat("en-PK", { timeStyle: "short" }).format(new Date(value));
 
-import type {
-  WonFlowPatientDashboardProjection,
-} from "@/lib/dashboard";
+const humanize = (value: string) => value.replaceAll("_", " ").toLowerCase();
 
-function PatientIcon() {
+/** Tone classes are limited to the palette that globals.css remaps for dark mode. */
+const toneClasses = {
+  blue: "border-blue-100 bg-blue-50 text-blue-700",
+  violet: "border-blue-100 bg-violet-50 text-violet-700",
+  emerald: "border-blue-100 bg-emerald-50 text-emerald-700",
+  amber: "border-blue-100 bg-amber-50 text-amber-700",
+  slate: "border-slate-200 bg-slate-50 text-slate-600",
+} as const;
+
+type Tone = keyof typeof toneClasses;
+
+function statusTone(status: string): Tone {
+  const value = status.toUpperCase();
+  if (["CANCELLED", "NO_SHOW", "REJECTED"].includes(value)) return "amber";
+  if (["COMPLETED", "RELEASED", "CONFIRMED", "ACTIVE", "VERIFIED"].includes(value)) return "emerald";
+  if (["PENDING", "REQUESTED", "IN_PROGRESS", "IN_QUEUE", "CHECKED_IN"].includes(value)) return "blue";
+  return "slate";
+}
+
+function StatusPill({ status }: { status: string }) {
   return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <circle
-        cx="12"
-        cy="8"
-        r="3"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="M5 21a7 7 0 0 1 14 0"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="M19 7h3M20.5 5.5v3"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function CalendarIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <rect
-        height="16"
-        rx="2"
-        stroke="currentColor"
-        strokeWidth="1.8"
-        width="18"
-        x="3"
-        y="5"
-      />
-
-      <path
-        d="M7 3v4M17 3v4M3 10h18"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function HistoryIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M4 12a8 8 0 1 0 2.3-5.7"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="M4 5v5h5M12 8v5l3 2"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function BedIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M4 19v-9M20 19v-6a3 3 0 0 0-3-3H9v7"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="M4 17h16M6 10V7h4a2 2 0 0 1 2 2v1"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function InvoiceIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M6 3h12v18l-3-2-3 2-3-2-3 2V3Z"
-        stroke="currentColor"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="M9 8h6M9 12h6M9 16h3"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function WalletIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M4 7a3 3 0 0 1 3-3h11v4H7a3 3 0 0 0 0 6h13v6H7a3 3 0 0 1-3-3V7Z"
-        stroke="currentColor"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="M17 11h4v5h-4a2.5 2.5 0 0 1 0-5Z"
-        stroke="currentColor"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function RefreshIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-4 w-4"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M20 7v5h-5M4 17v-5h5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2"
-      />
-
-      <path
-        d="M6.1 9a7 7 0 0 1 11.7-2.4L20 12M4 12l2.2 5.4A7 7 0 0 0 17.9 15"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function ShieldIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M12 3 20 6v5c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6l8-3Z"
-        stroke="currentColor"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="m8.5 12 2.2 2.2 4.8-5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function humanizeStatus(
-  value: string,
-): string {
-  return value
-    .replaceAll("-", " ")
-    .replace(
-      /\b\w/g,
-      (character) =>
-        character.toUpperCase(),
-    );
-}
-
-function getInitials(
-  displayName: string,
-): string {
-  return displayName
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 2)
-    .map(
-      (part) =>
-        part.charAt(0).toUpperCase(),
-    )
-    .join("");
-}
-
-function getAppointmentStatusClass(
-  status:
-    MockAppointment["status"],
-): string {
-  switch (status) {
-    case "completed":
-      return "bg-emerald-50 text-emerald-700 ring-emerald-100";
-
-    case "in-consultation":
-      return "bg-violet-50 text-violet-700 ring-violet-100";
-
-    case "arrived":
-    case "checked-in":
-      return "bg-blue-50 text-blue-700 ring-blue-100";
-
-    case "booked":
-    case "confirmed":
-      return "bg-amber-50 text-amber-700 ring-amber-100";
-
-    case "cancelled":
-    case "no-show":
-      return "bg-rose-50 text-rose-700 ring-rose-100";
-  }
-}
-
-function getAdmissionStatusClass(
-  status:
-    MockAdmission["status"],
-): string {
-  switch (status) {
-    case "admitted":
-      return "bg-blue-50 text-blue-700 ring-blue-100";
-
-    case "awaiting-bed":
-      return "bg-amber-50 text-amber-700 ring-amber-100";
-
-    case "transfer-pending":
-      return "bg-violet-50 text-violet-700 ring-violet-100";
-
-    case "discharge-planning":
-      return "bg-cyan-50 text-cyan-700 ring-cyan-100";
-
-    case "discharge-ready":
-      return "bg-emerald-50 text-emerald-700 ring-emerald-100";
-  }
-}
-
-function getInvoiceStatusClass(
-  status:
-    MockInvoiceSummary["status"],
-): string {
-  switch (status) {
-    case "paid":
-      return "bg-emerald-50 text-emerald-700 ring-emerald-100";
-
-    case "partially-paid":
-      return "bg-blue-50 text-blue-700 ring-blue-100";
-
-    case "draft":
-    case "issued":
-      return "bg-amber-50 text-amber-700 ring-amber-100";
-
-    case "overdue":
-      return "bg-rose-50 text-rose-700 ring-rose-100";
-  }
-}
-
-function StatusBadge({
-  label,
-  className,
-}: {
-  label: string;
-  className: string;
-}) {
-  return (
-    <span
-      className={[
-        "inline-flex items-center",
-        "rounded-full px-2.5 py-1",
-        "text-[11px] font-bold",
-        "ring-1",
-        className,
-      ].join(" ")}
-    >
-      {label}
+    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-wide ${toneClasses[statusTone(status)]}`}>
+      {humanize(status)}
     </span>
   );
 }
 
-interface PatientDashboardContentProps {
-  projection:
-    WonFlowPatientDashboardProjection;
-
-  patients:
-    readonly MockPatient[];
-
-  selectedPatientId:
-    MockPatient["id"];
-
-  onPatientChange(
-    patientId:
-      MockPatient["id"],
-  ): void;
-
-  onRefresh(): void;
-
-  refreshing: boolean;
+function SectionCard({ title, description, action, children }: { title: string; description?: string; action?: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-black text-slate-900">{title}</h2>
+          {description ? <p className="mt-1 text-sm text-slate-500">{description}</p> : null}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
 }
 
-function PatientDashboardContent({
-  projection,
-  patients,
-  selectedPatientId,
-  onPatientChange,
-  onRefresh,
-  refreshing,
-}: PatientDashboardContentProps) {
-  const branchesById =
-    useMemo(
-      () =>
-        new Map(
-          projection.branches.map(
-            (branch) => [
-              branch.id,
-              branch,
-            ],
-          ),
-        ),
-      [projection.branches],
-    );
+function EmptyState({ icon: Icon, title, hint, action }: { icon: LucideIcon; title: string; hint?: string; action?: React.ReactNode }) {
+  return (
+    <div className="mt-4 flex flex-col items-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
+      <span className="grid size-11 place-items-center rounded-2xl bg-blue-50 text-blue-600">
+        <Icon aria-hidden className="size-5" />
+      </span>
+      <p className="mt-3 text-sm font-black text-slate-700">{title}</p>
+      {hint ? <p className="mt-1 max-w-sm text-sm text-slate-500">{hint}</p> : null}
+      {action ? <div className="mt-4">{action}</div> : null}
+    </div>
+  );
+}
 
-  const practitionersById =
-    useMemo(
-      () =>
-        new Map(
-          projection.practitioners.map(
-            (practitioner) => [
-              practitioner.id,
-              practitioner,
-            ],
-          ),
-        ),
-      [projection.practitioners],
-    );
+function formatBytes(sizeBytes: string): string {
+  const bytes = Number(sizeBytes);
+  if (!Number.isFinite(bytes) || bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
-  const nextAppointment =
-    projection
-      .upcomingAppointments[0];
+/**
+ * Attach a scan image, a photo of a printed report, or a PDF to this test --
+ * uploads land immediately and are visible to your care team right away.
+ * Doctors and lab/radiology staff can attach files too; only lab/radiology
+ * staff can remove one, so a wrong upload here is fixed by adding the right
+ * file rather than deleting anything yourself.
+ */
+function DiagnosticAttachments({
+  orderId,
+  attachments,
+  onUploaded,
+}: {
+  orderId: string;
+  attachments: PatientHome["diagnosticOrders"][number]["attachments"];
+  onUploaded: () => void;
+}) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
 
-  const nextDoctor =
-    nextAppointment === undefined
-      ? undefined
-      : practitionersById.get(
-          nextAppointment
-            .practitionerId,
-        );
-
-  const nextBranch =
-    nextAppointment === undefined
-      ? undefined
-      : branchesById.get(
-          nextAppointment.branchId,
-        );
+  const handleFile = useCallback(async (file: File) => {
+    setUploading(true);
+    setUploadError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch(`/api/v1/patient/diagnostics/orders/${orderId}/attachments`, { method: "POST", credentials: "same-origin", body: form });
+      const body = await response.json() as { error?: string; scanResult?: string };
+      if (!response.ok) throw new Error(body.error ?? "The file could not be attached.");
+      if (body.scanResult === "INFECTED") throw new Error("This file failed a security scan and was not attached.");
+      onUploaded();
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : "The file could not be attached.");
+    } finally {
+      setUploading(false);
+    }
+  }, [orderId, onUploaded]);
 
   return (
-    <div className="space-y-4">
-      <WonFlowActionBar
-        description="Select a patient profile and refresh their connected care information."
-        filters={
-          <label className="flex min-w-64 flex-col gap-1.5">
-            <span className="text-xs font-bold text-slate-500">
-              Patient profile
-            </span>
-
-            <select
-              className={[
-                "h-11 rounded-xl",
-                "border border-slate-200",
-                "bg-white px-3.5",
-                "text-sm font-semibold",
-                "text-slate-800",
-                "outline-none transition",
-                "focus:border-blue-400",
-                "focus:ring-2",
-                "focus:ring-blue-100",
-              ].join(" ")}
-              onChange={(
-                event,
-              ) => {
-                onPatientChange(
-                  event.target
-                    .value as
-                    MockPatient["id"],
-                );
-              }}
-              value={
-                selectedPatientId
-              }
-            >
-              {patients.map(
-                (patient) => (
-                  <option
-                    key={patient.id}
-                    value={patient.id}
-                  >
-                    {patient.displayName}
-                    {" — "}
-                    {patient.mrNumber}
-                  </option>
-                ),
-              )}
-            </select>
-          </label>
-        }
-        primaryActions={
-          <WonFlowActionButton
-            icon={<RefreshIcon />}
-            onClick={onRefresh}
-            variant="primary"
-          >
-            {refreshing
-              ? "Refreshing"
-              : "Refresh My Care"}
-          </WonFlowActionButton>
-        }
-        summary="Secure patient overview"
-        title="Patient Access Controls"
-      />
-
-      <section
-        className={[
-          "relative isolate overflow-hidden rounded-[24px]",
-          "border border-indigo-300/30",
-          "bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.28),transparent_30%),linear-gradient(115deg,#0f172a_0%,#1d4ed8_48%,#6d28d9_100%)]",
-          "p-4 text-white",
-          "shadow-[0_22px_55px_rgba(30,64,175,0.25)]",
-          "sm:p-5",
-        ].join(" ")}
-      >
-        <div className="pointer-events-none absolute inset-0 opacity-25 [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:20px_20px]" />
-        <div className="relative grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_minmax(300px,0.8fr)] lg:items-center">
-          <div className="flex min-w-0 items-center gap-4">
-            <div
-              className={[
-                "flex h-14 w-14",
-                "shrink-0 items-center",
-                "justify-center rounded-[18px]",
-                "bg-white/16",
-                "text-lg font-black",
-                "ring-1 ring-white/35",
-                "backdrop-blur",
-              ].join(" ")}
-            >
-              {getInitials(
-                projection
-                  .patient
-                  .displayName,
-              )}
-            </div>
-
-            <div className="min-w-0">
-              <div className="text-xs font-extrabold uppercase tracking-[0.18em] text-blue-100">
-                My WonFlow Care
-              </div>
-
-              <h2 className="mt-1 truncate text-2xl font-black tracking-[-0.035em] text-white">
-                {
-                  projection
-                    .patient
-                    .displayName
-                }
-              </h2>
-
-              <p className="mt-1 text-sm text-indigo-100">
-                Medical record
-                {" "}
-                {
-                  projection
-                    .patient
-                    .mrNumber
-                }
-              </p>
-            </div>
-          </div>
-
-          <div className="rounded-[18px] bg-white/12 px-4 py-3.5 ring-1 ring-white/25 backdrop-blur-xl">
-            <div className="text-xs font-bold uppercase tracking-wider text-blue-100">
-              Next Appointment
-            </div>
-
-            {nextAppointment ===
-            undefined ? (
-              <div className="mt-3 text-sm font-semibold text-indigo-100">
-                No upcoming appointment is currently scheduled.
-              </div>
-            ) : (
-              <>
-                <div className="mt-1.5 text-xl font-black">
-                  {formatWonFlowDashboardDateTime(
-                    nextAppointment
-                      .scheduledStartAt,
-                  )}
-                </div>
-
-                <div className="mt-2 text-sm font-bold text-white">
-                  {
-                    nextAppointment
-                      .serviceName
-                  }
-                </div>
-
-                <div className="mt-1 text-xs leading-5 text-indigo-100">
-                  {nextDoctor
-                    ?.displayName ??
-                    "Doctor assignment pending"}
-                  {" · "}
-                  {nextBranch
-                    ?.name ??
-                    "Branch pending"}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </section>
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <WonFlowKpiCard
-          helperText="Confirmed future visits"
-          icon={<CalendarIcon />}
-          label="Upcoming Appointments"
-          tone="blue"
-          value={
-            projection
-              .summary
-              .upcomingAppointments
-          }
-        />
-
-        <WonFlowKpiCard
-          helperText="Latest appointment activity"
-          icon={<HistoryIcon />}
-          label="Recent Visits"
-          tone="violet"
-          value={
-            projection
-              .recentAppointments
-              .length
-          }
-        />
-
-        <WonFlowKpiCard
-          helperText="Current inpatient cases"
-          icon={<BedIcon />}
-          label="Active Admissions"
-          tone="emerald"
-          value={
-            projection
-              .summary
-              .activeAdmissions
-          }
-        />
-
-        <WonFlowKpiCard
-          helperText="Invoices with remaining value"
-          icon={<InvoiceIcon />}
-          label="Outstanding Invoices"
-          tone="amber"
-          value={
-            projection
-              .summary
-              .outstandingInvoices
-          }
-        />
-
-        <WonFlowKpiCard
-          helperText="Current unpaid balance"
-          icon={<WalletIcon />}
-          label="Outstanding Balance"
-          tone="rose"
-          value={formatWonFlowDashboardMoney(
-            projection
-              .summary
-              .outstandingBalanceMinorUnits,
-
-            projection
-              .summary
-              .currencyCode,
-          )}
-        />
-      </div>
-
-      <WonFlowOperationalPanel
-        compact
-        description="Move directly to your main care-information sections."
-        title="My Care Navigation"
-        tone="slate"
-      >
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {[
-            {
-              href:
-                "#patient-upcoming",
-              label:
-                "Appointments",
-              value:
-                projection
-                  .upcomingAppointments
-                  .length,
-              className:
-                "from-blue-50 to-indigo-50 text-blue-800 ring-blue-100",
-            },
-            {
-              href:
-                "#patient-history",
-              label:
-                "Recent Activity",
-              value:
-                projection
-                  .recentAppointments
-                  .length,
-              className:
-                "from-violet-50 to-purple-50 text-violet-800 ring-violet-100",
-            },
-            {
-              href:
-                "#patient-admissions",
-              label:
-                "Admissions",
-              value:
-                projection
-                  .activeAdmissions
-                  .length,
-              className:
-                "from-emerald-50 to-teal-50 text-emerald-800 ring-emerald-100",
-            },
-            {
-              href:
-                "#patient-invoices",
-              label:
-                "Invoices",
-              value:
-                projection
-                  .outstandingInvoices
-                  .length,
-              className:
-                "from-amber-50 to-rose-50 text-amber-800 ring-amber-100",
-            },
-          ].map(
-            (item) => (
-              <Link
-                className={[
-                  "rounded-[16px]",
-                  "bg-gradient-to-br",
-                  "p-3 ring-1",
-                  "transition",
-                  "hover:-translate-y-0.5",
-                  "hover:shadow-md",
-                  item.className,
-                ].join(" ")}
-                href={item.href}
-                key={item.href}
+    <div className="mt-3 rounded-xl border border-dashed border-blue-200 bg-blue-50/60 p-3">
+      <p className="text-xs font-black uppercase tracking-wide text-blue-700">Images and files for this test</p>
+      {attachments.length ? (
+        <ul className="mt-2 space-y-1.5">
+          {attachments.map((attachment) => (
+            <li className="flex items-center justify-between gap-2 text-sm" key={attachment.id}>
+              <a
+                className="truncate font-bold text-blue-700 underline-offset-2 hover:underline"
+                href={`/api/v1/patient/diagnostics/orders/${orderId}/attachments/${attachment.id}/file`}
+                rel="noreferrer"
+                target="_blank"
               >
-                <div className="text-xl font-black">
-                  {item.value}
-                </div>
+                {attachment.title}
+              </a>
+              <span className="shrink-0 text-xs text-slate-400">
+                {formatBytes(attachment.sizeBytes)} · {attachment.uploadedByPatient ? "you" : "your care team"}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-1 text-xs text-slate-500">No images or files attached yet.</p>
+      )}
+      <label className="mt-3 flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-blue-300 bg-white px-3 text-sm font-bold text-blue-700 transition hover:bg-blue-50">
+        <Upload aria-hidden className="size-4" />
+        {uploading ? "Uploading…" : "Add a photo or PDF"}
+        <input
+          accept="application/pdf,image/jpeg,image/png,image/webp"
+          capture="environment"
+          className="sr-only"
+          disabled={uploading}
+          onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void handleFile(file); }}
+          type="file"
+        />
+      </label>
+      {uploadError ? <p className="mt-2 text-xs font-bold text-red-600">{uploadError}</p> : null}
+    </div>
+  );
+}
 
-                <div className="mt-1 text-sm font-bold">
-                  {item.label}
-                </div>
+/**
+ * A tappable circular portrait shown in the patient portal's page header on
+ * every section — the one personalization touch that follows the patient
+ * everywhere, matching the same photo the app shell's identity chip shows.
+ * Camera-capable on a phone; a plain file picker on a laptop.
+ */
+function PatientAvatarUpload({ givenName, version, onChanged }: { givenName: string; version: number; onChanged: () => void }) {
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [hasPhoto, setHasPhoto] = useState(true);
 
-                <div className="mt-2 text-[11px] font-semibold opacity-70">
-                  Open section →
-                </div>
-              </Link>
-            ),
-          )}
-        </div>
-      </WonFlowOperationalPanel>
+  const handleFile = useCallback(async (file: File) => {
+    setUploading(true);
+    setUploadError("");
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const response = await fetch("/api/v1/patient/profile/avatar", { method: "POST", credentials: "same-origin", body: form });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? "The photo could not be saved.");
+      }
+      setHasPhoto(true);
+      onChanged();
+      window.dispatchEvent(new Event(WONFLOW_AVATAR_CHANGED_EVENT));
+    } catch (cause) {
+      setUploadError(cause instanceof Error ? cause.message : "The photo could not be saved.");
+    } finally {
+      setUploading(false);
+    }
+  }, [onChanged]);
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
-        <div id="patient-upcoming">
-          <WonFlowOperationalPanel
-            description="Your currently scheduled hospital appointments."
-            icon={<CalendarIcon />}
-            status={
-              <StatusBadge
-                className="bg-blue-50 text-blue-700 ring-blue-100"
-                label={`${projection.upcomingAppointments.length} scheduled`}
-              />
-            }
-            title="Upcoming Appointments"
-            tone="blue"
-          >
-            {projection
-              .upcomingAppointments
-              .length === 0 ? (
-              <WonFlowEmptyState
-                description="There are no upcoming appointments for this profile."
-                title="No upcoming appointments"
-              />
-            ) : (
-              <div className="space-y-4">
-                {projection
-                  .upcomingAppointments
-                  .map(
-                    (
-                      appointment,
-                    ) => {
-                      const practitioner =
-                        practitionersById.get(
-                          appointment
-                            .practitionerId,
-                        );
+  return (
+    <div className="relative">
+      <label
+        className="group relative flex size-12 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-blue-50 to-violet-100 text-indigo-700 ring-1 ring-indigo-100"
+        title={uploading ? "Uploading…" : "Change your photo"}
+      >
+        {hasPhoto ? (
+          // eslint-disable-next-line @next/next/no-img-element -- served from our own API, not an optimizable static asset
+          <img alt="" className="size-full object-cover" key={version} onError={() => setHasPhoto(false)} src={`/api/v1/patient/profile/avatar/file?v=${version}`} />
+        ) : (
+          <span aria-hidden className="text-lg font-black">{givenName.charAt(0).toUpperCase()}</span>
+        )}
+        <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-950/0 text-[10px] font-black text-transparent transition group-hover:bg-slate-950/40 group-hover:text-white">
+          {uploading ? "…" : "Edit"}
+        </span>
+        <input
+          accept="image/jpeg,image/png,image/webp"
+          capture="user"
+          className="sr-only"
+          disabled={uploading}
+          onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void handleFile(file); }}
+          type="file"
+        />
+      </label>
+      {uploadError ? <p className="absolute top-full left-0 mt-1 w-40 text-[11px] font-bold text-red-600">{uploadError}</p> : null}
+    </div>
+  );
+}
 
-                      const branch =
-                        branchesById.get(
-                          appointment
-                            .branchId,
-                        );
-
-                      return (
-                        <article
-                          className={[
-                            "rounded-3xl border",
-                            "border-blue-100",
-                            "bg-gradient-to-br",
-                            "from-white",
-                            "to-blue-50/70",
-                            "p-4 shadow-sm",
-                          ].join(" ")}
-                          key={
-                            appointment.id
-                          }
-                        >
-                          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="min-w-0">
-                              <div className="text-xs font-black uppercase tracking-[0.12em] text-blue-600">
-                                {formatWonFlowDashboardTime(
-                                  appointment
-                                    .scheduledStartAt,
-                                )}
-                              </div>
-
-                              <div className="mt-1 text-base font-black text-slate-950">
-                                {
-                                  appointment
-                                    .serviceName
-                                }
-                              </div>
-
-                              <div className="mt-2 text-sm text-slate-600">
-                                {practitioner
-                                  ?.displayName ??
-                                  "Doctor assignment pending"}
-                              </div>
-
-                              <div className="mt-1 text-xs text-slate-500">
-                                {branch
-                                  ?.name ??
-                                  "Hospital branch pending"}
-                              </div>
-                            </div>
-
-                            <StatusBadge
-                              className={getAppointmentStatusClass(
-                                appointment.status,
-                              )}
-                              label={humanizeStatus(
-                                appointment.status,
-                              )}
-                            />
-                          </div>
-
-                          <div className="mt-4 rounded-2xl bg-white p-3 text-xs leading-5 text-slate-600 ring-1 ring-slate-100">
-                            <strong className="text-slate-800">
-                              Visit reason:
-                            </strong>
-                            {" "}
-                            {
-                              appointment
-                                .reasonForVisit
-                            }
-                          </div>
-                        </article>
-                      );
-                    },
-                  )}
-              </div>
-            )}
-          </WonFlowOperationalPanel>
-        </div>
-
-        <WonFlowOperationalPanel
-          description="Important information about accessing your care profile."
-          icon={<ShieldIcon />}
-          title="Privacy and Access"
-          tone="violet"
-        >
-          <div className="space-y-4 text-sm leading-6 text-slate-600">
-            <div className="rounded-2xl bg-blue-50 p-4 ring-1 ring-blue-100">
-              <strong className="text-blue-900">
-                Signed-in access
-              </strong>
-
-              <p className="mt-1 text-xs leading-5 text-blue-700">
-                Access requires a secure login with your patient account. Only you can view this profile.
-              </p>
-            </div>
-
-            <div className="rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-100">
-              <strong className="text-emerald-900">
-                Shared care record
-              </strong>
-
-              <p className="mt-1 text-xs leading-5 text-emerald-700">
-                One organization-level patient identity connects approved appointments, admissions and invoices.
-              </p>
-            </div>
-          </div>
-        </WonFlowOperationalPanel>
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-5" aria-busy="true" aria-live="polite">
+      <span className="sr-only">Loading your secure care record</span>
+      <div className="h-36 animate-pulse rounded-3xl bg-slate-100" />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[0, 1, 2, 3].map((key) => (
+          <div key={key} className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+        ))}
       </div>
-
-      <div id="patient-history">
-        <WonFlowOperationalPanel
-          description="Your latest appointment and hospital-visit activity."
-          icon={<HistoryIcon />}
-          title="Recent Care Activity"
-          tone="violet"
-        >
-          {projection
-            .recentAppointments
-            .length === 0 ? (
-            <WonFlowEmptyState
-              description="No recent appointment activity is available."
-              title="No recent activity"
-            />
-          ) : (
-            <div className="relative space-y-4 before:absolute before:bottom-3 before:left-[19px] before:top-3 before:w-px before:bg-violet-100">
-              {projection
-                .recentAppointments
-                .map(
-                  (
-                    appointment,
-                  ) => {
-                    const practitioner =
-                      practitionersById.get(
-                        appointment
-                          .practitionerId,
-                      );
-
-                    return (
-                      <article
-                        className="relative flex gap-4"
-                        key={
-                          appointment.id
-                        }
-                      >
-                        <div className="relative z-10 flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-violet-100 text-violet-700 ring-4 ring-white">
-                          <CalendarIcon />
-                        </div>
-
-                        <div className="min-w-0 flex-1 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-black text-slate-950">
-                                {
-                                  appointment
-                                    .serviceName
-                                }
-                              </div>
-
-                              <div className="mt-1 text-xs text-slate-500">
-                                {formatWonFlowDashboardDateTime(
-                                  appointment
-                                    .scheduledStartAt,
-                                )}
-                              </div>
-                            </div>
-
-                            <StatusBadge
-                              className={getAppointmentStatusClass(
-                                appointment.status,
-                              )}
-                              label={humanizeStatus(
-                                appointment.status,
-                              )}
-                            />
-                          </div>
-
-                          <div className="mt-3 text-xs text-slate-600">
-                            {practitioner
-                              ?.displayName ??
-                              "Doctor information unavailable"}
-                          </div>
-                        </div>
-                      </article>
-                    );
-                  },
-                )}
-            </div>
-          )}
-        </WonFlowOperationalPanel>
-      </div>
-
-      <div className="grid gap-6 xl:grid-cols-2">
-        <div id="patient-admissions">
-          <WonFlowOperationalPanel
-            description="Current inpatient placements connected to your patient record."
-            icon={<BedIcon />}
-            status={
-              <StatusBadge
-                className="bg-emerald-50 text-emerald-700 ring-emerald-100"
-                label={`${projection.activeAdmissions.length} active`}
-              />
-            }
-            title="Active Admissions"
-            tone="emerald"
-          >
-            {projection
-              .activeAdmissions
-              .length === 0 ? (
-              <WonFlowEmptyState
-                description="There are no active admissions connected to this patient."
-                title="No active admissions"
-              />
-            ) : (
-              <div className="space-y-4">
-                {projection
-                  .activeAdmissions
-                  .map(
-                    (admission) => (
-                      <article
-                        className="rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4"
-                        key={
-                          admission.id
-                        }
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-black text-slate-950">
-                              {
-                                admission
-                                  .wardName
-                              }
-                            </div>
-
-                            <div className="mt-1 text-xs text-slate-500">
-                              {
-                                admission
-                                  .admissionNumber
-                              }
-                            </div>
-                          </div>
-
-                          <StatusBadge
-                            className={getAdmissionStatusClass(
-                              admission.status,
-                            )}
-                            label={humanizeStatus(
-                              admission.status,
-                            )}
-                          />
-                        </div>
-
-                        <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-white p-3 ring-1 ring-emerald-100">
-                          <div>
-                            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                              Room
-                            </div>
-
-                            <div className="mt-1 text-sm font-bold text-slate-700">
-                              {
-                                admission
-                                  .roomName
-                              }
-                            </div>
-                          </div>
-
-                          <div>
-                            <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
-                              Bed
-                            </div>
-
-                            <div className="mt-1 text-sm font-bold text-slate-700">
-                              {
-                                admission
-                                  .bedName
-                              }
-                            </div>
-                          </div>
-                        </div>
-                      </article>
-                    ),
-                  )}
-              </div>
-            )}
-          </WonFlowOperationalPanel>
-        </div>
-
-        <div id="patient-invoices">
-          <WonFlowOperationalPanel
-            description="Invoices that currently have a remaining patient balance."
-            icon={<InvoiceIcon />}
-            status={
-              <StatusBadge
-                className="bg-amber-50 text-amber-700 ring-amber-100"
-                label={`${projection.outstandingInvoices.length} outstanding`}
-              />
-            }
-            title="Outstanding Invoices"
-            tone="amber"
-          >
-            {projection
-              .outstandingInvoices
-              .length === 0 ? (
-              <WonFlowEmptyState
-                description="There are no outstanding invoices for this patient."
-                title="No outstanding balance"
-              />
-            ) : (
-              <div className="space-y-3">
-                {projection
-                  .outstandingInvoices
-                  .map(
-                    (invoice) => (
-                      <article
-                        className="rounded-2xl border border-slate-100 bg-slate-50/70 p-4"
-                        key={invoice.id}
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-3">
-                          <div>
-                            <div className="text-sm font-black text-slate-950">
-                              {
-                                invoice
-                                  .invoiceNumber
-                              }
-                            </div>
-
-                            <div className="mt-1 text-xs text-slate-500">
-                              Issued
-                              {" "}
-                              {formatWonFlowDashboardDateTime(
-                                invoice
-                                  .issuedAt,
-                              )}
-                            </div>
-                          </div>
-
-                          <StatusBadge
-                            className={getInvoiceStatusClass(
-                              invoice.status,
-                            )}
-                            label={humanizeStatus(
-                              invoice.status,
-                            )}
-                          />
-                        </div>
-
-                        <div className="mt-4 flex items-end justify-between gap-4 rounded-xl bg-white p-3 ring-1 ring-slate-100">
-                          <span className="text-xs font-bold text-slate-500">
-                            Remaining balance
-                          </span>
-
-                          <span className="text-lg font-black text-rose-700">
-                            {formatWonFlowDashboardMoney(
-                              invoice
-                                .balanceMinorUnits,
-
-                              invoice
-                                .currencyCode,
-                            )}
-                          </span>
-                        </div>
-                      </article>
-                    ),
-                  )}
-              </div>
-            )}
-          </WonFlowOperationalPanel>
-        </div>
-      </div>
-
-      <div className="rounded-2xl border border-violet-100 bg-gradient-to-r from-violet-50 via-white to-blue-50 px-4 py-3 text-xs leading-5 text-slate-600">
-        <strong className="text-violet-800">
-          Demonstration source:
-        </strong>
-        {" "}
-        {projection.source.datasetName}
-        {" · "}
-        Version
-        {" "}
-        {projection.source.datasetVersion}
+      <div className="grid gap-4 lg:grid-cols-2">
+        <div className="h-56 animate-pulse rounded-3xl bg-slate-100" />
+        <div className="h-56 animate-pulse rounded-3xl bg-slate-100" />
       </div>
     </div>
   );
 }
 
-export function PatientAccessDashboard() {
-  const hospitalService =
-    useWonFlowHospitalService();
+/**
+ * The patient's home/care/reports views — wired to /api/v1/patient/home,
+ * which resolves the caller's own linked patient record server-side from
+ * their session identity. No endpoint here accepts a patient id from the
+ * client, so there is nothing for this component to pass or leak.
+ */
+export function PatientAccessDashboard({ section }: { section: Section }) {
+  const [home, setHome] = useState<PatientHome | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState("");
+  const [avatarVersion, setAvatarVersion] = useState(0);
 
-  const [
-    selectedPatientId,
-    setSelectedPatientId,
-  ] = useState<
-    MockPatient["id"] |
-    undefined
-  >();
+  const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
+    if (mode === "refresh") setRefreshing(true); else setLoading(true);
+    setError("");
+    try {
+      const response = await fetch("/api/v1/patient/home", { credentials: "same-origin", cache: "no-store" });
+      const body = await response.json() as { home?: PatientHome; error?: string };
+      if (!response.ok || !body.home) throw new Error(body.error ?? "Your care record could not be loaded.");
+      setHome(body.home);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Your care record could not be loaded.");
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, []);
 
-  const patientDirectory =
-    useWonFlowAsyncData({
-      key:
-        "patient-access:directory",
+  useEffect(() => { queueMicrotask(() => { void load(); }); }, [load]);
 
-      loader: (signal) =>
-        hospitalService.listPatients(
-          {
-            limit: 100,
-          },
-          signal,
-        ),
+  const upcoming = useMemo(() => {
+    if (!home) return [];
+    // eslint-disable-next-line react-hooks/purity -- splitting past from upcoming visits needs the current instant.
+    const now = Date.now();
+    return home.appointments
+      .filter((item) => new Date(item.startsAt).getTime() >= now && item.status.toUpperCase() !== "CANCELLED")
+      .sort((first, second) => new Date(first.startsAt).getTime() - new Date(second.startsAt).getTime());
+  }, [home]);
 
-      isEmpty: (page) =>
-        page.items.length === 0,
-    });
+  const criticalResults = useMemo(
+    () => home ? home.diagnosticOrders.filter((order) => order.results.some((result) => result.critical)) : [],
+    [home],
+  );
 
-  const patients =
-    patientDirectory
-      .data
-      ?.items ??
-    [];
+  if (loading) return <DashboardSkeleton />;
 
-  const activePatientId =
-    selectedPatientId ??
-    patients[0]?.id;
-
-  const dashboard =
-    useWonFlowPatientDashboard(
-      activePatientId,
+  if (error || !home) {
+    return (
+      <div className="mx-auto mt-10 max-w-2xl rounded-3xl border border-slate-200 bg-red-50 p-8 text-center">
+        <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-white text-red-600">
+          <ShieldAlert aria-hidden className="size-6" />
+        </span>
+        <h1 className="mt-4 text-xl font-black text-slate-900">Patient record unavailable</h1>
+        <p className="mt-2 text-sm text-slate-600">{error}</p>
+        <button
+          className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white transition hover:bg-blue-700"
+          onClick={() => void load()}
+          type="button"
+        >
+          Try again
+        </button>
+      </div>
     );
+  }
 
-  const refreshPatientAccess = () => {
-    patientDirectory.reload();
-    dashboard.reload();
-  };
+  const title = section === "home" ? `Welcome, ${home.patient.givenName}` : section === "care" ? "My care" : section === "billing" ? "My billing" : "My reports";
+  const nextAppointment = upcoming[0];
+  const outstandingInvoices = home.invoices.filter((invoice) => invoice.totalMinor > invoice.paidMinor);
+
+  const tiles: Array<{ label: string; value: number; href: string; icon: LucideIcon }> = [
+    { label: "Upcoming appointments", value: upcoming.length, href: "/patient/appointments", icon: CalendarDays },
+    { label: "Active prescriptions", value: home.prescriptions.length, href: "/patient/care", icon: Pill },
+    { label: "Released reports", value: home.diagnosticOrders.length, href: "/patient/reports", icon: FlaskConical },
+    { label: "Documents", value: home.documents.length, href: "/patient/documents", icon: FileText },
+    { label: "Outstanding invoices", value: outstandingInvoices.length, href: "/patient/billing", icon: ReceiptText },
+  ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <WonFlowPageHeader
-        breadcrumbs={[
-          {
-            label:
-              "Patient Access",
-          },
-          {
-            label:
-              "My Care Dashboard",
-          },
-        ]}
-        description="A clear and secure overview of appointments, hospital activity, admissions and patient invoices."
-        eyebrow="Patient Access"
-        leading={<PatientIcon />}
-        metadata={
-          <span className="rounded-full bg-blue-50 px-2.5 py-1 font-bold text-blue-700 ring-1 ring-blue-100">
-            Patient-focused view
-          </span>
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 text-sm font-black text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700"
+              href="/patient/appointments/book"
+            >
+              <CalendarPlus aria-hidden className="size-4" />
+              Book appointment
+            </Link>
+            <button
+              aria-label="Refresh my care record"
+              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-indigo-200 bg-white px-4 text-sm font-bold text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-60"
+              disabled={refreshing}
+              onClick={() => void load("refresh")}
+              type="button"
+            >
+              <RefreshCw aria-hidden className={`size-4 ${refreshing ? "animate-spin" : ""}`} />
+              {refreshing ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
         }
-        title="My Care Dashboard"
+        description={`Medical record ${home.patient.patientNumber} · securely connected with your hospital care team.`}
+        eyebrow="My WonFlow care"
+        leading={<PatientAvatarUpload givenName={home.patient.givenName} onChanged={() => setAvatarVersion((current) => current + 1)} version={avatarVersion} />}
+        title={title}
       />
 
-      <WonFlowAsyncDataBoundary
-        emptyDescription="No patient profiles are available."
-        emptyTitle="No patients available"
-        loadingDescription="WonFlow is preparing the patient directory."
-        loadingTitle="Loading Patient Access"
-        onRetry={
-          patientDirectory.reload
-        }
-        state={
-          patientDirectory
-        }
-      >
-        {() => {
-          if (
-            activePatientId ===
-            undefined
-          ) {
-            return (
-              <WonFlowEmptyState
-                description="A patient profile must be selected before the dashboard can load."
-                title="Select a patient"
-              />
-            );
-          }
+      {criticalResults.length ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-red-50 p-4">
+          <ShieldAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-red-600" />
+          <div>
+            <p className="text-sm font-black text-slate-900">
+              {criticalResults.length === 1 ? "A result needs your attention" : `${criticalResults.length} results need your attention`}
+            </p>
+            <p className="mt-1 text-sm text-slate-600">
+              Please contact your care team about {criticalResults.map((order) => order.name).join(", ")}.
+            </p>
+            <Link className="mt-2 inline-block text-sm font-black text-red-700 underline underline-offset-4" href="/patient/reports">
+              View reports
+            </Link>
+          </div>
+        </div>
+      ) : null}
 
-          return (
-            <WonFlowAsyncDataBoundary
-              emptyDescription="No dashboard information is available for the selected patient."
-              emptyTitle="No care information"
-              loadingDescription="WonFlow is assembling appointments, admissions and invoices for the selected patient."
-              loadingTitle="Preparing My Care"
-              onRetry={
-                dashboard.reload
+      {section === "home" ? (
+        <>
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+            {tiles.map((tile) => (
+              <Link
+                className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-md sm:p-5"
+                href={tile.href}
+                key={tile.label}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-xs font-black uppercase tracking-wide text-slate-500">{tile.label}</span>
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600">
+                    <tile.icon aria-hidden className="size-4" />
+                  </span>
+                </div>
+                <div className="mt-3 text-3xl font-black text-slate-900">{tile.value}</div>
+              </Link>
+            ))}
+          </div>
+
+          <div className="grid gap-4 lg:grid-cols-2">
+            <SectionCard
+              title="Next appointments"
+              description="Your confirmed visits, soonest first."
+              action={
+                <Link className="text-sm font-black text-blue-700 underline underline-offset-4" href="/patient/appointments">
+                  See all
+                </Link>
               }
-              state={dashboard}
             >
-              {(projection) => (
-                <PatientDashboardContent
-                  onPatientChange={
-                    setSelectedPatientId
-                  }
-                  onRefresh={
-                    refreshPatientAccess
-                  }
-                  patients={patients}
-                  projection={
-                    projection
-                  }
-                  refreshing={
-                    dashboard
-                      .isRefreshing ||
-                    patientDirectory
-                      .isRefreshing
-                  }
-                  selectedPatientId={
-                    activePatientId
+              {nextAppointment ? (
+                <div className="mt-4 space-y-3">
+                  <article className="flex items-center gap-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                    <div className="grid shrink-0 place-items-center rounded-xl bg-white px-3 py-2 text-center shadow-sm">
+                      <span className="text-[11px] font-black uppercase text-slate-500">
+                        {new Intl.DateTimeFormat("en-PK", { month: "short" }).format(new Date(nextAppointment.startsAt))}
+                      </span>
+                      <span className="text-2xl font-black leading-none text-slate-900">
+                        {new Intl.DateTimeFormat("en-PK", { day: "2-digit" }).format(new Date(nextAppointment.startsAt))}
+                      </span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate font-black text-slate-900">{nextAppointment.service.name}</span>
+                        <StatusPill status={nextAppointment.status} />
+                      </div>
+                      <p className="mt-1 text-sm text-slate-600">
+                        {formatTime(nextAppointment.startsAt)} · {nextAppointment.branch.name}
+                      </p>
+                    </div>
+                  </article>
+                  {upcoming.slice(1, 4).map((item) => (
+                    <article className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3" key={item.id}>
+                      <div className="min-w-0">
+                        <div className="truncate font-bold text-slate-900">{item.service.name}</div>
+                        <div className="text-xs text-slate-500">{formatDate(item.startsAt)} · {item.branch.name}</div>
+                      </div>
+                      <StatusPill status={item.status} />
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState
+                  icon={CalendarDays}
+                  title="No upcoming appointments"
+                  hint="Book a consultation and it will appear here straight away."
+                  action={
+                    <Link className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-blue-700" href="/patient/appointments/book">
+                      <CalendarPlus aria-hidden className="size-4" />
+                      Book appointment
+                    </Link>
                   }
                 />
               )}
-            </WonFlowAsyncDataBoundary>
-          );
-        }}
-      </WonFlowAsyncDataBoundary>
+            </SectionCard>
+
+            <SectionCard
+              title="Recent reports"
+              description="Laboratory and imaging results released to you."
+              action={
+                <Link className="text-sm font-black text-blue-700 underline underline-offset-4" href="/patient/reports">
+                  See all
+                </Link>
+              }
+            >
+              {home.diagnosticOrders.length ? (
+                <div className="mt-4 space-y-3">
+                  {home.diagnosticOrders.slice(0, 4).map((item) => (
+                    <article className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-emerald-50 px-4 py-3" key={item.id}>
+                      <div className="min-w-0">
+                        <div className="truncate font-bold text-slate-900">{item.name}</div>
+                        <div className="text-xs text-slate-500">{item.type} · {item.code}</div>
+                      </div>
+                      <StatusPill status={item.status} />
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <EmptyState icon={FlaskConical} title="No released reports" hint="Results appear here once your care team releases them." />
+              )}
+            </SectionCard>
+          </div>
+
+          <SectionCard title="Quick actions" description="Common things patients do here.">
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                { label: "Book appointment", hint: "Choose a doctor and time", href: "/patient/appointments/book", icon: CalendarPlus },
+                { label: "Upload a document", hint: "Share reports with your team", href: "/patient/documents", icon: Upload },
+                { label: "My medicines", hint: "Dosage and instructions", href: "/patient/care", icon: Pill },
+                { label: "My profile", hint: "Contact and identity details", href: "/patient/profile", icon: ClipboardList },
+              ].map((action) => (
+                <Link
+                  className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:-translate-y-0.5 hover:border-blue-100 hover:bg-blue-50"
+                  href={action.href}
+                  key={action.label}
+                >
+                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-white text-blue-600 shadow-sm">
+                    <action.icon aria-hidden className="size-4" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block font-black text-slate-900">{action.label}</span>
+                    <span className="block text-xs text-slate-500">{action.hint}</span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </SectionCard>
+        </>
+      ) : null}
+
+      {section === "care" ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <SectionCard title="Medicines and instructions" description="Prescriptions your doctor has issued.">
+            {home.prescriptions.length ? (
+              <div className="mt-4 space-y-3">
+                {home.prescriptions.map((prescription) => (
+                  <article className="rounded-2xl border border-blue-100 bg-violet-50 p-4" key={prescription.id}>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-500">
+                        <Pill aria-hidden className="size-4" />
+                        Prescription
+                      </span>
+                      <StatusPill status={prescription.status} />
+                    </div>
+                    <ul className="mt-3 space-y-3">
+                      {prescription.items.map((item) => (
+                        <li key={item.id}>
+                          <div className="font-black text-slate-900">
+                            {item.medication.brandName ?? item.medication.genericName} {item.medication.strength}
+                          </div>
+                          {item.medication.brandName ? (
+                            <div className="text-xs text-slate-500">{item.medication.genericName}</div>
+                          ) : null}
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {[item.dosage, item.frequency, item.duration].filter(Boolean).length ? (
+                              [item.dosage, item.frequency, item.duration].filter(Boolean).map((detail) => (
+                                <span className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-600" key={detail}>
+                                  {detail}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="text-sm text-slate-500">Follow the prescribed instructions.</span>
+                            )}
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                    {prescription.instructions ? (
+                      <p className="mt-3 rounded-xl bg-white p-3 text-sm font-semibold text-slate-700">{prescription.instructions}</p>
+                    ) : null}
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <EmptyState icon={Pill} title="No active prescriptions" hint="Medicines prescribed during a consultation will be listed here." />
+            )}
+          </SectionCard>
+
+          <SectionCard title="Tests and follow-up" description="Orders raised by your care team.">
+            {home.diagnosticOrders.length ? (
+              <div className="mt-4 space-y-3">
+                {home.diagnosticOrders.map((order) => (
+                  <article className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3" key={order.id}>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <Stethoscope aria-hidden className="size-4 shrink-0 text-blue-600" />
+                        <span className="truncate font-black text-slate-900">{order.name}</span>
+                      </div>
+                      <div className="mt-1 text-xs text-slate-500">{order.type} · {order.code}</div>
+                    </div>
+                    <StatusPill status={order.status} />
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <EmptyState icon={HeartPulse} title="No tests or follow-up" hint="Tests ordered for you will appear here with their progress." />
+            )}
+          </SectionCard>
+        </div>
+      ) : null}
+
+      {section === "reports" ? (
+        <SectionCard
+          title="Released laboratory and radiology reports"
+          description="Only results your care team has released are shown."
+          action={
+            <Link className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-blue-700" href="/patient/documents">
+              <FileText aria-hidden className="size-4" />
+              My documents
+            </Link>
+          }
+        >
+          {home.diagnosticOrders.length ? (
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+              {home.diagnosticOrders.map((order) => (
+                <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" key={order.id}>
+                  <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-emerald-50 px-4 py-3">
+                    <div className="min-w-0">
+                      <div className="truncate font-black text-slate-900">{order.name}</div>
+                      <div className="text-xs font-bold text-slate-500">{order.type} · {order.code}</div>
+                    </div>
+                    <StatusPill status={order.status} />
+                  </header>
+                  <div className="space-y-3 p-4">
+                    {order.results.map((result) => (
+                      <div key={result.id}>
+                        {result.critical ? (
+                          <p className="mb-2 flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-black text-red-700">
+                            <ShieldAlert aria-hidden className="size-4" />
+                            Critical result — contact your care team.
+                          </p>
+                        ) : null}
+                        <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 font-sans text-sm text-slate-700">
+                          {result.reportText ?? (result.resultData ? JSON.stringify(result.resultData, null, 2) : "Result released without narrative notes.")}
+                        </pre>
+                        <p className="mt-2 text-xs text-slate-400">Released {formatDate(result.releasedAt)}</p>
+                      </div>
+                    ))}
+                    <DiagnosticAttachments attachments={order.attachments} onUploaded={() => void load("refresh")} orderId={order.id} />
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <EmptyState icon={FlaskConical} title="No reports released yet" hint="When a laboratory or imaging report is released to you it will appear here in full." />
+          )}
+        </SectionCard>
+      ) : null}
+
+      {section === "billing" ? (
+        <SectionCard title="Invoices and payments" description="Bills issued by the hospital and payments recorded against them.">
+          {home.invoices.length ? (
+            <div className="mt-4 space-y-4">
+              {home.invoices.map((invoice) => {
+                const outstandingMinor = invoice.totalMinor - invoice.paidMinor;
+                return (
+                  <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" key={invoice.id}>
+                    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-blue-50 px-4 py-3">
+                      <div className="min-w-0">
+                        <div className="truncate font-black text-slate-900">Invoice {invoice.invoiceNumber}</div>
+                        <div className="text-xs font-bold text-slate-500">{formatDate(invoice.issuedAt ?? invoice.createdAt)}</div>
+                      </div>
+                      <StatusPill status={invoice.status} />
+                    </header>
+                    <div className="space-y-3 p-4">
+                      <ul className="space-y-1 text-sm text-slate-700">
+                        {invoice.lines.map((line) => (
+                          <li className="flex items-center justify-between gap-2" key={line.id}>
+                            <span className="min-w-0 truncate">{line.description} {line.quantity > 1 ? `× ${line.quantity}` : ""}</span>
+                            <span className="shrink-0 font-bold">{formatMoney(line.totalMinor, invoice.currencyCode)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="grid grid-cols-3 gap-2 rounded-xl bg-slate-50 p-3 text-center text-xs">
+                        <div><p className="font-black uppercase text-slate-400">Total</p><p className="mt-1 text-sm font-black text-slate-900">{formatMoney(invoice.totalMinor, invoice.currencyCode)}</p></div>
+                        <div><p className="font-black uppercase text-slate-400">Paid</p><p className="mt-1 text-sm font-black text-emerald-700">{formatMoney(invoice.paidMinor, invoice.currencyCode)}</p></div>
+                        <div><p className="font-black uppercase text-slate-400">Outstanding</p><p className={`mt-1 text-sm font-black ${outstandingMinor > 0 ? "text-red-700" : "text-emerald-700"}`}>{formatMoney(outstandingMinor, invoice.currencyCode)}</p></div>
+                      </div>
+                      {invoice.payments.length ? (
+                        <div>
+                          <p className="text-xs font-black uppercase tracking-wide text-slate-500">Payments</p>
+                          <ul className="mt-2 space-y-1.5">
+                            {invoice.payments.map((payment) => (
+                              <li className="flex items-center justify-between gap-2 text-sm" key={payment.id}>
+                                <span className="text-slate-600">{formatDate(payment.completedAt ?? payment.createdAt)} · {payment.method}</span>
+                                <span className="flex items-center gap-2 font-bold">
+                                  {formatMoney(payment.amountMinor, invoice.currencyCode)}
+                                  <StatusPill status={payment.status} />
+                                </span>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-500">No payment has been recorded against this invoice yet. Payments are collected and recorded at the hospital billing counter.</p>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          ) : (
+            <EmptyState icon={ReceiptText} title="No invoices yet" hint="Bills issued by the hospital's billing counter will appear here." />
+          )}
+        </SectionCard>
+      ) : null}
     </div>
   );
 }

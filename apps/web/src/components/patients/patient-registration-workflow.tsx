@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import {
+  useEffect,
   useState,
 } from "react";
 
@@ -15,6 +16,8 @@ import type {
 import type {
   MockBranch,
 } from "@wonflow/mock-data";
+
+import { SaveIndicator } from "@wonflow/ui";
 
 import {
   useWonFlowHospitalService,
@@ -36,11 +39,23 @@ import {
 } from "@/lib/data";
 
 import {
+  WonFlowForbiddenError,
+  WonFlowValidationError,
+} from "@/lib/api";
+
+import {
+  useRegisterPatient,
+} from "@/lib/api/patients";
+
+import {
   buildPatientDisplayName,
+  buildRegisterPatientPayload,
   calculatePatientAge,
-  createDemoPatientRegistration,
   createInitialPatientRegistrationDraft,
-  persistDemoPatientRegistration,
+  fetchDuplicatePatients,
+  primeLegacyPatientDirectoryCache,
+  readDemoPatientRegistrations,
+  toDirectoryEntry,
   validatePatientRegistration,
 } from "@/lib/patients";
 
@@ -410,6 +425,82 @@ function PatientRegistrationForm({
     undefined
   >();
 
+  const [
+    duplicateMatches,
+    setDuplicateMatches,
+  ] = useState<
+    DemoPatientRegistrationResult[]
+  >([]);
+
+  const {
+    mutate: registerPatient,
+    saveState,
+    error: registerError,
+    reset: resetRegisterMutation,
+  } = useRegisterPatient();
+
+  // Server lookup on name and mobile, shown before saving so a receptionist
+  // can catch an existing patient instead of creating a duplicate record.
+  useEffect(() => {
+    const hasEnoughToSearch =
+      draft.givenName.trim()
+        .length >= 2 ||
+      draft.mobileNumber.trim() !==
+        "";
+
+    const controller =
+      new AbortController();
+
+    const timeoutId =
+      window.setTimeout(() => {
+        if (!hasEnoughToSearch) {
+          setDuplicateMatches(
+            [],
+          );
+
+          return;
+        }
+
+        const familyName =
+          draft.middleName.trim() ||
+          draft.givenName
+            .trim()
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(-1)[0];
+
+        void fetchDuplicatePatients(
+          {
+            givenName:
+              draft.givenName,
+            familyName,
+            phone:
+              draft.mobileNumber,
+          },
+          controller.signal,
+        )
+          .then(
+            setDuplicateMatches,
+          )
+          .catch(() => {
+            // A failed lookup should not block registration; the person can
+            // still be saved and any real duplicate is caught server-side.
+          });
+      }, 400);
+
+    return () => {
+      window.clearTimeout(
+        timeoutId,
+      );
+
+      controller.abort();
+    };
+  }, [
+    draft.givenName,
+    draft.middleName,
+    draft.mobileNumber,
+  ]);
+
   const selectedBranch =
     branches.find(
       (branch) =>
@@ -533,23 +624,49 @@ function PatientRegistrationForm({
       return;
     }
 
-    const registration =
-      createDemoPatientRegistration(
-        draft,
-      );
+    // A failed save must never discard what was typed: on failure this
+    // leaves `draft` and `errors` exactly as they are, and only
+    // `registerError`/`saveState` (surfaced below) change.
+    void registerPatient(
+      {
+        ...buildRegisterPatientPayload(
+          draft,
+        ),
+        registeredVia: "reception",
+      },
+    )
+      .then(({ patient }) => {
+        const registration =
+          toDirectoryEntry(
+            patient,
+          );
 
-    persistDemoPatientRegistration(
-      registration,
-    );
+        primeLegacyPatientDirectoryCache(
+          [
+            registration,
+            ...readDemoPatientRegistrations(),
+          ],
+        );
 
-    setSavedRegistration(
-      registration,
-    );
+        window.dispatchEvent(
+          new Event(
+            "wonflow:demo-patients-changed",
+          ),
+        );
 
-    window.scrollTo({
-      top: 0,
-      behavior: "smooth",
-    });
+        setSavedRegistration(
+          registration,
+        );
+
+        window.scrollTo({
+          top: 0,
+          behavior: "smooth",
+        });
+      })
+      .catch(() => {
+        // registerError (from useRegisterPatient) already carries the
+        // typed failure; nothing else to do here.
+      });
   }
 
   function registerAnotherPatient() {
@@ -563,6 +680,7 @@ function PatientRegistrationForm({
     setSavedRegistration(
       undefined,
     );
+    resetRegisterMutation();
   }
 
   if (
@@ -698,6 +816,25 @@ function PatientRegistrationForm({
             </p>
 
             <div className="mt-4 space-y-2">
+              <Link
+                className={[
+                  "flex min-h-11 w-full",
+                  "items-center justify-center",
+                  "rounded-xl border",
+                  "border-indigo-200",
+                  "bg-indigo-50",
+                  "px-4 text-sm",
+                  "font-bold text-indigo-700",
+                  "transition",
+                  "hover:bg-indigo-100",
+                ].join(" ")}
+                href={`/operations/patients?patientId=${encodeURIComponent(
+                  savedRegistration.id,
+                )}`}
+              >
+                View Patient Record
+              </Link>
+
               <Link
                 className={[
                   "flex min-h-11 w-full",
@@ -1689,18 +1826,104 @@ function PatientRegistrationForm({
                 />
               </dl>
 
+              {duplicateMatches.length >
+              0 ? (
+                <div
+                  className="mt-6 rounded-2xl bg-amber-50 p-3.5 text-xs leading-5 text-amber-800 ring-1 ring-amber-100"
+                  role="alert"
+                >
+                  <strong>
+                    Possible existing
+                    patient
+                    {duplicateMatches.length >
+                    1
+                      ? "s"
+                      : ""}
+                    :
+                  </strong>
+                  {" "}
+                  {duplicateMatches
+                    .map(
+                      (match) =>
+                        `${match.displayName} (${match.mrNumber})`,
+                    )
+                    .join(", ")}
+                  {" "}
+                  Check the directory before saving a new record.
+                </div>
+              ) : null}
+
               <div className="mt-6 rounded-2xl bg-amber-50 p-3.5 text-xs leading-5 text-amber-800 ring-1 ring-amber-100">
                 Save the patient identity first. Billing, appointments and hospital services remain separate workflows.
               </div>
 
+              {registerError instanceof
+              WonFlowForbiddenError ? (
+                <div
+                  className="mt-5 rounded-2xl bg-rose-50 p-3.5 text-xs leading-5 text-rose-800 ring-1 ring-rose-100"
+                  role="alert"
+                >
+                  <strong>
+                    You do not have
+                    access to register
+                    patients.
+                  </strong>
+                  {" "}
+                  This requires the
+                  patients.manage
+                  permission. Ask an
+                  administrator for
+                  access.
+                </div>
+              ) : registerError !==
+                undefined ? (
+                <div
+                  className="mt-5 rounded-2xl bg-rose-50 p-3.5 text-xs leading-5 text-rose-800 ring-1 ring-rose-100"
+                  role="alert"
+                >
+                  <strong>
+                    {
+                      registerError instanceof
+                      WonFlowValidationError
+                        ? "Check the highlighted information."
+                        : "The patient could not be saved."
+                    }
+                  </strong>
+                  {" "}
+                  {
+                    registerError.message
+                  }
+                  {" "}
+                  Your entries are
+                  still here — try
+                  again.
+                </div>
+              ) : null}
+
               <WonFlowActionButton
                 className="mt-5 w-full"
+                disabled={
+                  saveState ===
+                  "saving"
+                }
                 form="patient-registration-form"
                 type="submit"
                 variant="primary"
               >
-                Save Patient
+                {saveState ===
+                "saving"
+                  ? "Saving…"
+                  : "Save Patient"}
               </WonFlowActionButton>
+
+              <div className="mt-2 flex justify-center">
+                <SaveIndicator
+                  errorMessage={
+                    registerError?.message
+                  }
+                  state={saveState}
+                />
+              </div>
 
               <Link
                 className="mt-3 flex min-h-10 items-center justify-center rounded-xl text-sm font-bold text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
@@ -1789,14 +2012,6 @@ export function PatientRegistrationWorkflow() {
         }
         title="Register New Patient"
       />
-
-      <div className="rounded-2xl border border-violet-100 bg-gradient-to-r from-violet-50 via-white to-blue-50 px-4 py-3 text-xs leading-5 text-slate-600">
-        <strong className="text-violet-800">
-          Demonstration mode:
-        </strong>
-        {" "}
-        Newly registered patients are fictional and stored locally in this browser during the frontend stage.
-      </div>
 
       <WonFlowAsyncDataBoundary
         emptyDescription="No hospital branches are available for patient registration."

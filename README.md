@@ -42,8 +42,9 @@ The authoritative list of deferred module codes is `disabledModuleCodes` on
 apps/
   web/             Next.js App Router application (the product)
   worker/          background job runner
-  doctor-mobile/   doctor Android application
-  patient-mobile/  patient Android application
+  mobile/          Android/iOS wrapper around the web app (every role, one app)
+  doctor-mobile/   early native-screen scaffold, unfinished, superseded by mobile/
+  patient-mobile/  early native-screen scaffold, unfinished, superseded by mobile/
 packages/
   ui/              shared components, styles and design-system utilities
   contracts/       shared TypeScript domain and API contracts
@@ -66,7 +67,7 @@ built, type-checked or linted.
 
 ## Requirements
 
-- Node.js >= 20.9.0
+- Node.js >= 22.13.0
 - pnpm >= 10
 - PostgreSQL 16
 
@@ -74,8 +75,10 @@ built, type-checked or linted.
 
 ```bash
 pnpm install
-cp .env.example .env.local     # then fill in DATABASE_URL and AUTH_ENCRYPTION_KEY
+cp .env.example .env.local     # then fill in DATABASE_URL, SESSION_SECRET and AUTH_ENCRYPTION_KEY
+pnpm run doctor                # verify Node, pnpm, PostgreSQL and env vars are ready
 pnpm db:generate
+pnpm db:migrate
 pnpm db:seed:dev
 pnpm dev
 ```
@@ -83,7 +86,18 @@ pnpm dev
 The application runs on http://localhost:3000.
 
 Need a database? `deploy/docker-compose.yml` includes a `postgres:16-alpine`
-service.
+service:
+
+```bash
+docker compose -f deploy/docker-compose.yml up -d
+```
+
+`pnpm run doctor` is a preflight check for a fresh clone. It checks the Node.js
+and pnpm versions, whether PostgreSQL is reachable at `DATABASE_URL`, and
+whether `.env.local` has the required variables, then prints what is missing.
+Use `pnpm run doctor`, not `pnpm doctor` — pnpm reserves the bare `doctor`
+subcommand for its own environment diagnostics, which silently ignores this
+project's script.
 
 ### Development logins
 
@@ -123,10 +137,11 @@ Run everything from the repository root.
 
 | Command | Description |
 | --- | --- |
+| `pnpm run doctor` | Preflight: Node/pnpm versions, PostgreSQL reachability, required env vars |
 | `pnpm check` | Lint, typecheck, validate the schema and check the diff |
 | `pnpm check:full` | `pnpm check` plus a production build |
 | `pnpm lint` / `pnpm lint:fix` | ESLint |
-| `pnpm typecheck` | TypeScript across every workspace |
+| `pnpm typecheck` | TypeScript across every workspace. Never halts on the first failing package; runs all of them and reports a summary. |
 
 ### Test
 
@@ -176,6 +191,15 @@ See [`deploy/README.md`](deploy/README.md) for the Docker deployment.
 
 TypeScript, React, Next.js App Router, Tailwind CSS, shadcn-style components,
 PostgreSQL, Prisma, Zod, Vitest, Playwright, pnpm workspaces.
+
+## Data
+
+All user data lives in PostgreSQL and is reached through an API route.
+Client storage (`localStorage`, `sessionStorage`, `document.cookie`) is for
+interface preference only — never for patient, clinical, billing or any
+other business data. See
+[`docs/architecture/client-storage.md`](docs/architecture/client-storage.md)
+for how this is enforced.
 
 ## Production-readiness rule
 

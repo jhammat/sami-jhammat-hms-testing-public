@@ -385,62 +385,86 @@ model Tenant {
   secondaryLocale     String?      @default("ur") @db.VarChar(20)
   defaultTimezone     String       @default("Asia/Karachi") @db.VarChar(100)
   defaultCurrencyCode String       @default("PKR") @db.Char(3)
+  /// Atomically incremented (never read-then-write) to hand out gapless,
+  /// unique invoice numbers per tenant — see server/finance/invoice-numbering.ts.
+  nextInvoiceNumber   Int          @default(1)
   createdAt           DateTime     @default(now()) @db.Timestamptz(6)
   updatedAt           DateTime     @updatedAt @db.Timestamptz(6)
   archivedAt          DateTime?    @db.Timestamptz(6)
 
-  organizations        Organization[]
-  policies             PolicyDocument[]
-  policyVersions       PolicyDocumentVersion[]
-  memberships          TenantMembership[]
-  sessions             AuthSession[]
-  invitations          TenantInvitation[]
-  roles                Role[]
-  rolePermissions      RolePermission[]
-  roleAssignments      MembershipRole[]
-  permissionGrants     MembershipPermissionGrant[]
-  patients             Patient[]
-  staffProfiles        StaffProfile[]
-  services             ServiceDefinition[]
-  availabilityRules    AvailabilityRule[]
-  appointments         Appointment[]
-  encounters           Encounter[]
-  diagnosticOrders     DiagnosticOrder[]
-  medications          Medication[]
-  inventoryBatches     InventoryBatch[]
-  prescriptions        Prescription[]
-  invoices             Invoice[]
-  payments             Payment[]
-  storedObjects        StoredObject[]
-  documents            DocumentRecord[]
-  notifications        Notification[]
-  auditEvents          AuditEvent[]
-  subscription         TenantSubscription?
-  entitlements         TenantEntitlement[]
-  supportAccess        SupportAccessGrant[]
-  oneTimeTokens        OneTimeToken[]
-  outboxEvents         OutboxEvent[]
-  branches             Branch[]
-  doctorProfiles       DoctorProfile[]
-  patientIdentifiers   PatientIdentifier[]
-  queues               Queue[]
-  queueEntries         QueueEntry[]
-  idempotencyRecords   IdempotencyRecord[]
-  encounterNotes       EncounterNote[]
-  encounterDiagnoses   EncounterDiagnosis[]
-  patientAllergies     PatientAllergy[]
-  clinicalObservations ClinicalObservation[]
-  diagnosticSpecimens  DiagnosticSpecimen[]
-  stockMovements       StockMovement[]
-  dispenses            Dispense[]
-  refunds              Refund[]
-  deviceRegistrations  DeviceRegistration[]
-  diagnosticResults    DiagnosticResult[]
-  videoCallSessions    VideoCallSession[]
-  departments          Department[]
-  doctorSittings       DoctorSitting[]
+  organizations          Organization[]
+  policies               PolicyDocument[]
+  policyVersions         PolicyDocumentVersion[]
+  memberships            TenantMembership[]
+  sessions               AuthSession[]
+  invitations            TenantInvitation[]
+  roles                  Role[]
+  rolePermissions        RolePermission[]
+  roleAssignments        MembershipRole[]
+  permissionGrants       MembershipPermissionGrant[]
+  patients               Patient[]
+  staffProfiles          StaffProfile[]
+  services               ServiceDefinition[]
+  availabilityRules      AvailabilityRule[]
+  appointments           Appointment[]
+  encounters             Encounter[]
+  diagnosticOrders       DiagnosticOrder[]
+  medications            Medication[]
+  inventoryBatches       InventoryBatch[]
+  prescriptions          Prescription[]
+  invoices               Invoice[]
+  payments               Payment[]
+  storedObjects          StoredObject[]
+  documents              DocumentRecord[]
+  notifications          Notification[]
+  auditEvents            AuditEvent[]
+  subscription           TenantSubscription?
+  entitlements           TenantEntitlement[]
+  supportAccess          SupportAccessGrant[]
+  oneTimeTokens          OneTimeToken[]
+  outboxEvents           OutboxEvent[]
+  branches               Branch[]
+  doctorProfiles         DoctorProfile[]
+  patientIdentifiers     PatientIdentifier[]
+  queues                 Queue[]
+  queueEntries           QueueEntry[]
+  idempotencyRecords     IdempotencyRecord[]
+  encounterNotes         EncounterNote[]
+  encounterDiagnoses     EncounterDiagnosis[]
+  patientAllergies       PatientAllergy[]
+  clinicalObservations   ClinicalObservation[]
+  diagnosticSpecimens    DiagnosticSpecimen[]
+  stockMovements         StockMovement[]
+  dispenses              Dispense[]
+  refunds                Refund[]
+  deviceRegistrations    DeviceRegistration[]
+  diagnosticResults      DiagnosticResult[]
+  videoCallSessions      VideoCallSession[]
+  departments            Department[]
+  doctorSittings         DoctorSitting[]
+  documentUploadSessions DocumentUploadSession[]
+  documentAccessTokens   DocumentAccessToken[]
+  suppliers              Supplier[]
+  purchaseReceipts       PurchaseReceipt[]
+  pharmacyReturns        PharmacyReturn[]
+  serviceFeeHistory      ServiceFeeHistory[]
+  onboardingState        TenantOnboardingState?
 
   @@index([status])
+}
+
+/// Server-held onboarding wizard progress, so a tenant owner who starts
+/// setup on one device can resume on another — never tracked client-side.
+model TenantOnboardingState {
+  id          String   @id @default(uuid()) @db.Uuid
+  tenantId    String   @unique @db.Uuid
+  currentStep String   @db.VarChar(50)
+  /// Map of stepCode -> { status, startedAt?, completedAt?, skippedAt? }
+  steps       Json
+  createdAt   DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
 model Organization {
@@ -491,6 +515,8 @@ model Department {
 
   @@unique([tenantId, code])
   @@index([tenantId, organizationId, isActive])
+  @@index([branchId])
+  @@index([organizationId])
 }
 
 model Branch {
@@ -528,10 +554,13 @@ model Branch {
   dispenses          Dispense[]
   departments        Department[]
   doctorSittings     DoctorSitting[]
+  purchaseReceipts   PurchaseReceipt[]
+  pharmacyReturns    PharmacyReturn[]
 
   @@unique([tenantId, code])
   @@index([tenantId, organizationId, status])
   @@index([tenantId, isMainBranch])
+  @@index([organizationId])
 }
 
 model Identity {
@@ -582,19 +611,21 @@ model TenantMembership {
   updatedAt        DateTime         @updatedAt @db.Timestamptz(6)
   archivedAt       DateTime?        @db.Timestamptz(6)
 
-  tenant        Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  identity      Identity                    @relation(fields: [identityId], references: [id], onDelete: Restrict)
-  organization  Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  primaryBranch Branch?                     @relation("MembershipPrimaryBranch", fields: [primaryBranchId], references: [id], onDelete: SetNull)
-  roles         MembershipRole[]
-  directGrants  MembershipPermissionGrant[]
-  sessions      AuthSession[]
-  staffProfile  StaffProfile?
-  handledServices ServiceDefinition[] @relation("ServiceHandler")
+  tenant          Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  identity        Identity                    @relation(fields: [identityId], references: [id], onDelete: Restrict)
+  organization    Organization                @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  primaryBranch   Branch?                     @relation("MembershipPrimaryBranch", fields: [primaryBranchId], references: [id], onDelete: SetNull)
+  roles           MembershipRole[]
+  directGrants    MembershipPermissionGrant[]
+  sessions        AuthSession[]
+  staffProfile    StaffProfile?
+  handledServices ServiceDefinition[]         @relation("ServiceHandler")
 
   @@unique([tenantId, identityId])
   @@index([tenantId, status])
   @@index([identityId, status])
+  @@index([organizationId])
+  @@index([primaryBranchId])
 }
 
 model AuthSession {
@@ -628,6 +659,7 @@ model AuthSession {
   @@index([identityId, status])
   @@index([tenantId, membershipId, status])
   @@index([expiresAt])
+  @@index([membershipId])
 }
 
 model OneTimeToken {
@@ -646,6 +678,7 @@ model OneTimeToken {
 
   @@index([identityId, purpose, status])
   @@index([expiresAt])
+  @@index([tenantId])
 }
 
 model MfaCredential {
@@ -737,6 +770,8 @@ model RolePermission {
 
   @@unique([tenantId, roleId, permissionId])
   @@index([tenantId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
 }
 
 model MembershipRole {
@@ -757,6 +792,9 @@ model MembershipRole {
   @@index([tenantId, membershipId])
   @@index([tenantId, roleId])
   @@index([tenantId, branchId])
+  @@index([membershipId])
+  @@index([roleId])
+  @@index([branchId])
 }
 
 model MembershipPermissionGrant {
@@ -779,29 +817,33 @@ model MembershipPermissionGrant {
   @@index([tenantId, membershipId])
   @@index([tenantId, permissionId])
   @@index([tenantId, branchId])
+  @@index([membershipId])
+  @@index([permissionId])
+  @@index([branchId])
 }
 
 model Patient {
-  id              String        @id @default(uuid()) @db.Uuid
-  tenantId        String        @db.Uuid
-  patientNumber   String        @db.VarChar(100)
-  status          PatientStatus @default(ACTIVE)
-  givenName       String        @db.VarChar(120)
-  middleName      String?       @db.VarChar(120)
-  familyName      String        @db.VarChar(120)
-  dateOfBirth     DateTime?     @db.Date
-  sex             String?       @db.VarChar(50)
-  phone           String?       @db.VarChar(50)
-  email           String?       @db.VarChar(320)
-  normalizedPhone String?       @db.VarChar(50)
-  normalizedEmail String?       @db.VarChar(320)
-  address         Json?
-  guardianData    Json?
-  consentData     Json?
-  photoObjectKey  String?       @db.VarChar(1000)
-  createdAt       DateTime      @default(now()) @db.Timestamptz(6)
-  updatedAt       DateTime      @updatedAt @db.Timestamptz(6)
-  archivedAt      DateTime?     @db.Timestamptz(6)
+  id               String        @id @default(uuid()) @db.Uuid
+  tenantId         String        @db.Uuid
+  patientNumber    String        @db.VarChar(100)
+  status           PatientStatus @default(ACTIVE)
+  givenName        String        @db.VarChar(120)
+  middleName       String?       @db.VarChar(120)
+  familyName       String        @db.VarChar(120)
+  dateOfBirth      DateTime?     @db.Date
+  sex              String?       @db.VarChar(50)
+  phone            String?       @db.VarChar(50)
+  email            String?       @db.VarChar(320)
+  normalizedPhone  String?       @db.VarChar(50)
+  normalizedEmail  String?       @db.VarChar(320)
+  address          Json?
+  guardianData     Json?
+  consentData      Json?
+  photoObjectKey   String?       @db.VarChar(1000)
+  photoContentType String?       @db.VarChar(100)
+  createdAt        DateTime      @default(now()) @db.Timestamptz(6)
+  updatedAt        DateTime      @updatedAt @db.Timestamptz(6)
+  archivedAt       DateTime?     @db.Timestamptz(6)
 
   tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   accessAccounts   PatientAccess[]
@@ -818,6 +860,7 @@ model Patient {
   allergies        PatientAllergy[]
   observations     ClinicalObservation[]
   dispenses        Dispense[]
+  pharmacyReturns  PharmacyReturn[]
 
   @@unique([tenantId, patientNumber])
   @@index([tenantId, status])
@@ -861,28 +904,35 @@ model StaffProfile {
 
   @@unique([tenantId, employeeNumber])
   @@index([tenantId, staffType, status])
+  @@index([branchId])
 }
 
 model DoctorProfile {
-  id                 String   @id @default(uuid()) @db.Uuid
-  tenantId           String   @db.Uuid
-  staffProfileId     String   @unique @db.Uuid
-  departmentId       String?  @db.Uuid
-  registrationNumber String?  @db.VarChar(150)
-  specialty          String?  @db.VarChar(200)
-  qualifications     String?  @db.Text
-  biography          String?  @db.Text
-  contactPhone       String?  @db.VarChar(80)
-  profileImageData   String?  @db.Text
-  durationMinutes    Int      @default(15)
-  publiclyBookable   Boolean  @default(false)
-  signatureObjectKey String?  @db.VarChar(1000)
-  createdAt          DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt          DateTime @updatedAt @db.Timestamptz(6)
+  id                       String   @id @default(uuid()) @db.Uuid
+  tenantId                 String   @db.Uuid
+  staffProfileId           String   @unique @db.Uuid
+  departmentId             String?  @db.Uuid
+  registrationNumber       String?  @db.VarChar(150)
+  specialty                String?  @db.VarChar(200)
+  qualifications           String?  @db.Text
+  biography                String?  @db.Text
+  contactPhone             String?  @db.VarChar(80)
+  profileImageData         String?  @db.Text
+  durationMinutes          Int      @default(15)
+  publiclyBookable         Boolean  @default(false)
+  signatureObjectKey       String?  @db.VarChar(1000)
+  /// When true, this clinician's clinical notes cannot be self-signed —
+  /// they save as DRAFT and require supervisorDoctorId to countersign.
+  requiresCountersignature Boolean  @default(false)
+  supervisorDoctorId       String?  @db.Uuid
+  createdAt                DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt                DateTime @updatedAt @db.Timestamptz(6)
 
   tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   staffProfile      StaffProfile        @relation(fields: [staffProfileId], references: [id], onDelete: Restrict)
   department        Department?         @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  supervisor        DoctorProfile?      @relation("DoctorSupervision", fields: [supervisorDoctorId], references: [id], onDelete: SetNull)
+  supervisees       DoctorProfile[]     @relation("DoctorSupervision")
   availabilityRules AvailabilityRule[]
   appointments      Appointment[]
   encounters        Encounter[]
@@ -893,6 +943,9 @@ model DoctorProfile {
   @@unique([tenantId, registrationNumber])
   @@index([tenantId, publiclyBookable])
   @@index([tenantId, departmentId])
+  @@index([tenantId, supervisorDoctorId])
+  @@index([departmentId])
+  @@index([supervisorDoctorId])
 }
 
 /// A hospital policy or patient-facing content document. The live text lives
@@ -921,20 +974,21 @@ model PolicyDocument {
 
   @@unique([tenantId, code])
   @@index([tenantId, organizationId, status])
+  @@index([organizationId])
 }
 
 /// Immutable snapshot of a policy as it was published.
 model PolicyDocumentVersion {
-  id            String   @id @default(uuid()) @db.Uuid
-  tenantId      String   @db.Uuid
-  policyId      String   @db.Uuid
+  id            String    @id @default(uuid()) @db.Uuid
+  tenantId      String    @db.Uuid
+  policyId      String    @db.Uuid
   version       Int
-  title         String   @db.VarChar(250)
-  body          String   @db.Text
+  title         String    @db.VarChar(250)
+  body          String    @db.Text
   effectiveFrom DateTime? @db.Timestamptz(6)
-  publishedAt   DateTime @default(now()) @db.Timestamptz(6)
-  publishedById String?  @db.Uuid
-  createdAt     DateTime @default(now()) @db.Timestamptz(6)
+  publishedAt   DateTime  @default(now()) @db.Timestamptz(6)
+  publishedById String?   @db.Uuid
+  createdAt     DateTime  @default(now()) @db.Timestamptz(6)
 
   tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   policy PolicyDocument @relation(fields: [policyId], references: [id], onDelete: Cascade)
@@ -944,41 +998,64 @@ model PolicyDocumentVersion {
 }
 
 model ServiceDefinition {
-  id               String           @id @default(uuid()) @db.Uuid
-  tenantId         String           @db.Uuid
-  branchId         String?          @db.Uuid
-  doctorId         String?          @db.Uuid
+  id                  String              @id @default(uuid()) @db.Uuid
+  tenantId            String              @db.Uuid
+  branchId            String?             @db.Uuid
+  doctorId            String?             @db.Uuid
   /// Desk that operates this service when no single person owns it.
-  handlerWorkspace WorkspaceCode?
+  handlerWorkspace    WorkspaceCode?
   /// Specific staff member who operates this service, when one is named.
-  handlerMembershipId String?       @db.Uuid
-  code             String           @db.VarChar(100)
-  name             String           @db.VarChar(250)
-  category         String           @db.VarChar(100)
-  description      String?          @db.Text
-  durationMinutes  Int              @default(15)
-  priceMinorUnits  Int?
-  currencyCode     String           @default("PKR") @db.Char(3)
-  publiclyBookable Boolean          @default(false)
-  consultationMode ConsultationMode @default(IN_PERSON)
+  handlerMembershipId String?             @db.Uuid
+  code                String              @db.VarChar(100)
+  name                String              @db.VarChar(250)
+  category            String              @db.VarChar(100)
+  description         String?             @db.Text
+  durationMinutes     Int                 @default(15)
+  priceMinorUnits     Int?
+  currencyCode        String              @default("PKR") @db.Char(3)
+  publiclyBookable    Boolean             @default(false)
+  consultationMode    ConsultationMode    @default(IN_PERSON)
   /// Who may set this service price. DOCTOR is only valid on a doctor-linked service.
-  billingOwner     ServiceBillingOwner @default(HOSPITAL)
-  isActive         Boolean          @default(true)
-  createdAt        DateTime         @default(now()) @db.Timestamptz(6)
-  updatedAt        DateTime         @updatedAt @db.Timestamptz(6)
+  billingOwner        ServiceBillingOwner @default(HOSPITAL)
+  isActive            Boolean             @default(true)
+  createdAt           DateTime            @default(now()) @db.Timestamptz(6)
+  updatedAt           DateTime            @updatedAt @db.Timestamptz(6)
 
-  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  branch            Branch?            @relation(fields: [branchId], references: [id], onDelete: Cascade)
-  handlerMembership TenantMembership?  @relation("ServiceHandler", fields: [handlerMembershipId], references: [id], onDelete: SetNull)
-  doctor            DoctorProfile?     @relation(fields: [doctorId], references: [id], onDelete: SetNull)
+  tenant            Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  branch            Branch?             @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  handlerMembership TenantMembership?   @relation("ServiceHandler", fields: [handlerMembershipId], references: [id], onDelete: SetNull)
+  doctor            DoctorProfile?      @relation(fields: [doctorId], references: [id], onDelete: SetNull)
   availabilityRules AvailabilityRule[]
   appointments      Appointment[]
   invoiceLines      InvoiceLine[]
+  feeHistory        ServiceFeeHistory[]
 
   @@unique([tenantId, code])
   @@index([tenantId, branchId, isActive])
   @@index([tenantId, handlerMembershipId, isActive])
   @@index([tenantId, doctorId, isActive])
+  @@index([branchId])
+  @@index([doctorId])
+  @@index([handlerMembershipId])
+}
+
+/// Append-only fee history — a service's price is never overwritten in place
+/// without a row here, so a past invoice remains explicable by the price
+/// that was actually in effect when it was issued.
+model ServiceFeeHistory {
+  id                    String   @id @default(uuid()) @db.Uuid
+  tenantId              String   @db.Uuid
+  serviceId             String   @db.Uuid
+  priceMinorUnits       Int
+  currencyCode          String   @db.Char(3)
+  changedByMembershipId String   @db.Uuid
+  changedAt             DateTime @default(now()) @db.Timestamptz(6)
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  service ServiceDefinition @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, serviceId, changedAt])
+  @@index([serviceId])
 }
 
 model AvailabilityRule {
@@ -1004,6 +1081,9 @@ model AvailabilityRule {
 
   @@index([tenantId, doctorId, weekday])
   @@index([tenantId, branchId, isActive])
+  @@index([doctorId])
+  @@index([branchId])
+  @@index([serviceId])
 }
 
 /// A doctor's actual sitting hours for one business date at one branch.
@@ -1032,6 +1112,8 @@ model DoctorSitting {
   @@unique([tenantId, doctorId, branchId, businessDate])
   @@index([tenantId, branchId, businessDate])
   @@index([tenantId, doctorId, businessDate])
+  @@index([branchId])
+  @@index([doctorId])
 }
 
 model Appointment {
@@ -1070,6 +1152,10 @@ model Appointment {
   @@index([tenantId, branchId, startsAt, status])
   @@index([tenantId, doctorId, startsAt])
   @@index([tenantId, patientId, startsAt])
+  @@index([branchId])
+  @@index([doctorId])
+  @@index([patientId])
+  @@index([serviceId])
 }
 
 model VideoCallSession {
@@ -1139,6 +1225,9 @@ model Encounter {
   @@index([tenantId, patientId, createdAt])
   @@index([tenantId, doctorId, status])
   @@index([tenantId, branchId, status])
+  @@index([branchId])
+  @@index([doctorId])
+  @@index([patientId])
 }
 
 model DiagnosticOrder {
@@ -1162,17 +1251,21 @@ model DiagnosticOrder {
   createdAt             DateTime         @default(now()) @db.Timestamptz(6)
   updatedAt             DateTime         @updatedAt @db.Timestamptz(6)
 
-  tenant    Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  patient   Patient              @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  encounter Encounter?           @relation(fields: [encounterId], references: [id], onDelete: Restrict)
-  branch    Branch               @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  results   DiagnosticResult[]
-  specimens DiagnosticSpecimen[]
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient     Patient              @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  encounter   Encounter?           @relation(fields: [encounterId], references: [id], onDelete: Restrict)
+  branch      Branch               @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  results     DiagnosticResult[]
+  specimens   DiagnosticSpecimen[]
+  attachments DocumentRecord[]
 
   @@unique([tenantId, accessionNumber])
   @@index([tenantId, type, status, createdAt])
   @@index([tenantId, patientId])
   @@index([tenantId, branchId, type, status, createdAt])
+  @@index([branchId])
+  @@index([encounterId])
+  @@index([patientId])
 }
 
 model DiagnosticResult {
@@ -1204,23 +1297,27 @@ model DiagnosticResult {
 }
 
 model Medication {
-  id          String   @id @default(uuid()) @db.Uuid
-  tenantId    String   @db.Uuid
-  code        String   @db.VarChar(120)
-  genericName String   @db.VarChar(300)
-  brandName   String?  @db.VarChar(300)
-  strength    String?  @db.VarChar(150)
-  dosageForm  String?  @db.VarChar(150)
-  unit        String   @db.VarChar(80)
-  isActive    Boolean  @default(true)
-  createdAt   DateTime @default(now()) @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @db.Timestamptz(6)
+  id           String   @id @default(uuid()) @db.Uuid
+  tenantId     String   @db.Uuid
+  code         String   @db.VarChar(120)
+  genericName  String   @db.VarChar(300)
+  brandName    String?  @db.VarChar(300)
+  strength     String?  @db.VarChar(150)
+  dosageForm   String?  @db.VarChar(150)
+  unit         String   @db.VarChar(80)
+  /// Tenant-wide low-stock threshold, compared against a branch's total AVAILABLE quantity across batches.
+  reorderLevel Decimal  @default(0) @db.Decimal(18, 4)
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now()) @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @db.Timestamptz(6)
 
-  tenant            Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  inventoryBatches  InventoryBatch[]
-  prescriptionItems PrescriptionItem[]
-  stockMovements    StockMovement[]
-  dispenseItems     DispenseItem[]
+  tenant               Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  inventoryBatches     InventoryBatch[]
+  prescriptionItems    PrescriptionItem[]
+  stockMovements       StockMovement[]
+  dispenseItems        DispenseItem[]
+  purchaseReceiptLines PurchaseReceiptLine[]
+  pharmacyReturnLines  PharmacyReturnLine[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -1247,6 +1344,8 @@ model InventoryBatch {
 
   @@unique([tenantId, branchId, medicationId, batchNumber])
   @@index([tenantId, branchId, status, expiryDate])
+  @@index([branchId])
+  @@index([medicationId])
 }
 
 model Prescription {
@@ -1272,6 +1371,9 @@ model Prescription {
 
   @@index([tenantId, patientId, status])
   @@index([tenantId, doctorId, createdAt])
+  @@index([doctorId])
+  @@index([encounterId])
+  @@index([patientId])
 }
 
 model PrescriptionItem {
@@ -1291,6 +1393,7 @@ model PrescriptionItem {
   dispenseItems DispenseItem[]
 
   @@index([prescriptionId])
+  @@index([medicationId])
 }
 
 model Invoice {
@@ -1321,6 +1424,8 @@ model Invoice {
   @@unique([tenantId, invoiceNumber])
   @@index([tenantId, branchId, status, createdAt])
   @@index([tenantId, patientId])
+  @@index([branchId])
+  @@index([patientId])
 }
 
 model InvoiceLine {
@@ -1337,6 +1442,7 @@ model InvoiceLine {
   service ServiceDefinition? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
 
   @@index([invoiceId])
+  @@index([serviceId])
 }
 
 model Payment {
@@ -1359,6 +1465,7 @@ model Payment {
   refunds Refund[]
 
   @@index([tenantId, invoiceId, status])
+  @@index([invoiceId])
 }
 
 model StoredObject {
@@ -1379,22 +1486,86 @@ model StoredObject {
 }
 
 model DocumentRecord {
-  id         String         @id @default(uuid()) @db.Uuid
-  tenantId   String         @db.Uuid
-  patientId  String?        @db.Uuid
-  objectId   String         @db.Uuid
-  category   String         @db.VarChar(100)
-  title      String         @db.VarChar(300)
-  status     DocumentStatus @default(DRAFT)
-  releasedAt DateTime?      @db.Timestamptz(6)
-  createdAt  DateTime       @default(now()) @db.Timestamptz(6)
-  updatedAt  DateTime       @updatedAt @db.Timestamptz(6)
+  id                     String         @id @default(uuid()) @db.Uuid
+  tenantId               String         @db.Uuid
+  patientId              String?        @db.Uuid
+  objectId               String         @db.Uuid
+  category               String         @db.VarChar(100)
+  title                  String         @db.VarChar(300)
+  /// Set when this document is an attachment on a lab/radiology order
+  /// (a scan image, a photo of a printed report, etc.) rather than a
+  /// patient's general personal document.
+  diagnosticOrderId      String?        @db.Uuid
+  /// The staff/doctor membership that uploaded this, when uploaded by
+  /// staff. Null when the uploader was the patient themselves — the
+  /// patient relation above already identifies them in that case.
+  uploadedByMembershipId String?        @db.Uuid
+  status                 DocumentStatus @default(DRAFT)
+  releasedAt             DateTime?      @db.Timestamptz(6)
+  createdAt              DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime       @updatedAt @db.Timestamptz(6)
 
-  tenant  Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  patient Patient?     @relation(fields: [patientId], references: [id], onDelete: SetNull)
-  object  StoredObject @relation(fields: [objectId], references: [id], onDelete: Restrict)
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  patient         Patient?         @relation(fields: [patientId], references: [id], onDelete: SetNull)
+  object          StoredObject     @relation(fields: [objectId], references: [id], onDelete: Restrict)
+  diagnosticOrder DiagnosticOrder? @relation(fields: [diagnosticOrderId], references: [id], onDelete: Cascade)
+
+  accessTokens DocumentAccessToken[]
 
   @@index([tenantId, patientId, status])
+  @@index([objectId])
+  @@index([patientId])
+  @@index([diagnosticOrderId])
+}
+
+enum DocumentUploadStatus {
+  IN_PROGRESS
+  COMPLETED
+  ABORTED
+}
+
+/// A resumable chunked upload in progress. Chunks are appended, in order, to a
+/// temp file on disk keyed by this session's id; nextChunkIndex/receivedBytes
+/// let an interrupted client learn where to resume instead of restarting.
+model DocumentUploadSession {
+  id             String               @id @default(uuid()) @db.Uuid
+  tenantId       String               @db.Uuid
+  patientId      String               @db.Uuid
+  fileName       String               @db.VarChar(500)
+  contentType    String               @db.VarChar(250)
+  category       String               @db.VarChar(100)
+  title          String               @db.VarChar(300)
+  totalSizeBytes BigInt
+  chunkSizeBytes Int
+  receivedBytes  BigInt               @default(0)
+  nextChunkIndex Int                  @default(0)
+  status         DocumentUploadStatus @default(IN_PROGRESS)
+  expiresAt      DateTime             @db.Timestamptz(6)
+  createdAt      DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt      DateTime             @updatedAt @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, patientId, status])
+}
+
+/// A short-lived, single-use capability to fetch one document's bytes without
+/// a re-authenticated session round trip. usedAt is set atomically on first
+/// successful fetch; a second attempt with the same token is refused.
+model DocumentAccessToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  tenantId   String    @db.Uuid
+  documentId String    @db.Uuid
+  token      String    @unique @db.VarChar(128)
+  expiresAt  DateTime  @db.Timestamptz(6)
+  usedAt     DateTime? @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @db.Timestamptz(6)
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  document DocumentRecord @relation(fields: [documentId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, documentId])
+  @@index([documentId])
 }
 
 model Notification {
@@ -1421,6 +1592,7 @@ model Notification {
 
   @@index([tenantId, status, scheduledAt])
   @@index([identityId, createdAt])
+  @@index([patientId])
 }
 
 model AuditEvent {
@@ -1534,6 +1706,7 @@ model PatientIdentifier {
 
   @@unique([tenantId, system, normalizedValue])
   @@index([tenantId, patientId])
+  @@index([patientId])
 }
 
 model Queue {
@@ -1552,6 +1725,7 @@ model Queue {
 
   @@unique([tenantId, branchId, queueDate])
   @@index([tenantId, branchId, queueDate, status])
+  @@index([branchId])
 }
 
 model QueueEntry {
@@ -1577,6 +1751,7 @@ model QueueEntry {
   @@unique([queueId, tokenNumber])
   @@index([tenantId, queueId, status, priority, joinedAt])
   @@index([tenantId, patientId])
+  @@index([patientId])
 }
 
 model IdempotencyRecord {
@@ -1611,6 +1786,7 @@ model EncounterNote {
 
   @@index([tenantId, encounterId, status])
   @@index([tenantId, authorMembershipId])
+  @@index([encounterId])
 }
 
 model EncounterDiagnosis {
@@ -1634,6 +1810,8 @@ model EncounterDiagnosis {
 
   @@index([tenantId, patientId, status])
   @@index([tenantId, encounterId])
+  @@index([encounterId])
+  @@index([patientId])
 }
 
 model PatientAllergy {
@@ -1651,6 +1829,7 @@ model PatientAllergy {
   patient                Patient       @relation(fields: [patientId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, patientId, status])
+  @@index([patientId])
 }
 
 model ClinicalObservation {
@@ -1674,6 +1853,8 @@ model ClinicalObservation {
 
   @@index([tenantId, patientId, code, observedAt])
   @@index([tenantId, encounterId])
+  @@index([encounterId])
+  @@index([patientId])
 }
 
 model DiagnosticSpecimen {
@@ -1696,6 +1877,7 @@ model DiagnosticSpecimen {
 
   @@unique([tenantId, accessionNumber])
   @@index([tenantId, diagnosticOrderId, status])
+  @@index([diagnosticOrderId])
 }
 
 model StockMovement {
@@ -1721,50 +1903,199 @@ model StockMovement {
   @@index([tenantId, branchId, occurredAt])
   @@index([tenantId, medicationId, occurredAt])
   @@index([tenantId, inventoryBatchId])
+  @@index([branchId])
+  @@index([medicationId])
+  @@index([inventoryBatchId])
 }
 
 model Dispense {
-  id                      String         @id @default(uuid()) @db.Uuid
-  tenantId                String         @db.Uuid
-  branchId                String         @db.Uuid
-  patientId               String         @db.Uuid
-  prescriptionId          String         @db.Uuid
-  status                  DispenseStatus @default(DRAFT)
-  dispensedByMembershipId String         @db.Uuid
-  notes                   String?        @db.Text
-  completedAt             DateTime?      @db.Timestamptz(6)
-  cancelledAt             DateTime?      @db.Timestamptz(6)
-  cancellationReason      String?        @db.VarChar(1000)
-  version                 Int            @default(1)
-  createdAt               DateTime       @default(now()) @db.Timestamptz(6)
-  updatedAt               DateTime       @updatedAt @db.Timestamptz(6)
-  tenant                  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  branch                  Branch         @relation(fields: [branchId], references: [id], onDelete: Restrict)
-  patient                 Patient        @relation(fields: [patientId], references: [id], onDelete: Restrict)
-  prescription            Prescription   @relation(fields: [prescriptionId], references: [id], onDelete: Restrict)
+  id                      String           @id @default(uuid()) @db.Uuid
+  tenantId                String           @db.Uuid
+  branchId                String           @db.Uuid
+  patientId               String           @db.Uuid
+  prescriptionId          String           @db.Uuid
+  status                  DispenseStatus   @default(DRAFT)
+  dispensedByMembershipId String           @db.Uuid
+  notes                   String?          @db.Text
+  completedAt             DateTime?        @db.Timestamptz(6)
+  cancelledAt             DateTime?        @db.Timestamptz(6)
+  cancellationReason      String?          @db.VarChar(1000)
+  version                 Int              @default(1)
+  createdAt               DateTime         @default(now()) @db.Timestamptz(6)
+  updatedAt               DateTime         @updatedAt @db.Timestamptz(6)
+  tenant                  Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  branch                  Branch           @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  patient                 Patient          @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  prescription            Prescription     @relation(fields: [prescriptionId], references: [id], onDelete: Restrict)
   items                   DispenseItem[]
+  pharmacyReturns         PharmacyReturn[]
 
   @@index([tenantId, branchId, status, createdAt])
   @@index([tenantId, patientId, createdAt])
   @@index([tenantId, prescriptionId])
+  @@index([branchId])
+  @@index([patientId])
+  @@index([prescriptionId])
 }
 
 model DispenseItem {
-  id                 String           @id @default(uuid()) @db.Uuid
-  dispenseId         String           @db.Uuid
-  prescriptionItemId String           @db.Uuid
-  medicationId       String           @db.Uuid
-  inventoryBatchId   String           @db.Uuid
-  quantity           Decimal          @db.Decimal(18, 4)
-  unit               String           @db.VarChar(80)
-  createdAt          DateTime         @default(now()) @db.Timestamptz(6)
-  dispense           Dispense         @relation(fields: [dispenseId], references: [id], onDelete: Cascade)
-  prescriptionItem   PrescriptionItem @relation(fields: [prescriptionItemId], references: [id], onDelete: Restrict)
-  medication         Medication       @relation(fields: [medicationId], references: [id], onDelete: Restrict)
-  inventoryBatch     InventoryBatch   @relation(fields: [inventoryBatchId], references: [id], onDelete: Restrict)
+  id                  String               @id @default(uuid()) @db.Uuid
+  dispenseId          String               @db.Uuid
+  prescriptionItemId  String               @db.Uuid
+  medicationId        String               @db.Uuid
+  inventoryBatchId    String               @db.Uuid
+  quantity            Decimal              @db.Decimal(18, 4)
+  unit                String               @db.VarChar(80)
+  createdAt           DateTime             @default(now()) @db.Timestamptz(6)
+  dispense            Dispense             @relation(fields: [dispenseId], references: [id], onDelete: Cascade)
+  prescriptionItem    PrescriptionItem     @relation(fields: [prescriptionItemId], references: [id], onDelete: Restrict)
+  medication          Medication           @relation(fields: [medicationId], references: [id], onDelete: Restrict)
+  inventoryBatch      InventoryBatch       @relation(fields: [inventoryBatchId], references: [id], onDelete: Restrict)
+  pharmacyReturnLines PharmacyReturnLine[]
 
   @@index([dispenseId])
   @@index([inventoryBatchId])
+  @@index([medicationId])
+  @@index([prescriptionItemId])
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Supplier {
+  id            String         @id @default(uuid()) @db.Uuid
+  tenantId      String         @db.Uuid
+  code          String         @db.VarChar(80)
+  name          String         @db.VarChar(250)
+  contactPerson String?        @db.VarChar(200)
+  phone         String?        @db.VarChar(50)
+  email         String?        @db.VarChar(320)
+  address       String?        @db.VarChar(500)
+  status        SupplierStatus @default(ACTIVE)
+  createdAt     DateTime       @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime       @updatedAt @db.Timestamptz(6)
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  purchaseReceipts PurchaseReceipt[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+}
+
+enum PurchaseReceiptStatus {
+  DRAFT
+  POSTED
+}
+
+model PurchaseReceipt {
+  id                     String                @id @default(uuid()) @db.Uuid
+  tenantId               String                @db.Uuid
+  branchId               String                @db.Uuid
+  supplierId             String                @db.Uuid
+  supplierInvoiceNumber  String                @db.VarChar(150)
+  status                 PurchaseReceiptStatus @default(DRAFT)
+  receivedByMembershipId String                @db.Uuid
+  postedAt               DateTime?             @db.Timestamptz(6)
+  createdAt              DateTime              @default(now()) @db.Timestamptz(6)
+  updatedAt              DateTime              @updatedAt @db.Timestamptz(6)
+
+  tenant   Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  branch   Branch                @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  supplier Supplier              @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  lines    PurchaseReceiptLine[]
+
+  @@index([tenantId, branchId, status, createdAt])
+  @@index([branchId])
+  @@index([supplierId])
+}
+
+model PurchaseReceiptLine {
+  id                String   @id @default(uuid()) @db.Uuid
+  purchaseReceiptId String   @db.Uuid
+  medicationId      String   @db.Uuid
+  batchNumber       String   @db.VarChar(150)
+  expiryDate        DateTime @db.Date
+  quantity          Decimal  @db.Decimal(18, 4)
+  unitCostMinor     Int
+  createdAt         DateTime @default(now()) @db.Timestamptz(6)
+
+  purchaseReceipt PurchaseReceipt @relation(fields: [purchaseReceiptId], references: [id], onDelete: Cascade)
+  medication      Medication      @relation(fields: [medicationId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseReceiptId])
+  @@index([medicationId])
+}
+
+enum PharmacyReturnStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+  COMPLETED
+}
+
+enum PharmacyReturnDisposition {
+  RESTOCK
+  QUARANTINE
+  DESTROY
+}
+
+enum PharmacyPackageCondition {
+  SEALED
+  OPENED
+  DAMAGED
+  EXPIRED
+}
+
+model PharmacyReturn {
+  id                      String               @id @default(uuid()) @db.Uuid
+  tenantId                String               @db.Uuid
+  branchId                String               @db.Uuid
+  patientId               String               @db.Uuid
+  dispenseId              String               @db.Uuid
+  status                  PharmacyReturnStatus @default(REQUESTED)
+  reason                  String               @db.VarChar(1000)
+  requestedByMembershipId String               @db.Uuid
+  approvedByMembershipId  String?              @db.Uuid
+  requestedAt             DateTime             @default(now()) @db.Timestamptz(6)
+  approvedAt              DateTime?            @db.Timestamptz(6)
+  completedAt             DateTime?            @db.Timestamptz(6)
+  rejectedAt              DateTime?            @db.Timestamptz(6)
+  rejectionReason         String?              @db.VarChar(1000)
+  createdAt               DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt               DateTime             @updatedAt @db.Timestamptz(6)
+
+  tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  branch   Branch               @relation(fields: [branchId], references: [id], onDelete: Restrict)
+  patient  Patient              @relation(fields: [patientId], references: [id], onDelete: Restrict)
+  dispense Dispense             @relation(fields: [dispenseId], references: [id], onDelete: Restrict)
+  lines    PharmacyReturnLine[]
+
+  @@index([tenantId, branchId, status, requestedAt])
+  @@index([tenantId, dispenseId])
+  @@index([branchId])
+  @@index([dispenseId])
+  @@index([patientId])
+}
+
+model PharmacyReturnLine {
+  id               String                    @id @default(uuid()) @db.Uuid
+  returnId         String                    @db.Uuid
+  dispenseItemId   String                    @db.Uuid
+  medicationId     String                    @db.Uuid
+  quantity         Decimal                   @db.Decimal(18, 4)
+  disposition      PharmacyReturnDisposition
+  packageCondition PharmacyPackageCondition
+  createdAt        DateTime                  @default(now()) @db.Timestamptz(6)
+
+  return       PharmacyReturn @relation(fields: [returnId], references: [id], onDelete: Cascade)
+  dispenseItem DispenseItem   @relation(fields: [dispenseItemId], references: [id], onDelete: Restrict)
+  medication   Medication     @relation(fields: [medicationId], references: [id], onDelete: Restrict)
+
+  @@index([returnId])
+  @@index([dispenseItemId])
+  @@index([medicationId])
 }
 
 model Refund {
@@ -1793,6 +2124,8 @@ model Refund {
   @@index([tenantId, status, requestedAt])
   @@index([tenantId, invoiceId])
   @@index([tenantId, paymentId])
+  @@index([invoiceId])
+  @@index([paymentId])
 }
 
 model DeviceRegistration {

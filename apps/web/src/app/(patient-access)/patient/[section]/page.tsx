@@ -1,11 +1,11 @@
 import { notFound } from "next/navigation";
-import { LivePatientPortal } from "@/components/patient/live-patient-portal";
+import { PatientAccessDashboard } from "@/components/patient/patient-access-dashboard";
 import { PatientProfileEditor } from "@/components/patient/patient-profile-editor";
 
-const sections = ["care", "reports", "profile"] as const;
+const sections = ["care", "reports", "billing", "profile"] as const;
 export default async function PatientSectionPage({ params }: { params: Promise<{ section: string }> }) {
   const { section } = await params;
   if (!sections.includes(section as (typeof sections)[number])) notFound();
   if (section === "profile") return <PatientProfileEditor />;
-  return <LivePatientPortal section={section as (typeof sections)[number]} />;
+  return <PatientAccessDashboard section={section as "care" | "reports" | "billing"} />;
 }

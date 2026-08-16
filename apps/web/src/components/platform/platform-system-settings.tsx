@@ -18,10 +18,10 @@ import {
 
 import {
   usePlatformAdministration,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 import type {
   PlatformSystemSettings,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 import {
   PlatformLoadingState,
   PlatformPanel,

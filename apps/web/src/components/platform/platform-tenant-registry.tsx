@@ -22,10 +22,10 @@ import {
 } from "./platform-administration-ui";
 import {
   usePlatformAdministration,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 import type {
   PlatformTenantStatus,
-} from "./platform-administration-store";
+} from "./platform-administration-context";
 
 type TenantStatusFilter =
   | "all"

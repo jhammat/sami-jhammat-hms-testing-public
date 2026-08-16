@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DoctorPageHeader } from "@/components/doctor/doctor-page-header";
 
-import { Pill, patientNameOf, readApiError } from "./diagnostics-workspace";
+import { DiagnosticAttachmentsPanel, Pill, patientNameOf, readApiError } from "./diagnostics-workspace";
 import type { DiagnosticOrder, DiagnosticType } from "./diagnostics-workspace";
 
 interface ClinicianResult {
@@ -177,6 +177,8 @@ export function ClinicianResultsWorkspace({ type }: { type: DiagnosticType }) {
                   </pre>
                 </div>
               ))}
+
+              <DiagnosticAttachmentsPanel attachments={order.attachments} canDelete={false} onChange={() => void load()} orderId={order.id} />
             </div>
           </article>
         ))}

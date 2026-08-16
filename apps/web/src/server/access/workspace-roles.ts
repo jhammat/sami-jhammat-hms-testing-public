@@ -20,12 +20,16 @@ export const WORKSPACE_PERMISSION_CODES = {
   ],
   RECEPTION: [
     "patients.read", "patients.manage", "appointments.read", "appointments.manage", "queues.manage",
-    "billing.invoices.manage", "organization.services.read", "organization.schedules.read",
+    "billing.invoices.manage", "billing.payments.manage", "organization.services.read", "organization.schedules.read",
   ],
   DOCTOR: [
-    "patients.read", "appointments.read", "appointments.manage", "queues.manage",
+    // patients.manage: a doctor can register a new patient themselves,
+    // the same as reception, from the doctor portal's own registration
+    // screen — not just read an existing record.
+    "patients.read", "patients.manage", "appointments.read", "appointments.manage", "queues.manage",
     "encounters.read", "encounters.manage", "encounters.sign",
-    "laboratory.orders.read", "radiology.orders.read",
+    "laboratory.orders.read", "laboratory.orders.manage",
+    "radiology.orders.read", "radiology.orders.manage",
     "organization.services.read", "organization.schedules.read",
   ],
   LABORATORY: [
@@ -36,11 +40,15 @@ export const WORKSPACE_PERMISSION_CODES = {
     "radiology.orders.read", "radiology.orders.manage", "radiology.reports.manage",
     "radiology.reports.release", "patients.read",
   ],
-  PHARMACY: ["pharmacy.dispensing.manage", "patients.read"],
-  BILLING: ["billing.invoices.manage", "patients.read", "appointments.read"],
+  PHARMACY: [
+    "pharmacy.dispensing.manage", "pharmacy.catalogue.read", "pharmacy.catalogue.manage",
+    "pharmacy.inventory.read", "pharmacy.inventory.manage", "pharmacy.suppliers.manage",
+    "pharmacy.purchase-receipts.manage", "pharmacy.returns.manage", "patients.read",
+  ],
+  BILLING: ["billing.invoices.manage", "billing.payments.manage", "billing.refunds.manage", "patients.read", "appointments.read"],
   MANAGEMENT: [
     "organization.profile.read", "organization.audit.read", "organization.services.read",
-    "patients.read", "appointments.read",
+    "patients.read", "appointments.read", "management.dashboard.read", "billing.invoices.read",
   ],
   // The patient portal authorizes through PatientAccess, not tenant permissions.
   PATIENT: [],
