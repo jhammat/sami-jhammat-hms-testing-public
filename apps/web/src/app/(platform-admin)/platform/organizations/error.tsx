@@ -3,11 +3,13 @@
 import { WonFlowErrorState } from "@/components/feedback/async-data-state";
 
 export default function ErrorState({
+  error,
   reset,
 }: {
-  error: Error;
+  error: Error & { digest?: string };
   reset: () => void;
 }) {
+  console.error("Platform organization error boundary caught:", error);
   return (
     <main className="grid min-h-[60vh] place-items-center" id="main-content">
       <div className="w-full max-w-xl">

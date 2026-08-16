@@ -230,7 +230,7 @@ if (developmentDoctor) {
       priceMinorUnits: 120_000,
       currencyCode: "PKR",
       publiclyBookable: true,
-      consultationMode: "ONLINE",
+      consultationModes: ["ONLINE"],
       isActive: true,
     },
     update: {
@@ -242,7 +242,7 @@ if (developmentDoctor) {
       priceMinorUnits: 120_000,
       currencyCode: "PKR",
       publiclyBookable: true,
-      consultationMode: "ONLINE",
+      consultationModes: ["ONLINE"],
       isActive: true,
     },
   });

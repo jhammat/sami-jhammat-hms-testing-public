@@ -114,8 +114,6 @@ export class PlatformAdministrationService {
     requirePermission(context, "platform.subscriptions.manage");
     if ((input.entitlements?.length ?? 0) > 0) requirePermission(context, "platform.entitlements.manage");
 
-    const displayName = requiredText(input.tenantDisplayName, "organization name");
-    const slug = requiredText(input.tenantSlug, "tenant slug").toLowerCase();
     const ownerName = requiredText(input.ownerName, "owner name");
     const ownerEmail = requiredText(input.ownerEmail, "owner email").toLowerCase();
     if (!EMAIL_PATTERN.test(ownerEmail)) throw new WonFlowApiError(400, "invalid-owner-email", "Enter a valid owner email address.");
@@ -152,6 +150,10 @@ export class PlatformAdministrationService {
       if (resolved.tenant?.archivedAt) {
         throw new WonFlowApiError(409, "tenant-archived", "Archived tenant backups cannot be activated.");
       }
+
+      const displayName = input.tenantDisplayName?.trim() || resolved.tenant?.displayName || requiredText(input.tenantDisplayName, "organization name");
+      const slug = (input.tenantSlug?.trim() || resolved.tenant?.slug || requiredText(input.tenantSlug, "tenant slug")).toLowerCase();
+
       const tenant = resolved.tenant
         ? await transaction.tenant.update({
             where: { id: resolved.tenant.id },

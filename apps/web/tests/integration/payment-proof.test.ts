@@ -23,6 +23,7 @@ let organizationId: string;
 let branchId: string;
 let doctorIdentityId: string;
 let adminMembershipId: string;
+let patientMembershipId: string;
 let patientIdentityId: string;
 let patientId: string;
 let appointmentId: string;
@@ -39,7 +40,7 @@ function adminContext(): WonFlowTenantRequestContext {
 function patientContext(): WonFlowTenantRequestContext {
   return {
     scope: "tenant", requestId: randomUUID(), userId: randomUUID(), identityId: patientIdentityId,
-    membershipId: null, sessionId: randomUUID(), workspace: "PATIENT", locale: "en",
+    membershipId: patientMembershipId, sessionId: randomUUID(), workspace: "PATIENT", locale: "en",
     timezone: "Asia/Karachi", currencyCode: "PKR", permissionCodes: [],
     sourceApplication: "web", tenantId, organizationId, branchId,
   };
@@ -65,6 +66,8 @@ beforeAll(async () => {
 
   const patientIdentity = await database.identity.create({ data: { email: `${RUN_ID}-patient@example.test`, normalizedEmail: `${RUN_ID}-patient@example.test`, status: "ACTIVE" } });
   patientIdentityId = patientIdentity.id;
+  const patientMembership = await database.tenantMembership.create({ data: { tenantId, identityId: patientIdentity.id, organizationId, primaryBranchId: branchId, displayName: "Test Patient", status: "ACTIVE" } });
+  patientMembershipId = patientMembership.id;
   const patient = await database.patient.create({ data: { tenantId, patientNumber: `${RUN_ID}-p`, givenName: "Test", familyName: "Patient" } });
   patientId = patient.id;
   await database.patientAccess.create({ data: { patientId: patient.id, identityId: patientIdentity.id, isPrimary: true, isActive: true } });

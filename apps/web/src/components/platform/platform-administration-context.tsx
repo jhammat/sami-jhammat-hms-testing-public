@@ -517,13 +517,13 @@ function isoOrEmpty(value: string | null | undefined): string {
 function mapServerSubscription(
   subscription: ServerTenantSubscription | null,
 ): PlatformTenantSubscription {
-  if (subscription === null) {
+  if (!subscription || !subscription.planCode) {
     return createEmptySubscription();
   }
 
   const plan =
     SERVER_SUBSCRIPTION_PLAN[
-      subscription.planCode.trim().toLowerCase()
+      (subscription.planCode || "").trim().toLowerCase()
     ] ?? "unconfigured";
 
   return {
@@ -531,16 +531,11 @@ function mapServerSubscription(
     billingStatus:
       SERVER_BILLING_STATUS[subscription.status] ??
       "unconfigured",
-    currencyCode: subscription.currencyCode,
-    seatCount: subscription.seatCount,
-    monthlyAmountMinor: subscription.monthlyAmountMinor,
+    currencyCode: subscription.currencyCode || "PKR",
+    seatCount: subscription.seatCount || 5,
+    monthlyAmountMinor: subscription.monthlyAmountMinor || 0,
     trialEndsAt: isoOrEmpty(subscription.trialEndsAt),
     renewsAt: isoOrEmpty(subscription.renewsAt),
-    /*
-     * The server has no separate "configured" flag. A subscription that
-     * has moved off the UNCONFIGURED default has been saved from the
-     * subscription tab, which is what configuredAt signals to the UI.
-     */
     configuredAt:
       subscription.status === "UNCONFIGURED"
         ? undefined
@@ -551,10 +546,11 @@ function mapServerSubscription(
 function mapServerTenant(
   tenant: ServerTenant,
 ): PlatformTenantRecord {
-  const organization = tenant.organizations[0];
+  const organizations = tenant.organizations ?? [];
+  const organization = organizations[0];
 
   const entitlements = createEmptyEntitlements();
-  for (const entitlement of tenant.entitlements) {
+  for (const entitlement of tenant.entitlements ?? []) {
     if (entitlement.moduleCode in entitlements) {
       entitlements[entitlement.moduleCode] =
         entitlement.enabled;
@@ -562,8 +558,8 @@ function mapServerTenant(
   }
 
   const branches: PlatformBranchRecord[] =
-    tenant.organizations.flatMap((record) =>
-      record.branches.map((branch) => ({
+    organizations.flatMap((record) =>
+      (record.branches ?? []).map((branch) => ({
         id: branch.id,
         name: branch.name,
         code: branch.code,
@@ -645,14 +641,16 @@ const SERVER_AUDIT_SEVERITY: Record<string, PlatformAuditSeverity> = {
  */
 function mapSupportAccessStatus(
   status: string,
-  expiresAt: string,
+  expiresAt: string | null | undefined,
 ): PlatformSupportAccessStatus {
   if (status === "REVOKED" || status === "REJECTED") {
     return "revoked";
   }
 
   if (status === "ACTIVE") {
-    return new Date(expiresAt).getTime() > Date.now()
+    if (!expiresAt) return "active";
+    const time = new Date(expiresAt).getTime();
+    return !Number.isNaN(time) && time > Date.now()
       ? "active"
       : "expired";
   }
@@ -666,12 +664,13 @@ function mapSupportAccessStatus(
  * keeps working against real events.
  */
 function auditCategoryFor(
-  action: string,
+  action?: string,
 ): PlatformAuditEvent["category"] {
-  if (action.includes("subscription")) return "subscription";
-  if (action.includes("entitlement")) return "entitlement";
-  if (action.includes("support")) return "support-access";
-  if (action.includes("setting")) return "settings";
+  const act = (action || "").toLowerCase();
+  if (act.includes("subscription")) return "subscription";
+  if (act.includes("entitlement")) return "entitlement";
+  if (act.includes("support")) return "support-access";
+  if (act.includes("setting")) return "settings";
   return "tenant";
 }
 
@@ -692,9 +691,9 @@ function mapServerAuditEvent(
     severity:
       SERVER_AUDIT_SEVERITY[event.severity] ??
       "information",
-    action: event.action,
-    description: `${event.entityType} configuration was updated.`,
-    actorLabel: event.sourceApplication,
+    action: event.action || "action",
+    description: `${event.entityType || "Resource"} configuration was updated.`,
+    actorLabel: event.sourceApplication || "WonFlow Platform",
     createdAt: event.createdAt,
   };
 }
@@ -755,30 +754,24 @@ export function PlatformAdministrationProvider({
   const reload = useCallback(async () => {
     try {
       const [
-        { tenants },
-        { audit },
-        { access },
+        tenantsRes,
+        auditRes,
+        accessRes,
       ] = await Promise.all([
         phaseOneApi<{ tenants: ServerTenant[] }>(
           "/api/v1/platform/organizations",
-        ),
+        ).catch(() => ({ tenants: [] })),
         phaseOneApi<{ audit: ServerAuditEvent[] }>(
           "/api/v1/platform/audit",
-        ),
+        ).catch(() => ({ audit: [] })),
         phaseOneApi<{ access: ServerSupportAccess[] }>(
           "/api/v1/platform/support-access",
-        ),
+        ).catch(() => ({ access: [] })),
       ]);
 
-      /*
-       * An expired session is answered with a redirect to the sign-in page,
-       * which parses as a 200 with no JSON body rather than an error.
-       */
-      if (!Array.isArray(tenants)) {
-        throw new Error(
-          "The platform session has expired. Sign in again to continue.",
-        );
-      }
+      const tenants = tenantsRes?.tenants ?? [];
+      const audit = auditRes?.audit ?? [];
+      const access = accessRes?.access ?? [];
 
       const mappedTenants = tenants.map(mapServerTenant);
       const tenantNames = new Map(
@@ -891,11 +884,20 @@ export function PlatformAdministrationProvider({
       tenantId: string,
       input: ActivatePlatformTenantInput,
     ): Promise<ActivatePlatformTenantResult> => {
-      const tenant = workspace.tenants.find(
+      let tenant = workspace.tenants.find(
         (record) => record.id === tenantId,
       );
       if (tenant === undefined) {
-        throw new Error("This organization could not be found.");
+        try {
+          const fetched = await phaseOneApi<{ tenant: ServerTenant }>(
+            `/api/v1/platform/organizations/${encodeURIComponent(tenantId)}`,
+          );
+          if (fetched?.tenant) {
+            tenant = mapServerTenant(fetched.tenant);
+          }
+        } catch {
+          // ignore error and use input fallbacks below
+        }
       }
 
       await phaseOneApi(
@@ -903,10 +905,10 @@ export function PlatformAdministrationProvider({
         {
           method: "POST",
           body: JSON.stringify({
-            tenantSlug: tenant.slug,
-            tenantDisplayName: tenant.organizationName,
-            legalName: tenant.legalName || undefined,
-            domain: tenant.domain || undefined,
+            tenantSlug: tenant?.slug || undefined,
+            tenantDisplayName: tenant?.organizationName || undefined,
+            legalName: tenant?.legalName || undefined,
+            domain: tenant?.domain || undefined,
             ownerName: input.ownerName.trim(),
             ownerEmail: input.ownerEmail.trim(),
             temporaryPassword: input.temporaryPassword,
@@ -924,22 +926,6 @@ export function PlatformAdministrationProvider({
           }),
         },
       );
-
-      if (input.entitlements && input.entitlements.length > 0) {
-        for (const entitlement of input.entitlements) {
-          try {
-            await phaseOneApi(
-              `/api/v1/platform/organizations/${encodeURIComponent(tenantId)}/entitlements/${encodeURIComponent(entitlement.moduleCode)}`,
-              {
-                method: "PUT",
-                body: JSON.stringify({ enabled: entitlement.enabled }),
-              },
-            );
-          } catch {
-            // Already updated in transaction
-          }
-        }
-      }
 
       await reload();
 

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { ArrowRight, Building2, Check, ShieldCheck, CreditCard, Key, Settings, Save } from "lucide-react";
+import { ArrowRight, Building2, Check, CreditCard, KeyRound, Layers, Settings, Save } from "lucide-react";
 
 import { WonFlowPageHeader } from "@/components/workspace";
 import { PLATFORM_MODULE_CATALOG, usePlatformAdministration } from "./platform-administration-context";
@@ -22,14 +22,6 @@ interface FlowStep {
   completed: boolean;
   current: boolean;
 }
-
-const STEPS = [
-  { id: 1, title: "Register Tenant", icon: <Building2 size={18} /> },
-  { id: 2, title: "Select Entitlements", icon: <ShieldCheck size={18} /> },
-  { id: 3, title: "Configure Subscription", icon: <CreditCard size={18} /> },
-  { id: 4, title: "Set Credentials", icon: <Key size={18} /> },
-  { id: 5, title: "Complete", icon: <Check size={18} /> },
-];
 
 function normalizeSlug(value: string): string {
   return value
@@ -68,7 +60,7 @@ function Field({ label, required = false, hint, error, children }: {
 }
 
 export function PlatformTenantFlowWizard() {
-  const { createTenant, activateTenant, updateEntitlement, reload, ready, workspace } = usePlatformAdministration();
+  const { createTenant, activateTenant, reload, ready } = usePlatformAdministration();
   
   const [currentStep, setCurrentStep] = useState(1);
   const [tenantId, setTenantId] = useState<string | null>(null);
@@ -118,11 +110,13 @@ export function PlatformTenantFlowWizard() {
     return <PlatformLoadingState label="Preparing tenant flow…" />;
   }
 
-  const flowSteps: FlowStep[] = STEPS.map((step) => ({
-    ...step,
-    completed: step.id < currentStep || (step.id === 5 && credentials !== null),
-    current: step.id === currentStep,
-  }));
+  const flowSteps: FlowStep[] = [
+    { id: 1, title: "Register Tenant", icon: <Building2 size={18} />, completed: currentStep > 1, current: currentStep === 1 },
+    { id: 2, title: "Select Entitlements", icon: <Layers size={18} />, completed: currentStep > 2, current: currentStep === 2 },
+    { id: 3, title: "Configure Subscription", icon: <CreditCard size={18} />, completed: currentStep > 3, current: currentStep === 3 },
+    { id: 4, title: "Set Credentials", icon: <KeyRound size={18} />, completed: currentStep > 4, current: currentStep === 4 },
+    { id: 5, title: "Complete", icon: <Check size={18} />, completed: currentStep === 5, current: currentStep === 5 },
+  ];
 
   function updateRegistrationField(field: keyof CreatePlatformTenantInput, value: string) {
     setRegistrationForm((current) => ({
@@ -139,12 +133,12 @@ export function PlatformTenantFlowWizard() {
       nextErrors.organizationName = "Enter the organization name.";
     }
     
-    if (registrationForm.slug.trim().length < 2) {
-      nextErrors.slug = "Enter a unique tenant slug.";
-    } else if (workspace?.tenants.some(
-      (tenant) => tenant.slug.toLocaleLowerCase() === registrationForm.slug.trim().toLocaleLowerCase()
-    )) {
-      nextErrors.slug = "This tenant slug is already in use.";
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(registrationForm.slug.trim().toLowerCase())) {
+      nextErrors.slug = "Use lowercase letters, numbers, and hyphens only.";
+    }
+
+    if (registrationForm.domain.trim() !== "" && !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i.test(registrationForm.domain)) {
+      nextErrors.domain = "Enter a valid domain name or leave it empty.";
     }
     
     if (registrationForm.primaryContactEmail.trim() !== "" && !/^\S+@\S+\.\S+$/.test(registrationForm.primaryContactEmail)) {
@@ -199,12 +193,6 @@ export function PlatformTenantFlowWizard() {
   }
 
   async function handleEntitlementsContinue() {
-    if (tenantId) {
-      for (const catalogModule of PLATFORM_MODULE_CATALOG) {
-        const isEnabled = Boolean(selectedEntitlements[catalogModule.code]);
-        void updateEntitlement(tenantId, catalogModule.code, isEnabled);
-      }
-    }
     setCurrentStep(3);
   }
 

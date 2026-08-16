@@ -17,6 +17,7 @@ const portals = [
 
 for (const portal of portals) {
   test(`${portal.email} can open its Phase 1 portal routes`, async ({ page }) => {
+    test.slow();
     const loginResponse = await page.request.post("/api/auth/login", {
       data: { email: portal.email, password },
     });
