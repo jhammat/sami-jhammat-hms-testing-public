@@ -11,27 +11,29 @@ import {
   CheckCircle2,
   Clock,
   Clock3,
+  DoorClosed,
   FileClock,
   HeartPulse,
   ListFilter,
   MapPin,
   Pause,
   Play,
-  Plus,
   RefreshCw,
   Search,
   Square,
   Stethoscope,
   UserRound,
+  Users,
   Video,
+  X,
 } from "lucide-react";
+import { ActionReadiness, ActionResult, StatusBadge } from "@wonflow/ui";
+import type { ActionReadinessBlocker, ActionResultState, StatusBadgeTone } from "@wonflow/ui";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
-  saveDemoDoctorSitting,
-  updateDemoDoctorSittingStatus,
   persistDoctorSitting,
   persistDoctorSittingStatus,
   useSittingBranch,
@@ -39,11 +41,9 @@ import {
 import type { DemoDoctorSitting } from "@/lib/doctor-sittings";
 import {
   calculateDemoQueueWaitMinutes,
-  addCustomConsultationRoom,
   QUEUE_ROOMS_CHANGED_EVENT,
   QUEUE_ROOM_OPTIONS,
   readQueueRoomOptions,
-  syncDemoDoctorSittingToQueueEntries,
 } from "@/lib/queue";
 import type { DemoQueueEntry, DemoQueuePriority, DemoQueueStatus } from "@/lib/queue";
 
@@ -237,266 +237,433 @@ function PortalFilters({ model }: { model: DoctorWorkflowModel }) {
   );
 }
 
+const RESOLVER_LABELS: Record<string, string> = {
+  self: "You",
+  administrator: "An administrator",
+  reception: "Reception",
+  billing: "Billing",
+  doctor: "The doctor",
+};
+
+interface StartSittingReadinessResponse {
+  ready: boolean;
+  blockers: Array<{ code: string; reason: string; resolverRole: string; resolutionHref: string }>;
+}
+
+/** Calls the start-sitting readiness endpoint whenever the sitting is not yet active — there is nothing to gate once it already is. */
+function useStartSittingReadiness(
+  enabled: boolean,
+  branchId: string | undefined,
+  businessDate: string,
+  roomLabel: string,
+): { blockers: ActionReadinessBlocker[]; loading: boolean } {
+  const [blockers, setBlockers] = useState<ActionReadinessBlocker[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = async () => {
+      if (!enabled || !branchId) {
+        setBlockers([]);
+        return;
+      }
+      setLoading(true);
+      try {
+        const params = new URLSearchParams({ branchId, businessDate });
+        if (roomLabel.trim()) params.set("roomLabel", roomLabel.trim());
+        const response = await fetch(`/api/v1/readiness/start-sitting?${params.toString()}`, {
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const body = await response.json() as StartSittingReadinessResponse;
+        setBlockers(
+          body.blockers.map((blocker) => ({
+            code: blocker.code,
+            reason: blocker.reason,
+            resolverLabel: RESOLVER_LABELS[blocker.resolverRole] ?? blocker.resolverRole,
+            resolutionHref: blocker.resolutionHref,
+            resolutionLabel: "Fix this",
+          })),
+        );
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+    void load();
+    return () => controller.abort();
+  }, [enabled, branchId, businessDate, roomLabel]);
+
+  return { blockers, loading };
+}
+
+interface OccupiedRoom {
+  roomLabel: string;
+  doctorName: string;
+}
+
+/** Every other doctor's occupied room at this branch today — reused from reception's own sitting list, since a doctor already has appointments.read. */
+function useRoomOccupancy(branchId: string | undefined, businessDate: string, excludeDoctorId: string): OccupiedRoom[] {
+  const [occupied, setOccupied] = useState<OccupiedRoom[]>([]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = async () => {
+      if (!branchId) {
+        setOccupied([]);
+        return;
+      }
+      try {
+        const response = await fetch(`/api/v1/reception/sittings?date=${encodeURIComponent(businessDate)}`, {
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        if (!response.ok) return;
+        const body = await response.json() as {
+          sittings: Array<{ doctorId: string; branchId: string; roomLabel: string | null; status: string; doctorName: string }>;
+        };
+        setOccupied(
+          body.sittings
+            .filter((sitting) =>
+              sitting.branchId === branchId &&
+              sitting.doctorId !== excludeDoctorId &&
+              sitting.roomLabel !== null &&
+              (sitting.status === "AVAILABLE" || sitting.status === "ON_BREAK"),
+            )
+            .map((sitting) => ({ roomLabel: sitting.roomLabel!, doctorName: sitting.doctorName })),
+        );
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+      }
+    };
+    void load();
+    return () => controller.abort();
+  }, [branchId, businessDate, excludeDoctorId]);
+
+  return occupied;
+}
+
+function formatClockTime(value: string | undefined): string {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+}
+
+interface SittingStatusLine {
+  badgeLabel: string;
+  tone: StatusBadgeTone;
+  detail: string;
+}
+
+/** Built from model.sitting only — the same server-fetched value the rest of the portal reads, so this line and the badge can never disagree. */
+function describeSittingStatus(sitting: DemoDoctorSitting | undefined, waiting: number, inProgress: number, seen: number): SittingStatusLine {
+  if (!sitting || sitting.status === "not-started") {
+    return { badgeLabel: "NOT STARTED", tone: "neutral", detail: "Not started — patients cannot be called" };
+  }
+  if (sitting.status === "available") {
+    const since = formatClockTime(sitting.actualStartedAt);
+    return {
+      badgeLabel: "ACTIVE",
+      tone: "positive",
+      detail: `Active in ${sitting.roomLabel || "an unassigned room"}${since ? ` since ${since}` : ""} — ${waiting} waiting${inProgress > 0 ? `, ${inProgress} in progress` : ""}`,
+    };
+  }
+  if (sitting.status === "on-break") {
+    const since = formatClockTime(sitting.updatedAt);
+    return {
+      badgeLabel: "ON BREAK",
+      tone: "caution",
+      detail: `On break${since ? ` since ${since}` : ""} — patients remain queued`,
+    };
+  }
+  const endedAt = formatClockTime(sitting.actualEndedAt);
+  return {
+    badgeLabel: "FINISHED",
+    tone: "neutral",
+    detail: `Finished${endedAt ? ` at ${endedAt}` : ""} — ${seen} patient${seen === 1 ? "" : "s"} seen`,
+  };
+}
+
 function SittingControls({ model }: { model: DoctorWorkflowModel }) {
   const rooms = useConsultationRooms();
   const { resolvedBranchId: sittingBranchId } = useSittingBranch(model.legacyBranchId);
-  const [roomId, setRoomId] = useState(model.sitting?.roomId ?? "");
-  const [addingRoom, setAddingRoom] = useState(false);
-  const [customRoomName, setCustomRoomName] = useState("");
-  const [startTime, setStartTime] = useState(
-    model.sitting?.sittingStartTime ?? "09:00",
-  );
-  const [endTime, setEndTime] = useState(
-    model.sitting?.sittingEndTime ?? "17:00",
-  );
-  const [minutes, setMinutes] = useState(
-    String(model.sitting?.averageConsultationMinutes ?? 15),
-  );
+  const businessDate = model.businessDate;
+
+  const [roomLabel, setRoomLabel] = useState(model.sitting?.roomLabel ?? "");
+  const [startTime, setStartTime] = useState(model.sitting?.sittingStartTime ?? "09:00");
+  const [endTime, setEndTime] = useState(model.sitting?.sittingEndTime ?? "13:00");
+  const [minutes, setMinutes] = useState(String(model.sitting?.averageConsultationMinutes ?? 15));
+  const [editingRoom, setEditingRoom] = useState(false);
+
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<ActionResultState>({ status: "idle" });
 
   useEffect(() => {
     queueMicrotask(() => {
-      setRoomId(model.sitting?.roomId ?? "");
+      setRoomLabel(model.sitting?.roomLabel ?? "");
       setStartTime(model.sitting?.sittingStartTime ?? "09:00");
-      setEndTime(model.sitting?.sittingEndTime ?? "17:00");
+      setEndTime(model.sitting?.sittingEndTime ?? "13:00");
       setMinutes(String(model.sitting?.averageConsultationMinutes ?? 15));
     });
   }, [model.sitting]);
 
-  function save(startNow = false, overrideEndTime = endTime): void {
-    const room = rooms.find(
-      (item) => item.id === roomId && item.category === "consultation",
-    );
+  const isNotStarted = model.sitting === undefined || model.sitting.status === "not-started" || model.sitting.status === "finished";
+
+  const { blockers: startBlockers, loading: readinessLoading } = useStartSittingReadiness(
+    isNotStarted,
+    sittingBranchId,
+    businessDate,
+    roomLabel,
+  );
+
+  const occupiedRooms = useRoomOccupancy(sittingBranchId, businessDate, model.doctorId);
+  const occupiedByLabel = useMemo(
+    () => new Map(occupiedRooms.map((occupied) => [occupied.roomLabel, occupied.doctorName])),
+    [occupiedRooms],
+  );
+
+  const waitingCount = model.entries.filter((entry) => entry.status === "waiting" || entry.status === "called").length;
+  const inProgressCount = model.entries.filter((entry) => entry.status === "serving").length;
+  const seenCount = model.entries.filter((entry) => entry.status === "completed").length;
+
+  const statusLine = describeSittingStatus(model.sitting, waitingCount, inProgressCount, seenCount);
+
+  const slotCount = useMemo(() => {
+    const [startHour = 0, startMinute = 0] = startTime.split(":").map(Number);
+    const [endHour = 0, endMinute = 0] = endTime.split(":").map(Number);
+    const totalMinutes = (endHour * 60 + endMinute) - (startHour * 60 + startMinute);
     const duration = Number(minutes);
+    if (totalMinutes <= 0 || !Number.isFinite(duration) || duration <= 0) return 0;
+    return Math.floor(totalMinutes / duration);
+  }, [startTime, endTime, minutes]);
 
-    if (room === undefined) {
-      model.setMessage("Select an available consultation room.");
-      return;
-    }
+  /**
+   * Calls the server first and only updates the interface from its confirmed
+   * response — never the other way around. `mutate()` cannot resolve to
+   * "success" ahead of the request completing, so there is no window where
+   * this shows a result the database does not yet have.
+   */
+  async function save(startNow: boolean): Promise<void> {
     if (sittingBranchId === undefined) {
-      model.setMessage(
-        "No hospital branch is available for your account. Ask an administrator to assign you to a branch.",
-      );
+      setResult({ status: "error", message: "No hospital branch is available for your account. Ask an administrator to assign you to a branch in Admin → Team → Staff." });
       return;
     }
-    if (startTime >= overrideEndTime) {
-      model.setMessage("Planned start time must be before end time.");
+    if (!roomLabel.trim()) {
+      setResult({ status: "error", message: "Select a consultation room before saving." });
       return;
     }
+    if (startTime >= endTime) {
+      setResult({ status: "error", message: "Planned start time must be before end time." });
+      return;
+    }
+    const duration = Number(minutes);
     if (!Number.isInteger(duration) || duration < 5 || duration > 120) {
-      model.setMessage(
-        "Average consultation time must be between 5 and 120 minutes.",
-      );
+      setResult({ status: "error", message: "Average consultation time must be a whole number between 5 and 120 minutes." });
       return;
     }
 
-    const sitting = saveDemoDoctorSitting({
-      practitionerId: model.doctor.id,
-      branchId: sittingBranchId,
-      businessDate: model.businessDate,
-      roomId,
-      roomLabel: room.label,
-      sittingStartTime: startTime,
-      sittingEndTime: overrideEndTime,
-      averageConsultationMinutes: duration,
-      status: startNow
-        ? "available"
-        : (model.sitting?.status ?? "not-started"),
-    });
-    const updated = syncDemoDoctorSittingToQueueEntries(sitting);
-    model.reload();
-    model.setMessage(
-      startNow
-        ? `Sitting started in ${room.label}.`
-        : `${room.label} saved. ${updated} active queue patient${updated === 1 ? "" : "s"} updated.`,
-    );
+    setBusy(true);
+    setResult({ status: "pending", message: startNow ? "Starting sitting…" : "Saving…" });
 
-    // Publish to the tenant database so reception and the patient portal book
-    // against these hours instead of the hospital roster.
-    void persistDoctorSitting({
-      localId: sitting.id,
-      branchId: sitting.branchId,
-      businessDate: sitting.businessDate,
-      sittingStartTime: sitting.sittingStartTime,
-      sittingEndTime: sitting.sittingEndTime,
-      averageConsultationMinutes: sitting.averageConsultationMinutes,
-      roomLabel: sitting.roomLabel,
-      status: sitting.status,
-    }).then((failure) => {
-      if (failure) model.setMessage(failure);
+    const outcome = await persistDoctorSitting({
+      branchId: sittingBranchId,
+      businessDate,
+      sittingStartTime: startTime,
+      sittingEndTime: endTime,
+      averageConsultationMinutes: duration,
+      roomLabel: roomLabel.trim(),
+      status: startNow ? "available" : (model.sitting?.status ?? "not-started"),
+    });
+
+    setBusy(false);
+
+    if (outcome.status === "failure") {
+      setResult({ status: "error", message: outcome.error.message, onRetry: () => void save(startNow) });
+      return;
+    }
+
+    model.reload();
+    setEditingRoom(false);
+    setResult({
+      status: "success",
+      message: startNow ? `Sitting started in ${outcome.data.sitting.roomLabel ?? roomLabel.trim()}.` : "Sitting details saved.",
     });
   }
 
-  function changeStatus(status: "available" | "on-break" | "finished"): void {
-    if (model.sitting === undefined) {
-      model.setMessage("Save the sitting configuration first.");
+  async function changeStatus(status: "available" | "on-break" | "finished" | "not-started"): Promise<void> {
+    if (model.sitting === undefined || model.sitting.id === "") {
+      setResult({ status: "error", message: "There is no sitting to update yet. Start one first." });
       return;
     }
-    const sitting = updateDemoDoctorSittingStatus(model.sitting.id, status);
-    if (sitting !== undefined) syncDemoDoctorSittingToQueueEntries(sitting);
+
+    setBusy(true);
+    setResult({
+      status: "pending",
+      message: status === "on-break" ? "Pausing sitting…" : status === "available" ? "Resuming sitting…" : status === "finished" ? "Ending sitting…" : "Cancelling sitting…",
+    });
+
+    const outcome = await persistDoctorSittingStatus(model.sitting.id, status);
+
+    setBusy(false);
+
+    if (outcome.status === "failure") {
+      setResult({ status: "error", message: outcome.error.message, onRetry: () => void changeStatus(status) });
+      return;
+    }
+
     model.reload();
-    model.setMessage(
-      status === "available"
+    setResult({
+      status: "success",
+      message: status === "available"
         ? "The sitting is active and the doctor is available."
         : status === "on-break"
           ? "The sitting is paused. Waiting patients remain in the queue."
-          : "The sitting has ended for this business date.",
-    );
-
-    if (sitting !== undefined) {
-      void persistDoctorSittingStatus(sitting.id, status).then((failure) => {
-        if (failure) model.setMessage(failure);
-      });
-    }
+          : status === "finished"
+            ? "The sitting has ended for this business date."
+            : "The sitting was cancelled.",
+    });
   }
 
-  function extendTime(): void {
-    const [hour, minute] = endTime.split(":").map(Number);
-    const total = Math.min(23 * 60 + 59, hour * 60 + minute + 30);
-    const extended = `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
-    setEndTime(extended);
-    save(false, extended);
+  async function extendOrShorten(deltaMinutes: number): Promise<void> {
+    const [hour = 0, minute = 0] = endTime.split(":").map(Number);
+    const total = Math.min(23 * 60 + 59, Math.max(0, hour * 60 + minute + deltaMinutes));
+    const next = `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+    setEndTime(next);
+    await save(false);
   }
+
+  const startDisabled = busy || readinessLoading || startBlockers.length > 0;
+  const startDisabledReason = startBlockers[0]?.reason;
 
   return (
-    <section className="overflow-hidden rounded-[22px] border border-indigo-200/80 bg-gradient-to-br from-white via-white to-indigo-50/40 shadow-[0_16px_42px_rgba(79,70,229,0.12)]">
-      <header className="relative flex flex-wrap items-center justify-between gap-2 overflow-hidden bg-gradient-to-r from-indigo-100 via-violet-50 to-cyan-100 px-4 py-3">
-        <div className="pointer-events-none absolute -right-8 -top-12 h-28 w-28 rounded-full bg-cyan-300/30 blur-2xl" />
-        <div className="flex items-center gap-2">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-lg shadow-indigo-500/20">
-            <Stethoscope size={15} />
+    <section className="rounded-2xl border border-slate-200 bg-white">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3.5">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-slate-700">
+            <Stethoscope size={16} />
           </span>
           <div>
-            <h2 className="text-[11px] font-black text-slate-950">
-              Daily Sitting Controls
-            </h2>
-            <p className="text-[9px] text-slate-500">
-              Room changes update every active assigned patient.
-            </p>
+            <h2 className="text-sm font-black text-slate-950">Daily Sitting</h2>
+            <p className="text-xs text-slate-500">{statusLine.detail}</p>
           </div>
         </div>
-        <StatusPill status={model.sitting?.status ?? "not-started"} />
+        <StatusBadge label={statusLine.badgeLabel} tone={statusLine.tone} />
       </header>
 
-      <div className="p-4">
+      <div className="space-y-3 p-4">
+        {isNotStarted ? (
+          <ActionReadiness blockers={startBlockers} />
+        ) : null}
+
+        <ActionResult result={result} />
+
         <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
           <label className="text-[9px] font-black uppercase text-slate-500">
             Consultation room
             <select
               className={fieldClass}
-              onChange={(event) => {
-                if (event.target.value === "__custom__") {
-                  setAddingRoom(true);
-                  return;
-                }
-                setRoomId(event.target.value);
-              }}
-              value={roomId}
+              disabled={!isNotStarted && !editingRoom}
+              onChange={(event) => setRoomLabel(event.target.value)}
+              value={roomLabel}
             >
               <option value="">Select room</option>
-              {rooms.map((room) => (
-                <option key={room.id} value={room.id}>
-                  {room.label}
-                </option>
-              ))}
-              <option value="__custom__">+ Add a custom room</option>
+              {rooms.map((room) => {
+                const occupant = occupiedByLabel.get(room.label);
+                return (
+                  <option disabled={occupant !== undefined} key={room.id} value={room.label}>
+                    {room.label}{occupant ? ` — occupied by ${occupant}` : ""}
+                  </option>
+                );
+              })}
             </select>
           </label>
           <label className="text-[9px] font-black uppercase text-slate-500">
             Planned start
-            <input
-              className={fieldClass}
-              onChange={(event) => setStartTime(event.target.value)}
-              type="time"
-              value={startTime}
-            />
+            <input className={fieldClass} disabled={!isNotStarted} onChange={(event) => setStartTime(event.target.value)} type="time" value={startTime} />
           </label>
           <label className="text-[9px] font-black uppercase text-slate-500">
             Planned end
-            <input
-              className={fieldClass}
-              onChange={(event) => setEndTime(event.target.value)}
-              type="time"
-              value={endTime}
-            />
+            <input className={fieldClass} onChange={(event) => setEndTime(event.target.value)} type="time" value={endTime} />
           </label>
           <label className="text-[9px] font-black uppercase text-slate-500">
             Average minutes
-            <input
-              className={fieldClass}
-              max={120}
-              min={5}
-              onChange={(event) => setMinutes(event.target.value)}
-              type="number"
-              value={minutes}
-            />
+            <input className={fieldClass} max={120} min={5} onChange={(event) => setMinutes(event.target.value)} type="number" value={minutes} />
           </label>
         </div>
+        <p className="text-[10px] text-slate-500">{slotCount > 0 ? `≈ ${slotCount} appointment slot${slotCount === 1 ? "" : "s"} in these hours` : "Enter valid hours to see the slot count"}</p>
 
-        {addingRoom ? (
-          <div className="mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
-            <label className="min-w-56 flex-1 text-[9px] font-black uppercase text-slate-500">New consultation room<input autoFocus className={fieldClass} onChange={(event) => setCustomRoomName(event.target.value)} placeholder="e.g. Consultation Room 7" value={customRoomName} /></label>
-            <button className={`${buttonClass} bg-indigo-600 text-white`} onClick={() => { try { const room = addCustomConsultationRoom(customRoomName); setRoomId(room.id); setCustomRoomName(""); setAddingRoom(false); model.setMessage(`${room.label} was added to hospital rooms.`); } catch (caught) { model.setMessage(caught instanceof Error ? caught.message : "Unable to add room."); } }} type="button"><Plus size={13} /> Add room</button>
-            <button className={`${buttonClass} bg-white text-slate-600`} onClick={() => setAddingRoom(false)} type="button">Cancel</button>
-          </div>
-        ) : null}
-
-        <div className="mt-3 flex flex-wrap gap-2">
-          <button
-            className={`${buttonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}
-            onClick={() => save(false)}
-            type="button"
-          >
-            Save / Change Room
-          </button>
-          {model.sitting === undefined ||
-          model.sitting.status === "not-started" ||
-          model.sitting.status === "finished" ? (
-            <button
-              className={`${buttonClass} bg-emerald-600 text-white hover:bg-emerald-700`}
-              onClick={() => save(true)}
-              type="button"
-            >
-              <Play size={13} /> Start Sitting
-            </button>
-          ) : null}
-          {model.sitting?.status === "available" ? (
-            <button
-              className={`${buttonClass} bg-amber-500 text-white hover:bg-amber-600`}
-              onClick={() => changeStatus("on-break")}
-              type="button"
-            >
-              <Pause size={13} /> Take Break
-            </button>
-          ) : null}
-          {model.sitting?.status === "on-break" ? (
-            <button
-              className={`${buttonClass} bg-emerald-600 text-white hover:bg-emerald-700`}
-              onClick={() => changeStatus("available")}
-              type="button"
-            >
-              <Play size={13} /> Resume
-            </button>
-          ) : null}
-          {model.sitting !== undefined &&
-          !["not-started", "finished"].includes(model.sitting.status) ? (
+        <div className="flex flex-wrap gap-2 pt-1">
+          {isNotStarted ? (
             <>
-              <button
-                className={`${buttonClass} bg-indigo-50 text-indigo-700 hover:bg-indigo-100`}
-                onClick={extendTime}
-                type="button"
-              >
-                <Clock3 size={13} /> Extend 30 min
+              <button className={`${buttonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`} disabled={busy} onClick={() => void save(false)} type="button">
+                Save
               </button>
-              <button
-                className={`${buttonClass} bg-rose-50 text-rose-700 hover:bg-rose-100`}
-                onClick={() => changeStatus("finished")}
-                type="button"
-              >
+              <span title={startDisabled ? (startDisabledReason ?? "Checking readiness…") : undefined}>
+                <button className={`${buttonClass} bg-emerald-600 text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50`} disabled={startDisabled} onClick={() => void save(true)} type="button">
+                  <Play size={13} /> Start Sitting
+                </button>
+              </span>
+            </>
+          ) : null}
+
+          {model.sitting?.status === "available" ? (
+            <>
+              <button className={`${buttonClass} bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50`} disabled={busy} onClick={() => void changeStatus("on-break")} type="button">
+                <Pause size={13} /> Take Break
+              </button>
+              <button className={`${buttonClass} bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50`} disabled={busy} onClick={() => void changeStatus("finished")} type="button">
                 <Square size={13} /> End Sitting
               </button>
             </>
           ) : null}
+
+          {model.sitting?.status === "on-break" ? (
+            <>
+              <button className={`${buttonClass} bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50`} disabled={busy} onClick={() => void changeStatus("available")} type="button">
+                <Play size={13} /> Resume
+              </button>
+              <button className={`${buttonClass} bg-rose-50 text-rose-700 hover:bg-rose-100 disabled:opacity-50`} disabled={busy} onClick={() => void changeStatus("finished")} type="button">
+                <Square size={13} /> End Sitting
+              </button>
+            </>
+          ) : null}
+
+          {model.sitting !== undefined && (model.sitting.status === "available" || model.sitting.status === "on-break") ? (
+            <>
+              {!editingRoom ? (
+                <button className={`${buttonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 disabled:opacity-50`} disabled={busy} onClick={() => setEditingRoom(true)} type="button">
+                  <DoorClosed size={13} /> Change Room
+                </button>
+              ) : (
+                <button className={`${buttonClass} bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50`} disabled={busy} onClick={() => void save(false)} type="button">
+                  Save Room
+                </button>
+              )}
+              <button className={`${buttonClass} bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50`} disabled={busy} onClick={() => void extendOrShorten(30)} type="button">
+                <Clock3 size={13} /> Extend 30 min
+              </button>
+              <button className={`${buttonClass} bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50`} disabled={busy} onClick={() => void extendOrShorten(-30)} type="button">
+                <Clock3 size={13} /> Shorten 30 min
+              </button>
+              <button className={`${buttonClass} border border-slate-200 bg-white text-rose-700 hover:bg-rose-50 disabled:opacity-50`} disabled={busy} onClick={() => void changeStatus("not-started")} type="button">
+                <X size={13} /> Cancel Sitting
+              </button>
+            </>
+          ) : null}
         </div>
+
+        {model.sitting?.status === "available" || model.sitting?.status === "on-break" ? (
+          <div className="flex items-center gap-3 border-t border-slate-100 pt-3 text-[10px] font-bold text-slate-600">
+            <span className="flex items-center gap-1"><Users size={12} /> {waitingCount} waiting</span>
+            <span>·</span>
+            <span>{inProgressCount} in progress</span>
+            <span>·</span>
+            <span>{seenCount} seen</span>
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -571,7 +738,7 @@ function PatientCard({
           {calculateDemoQueueWaitMinutes(entry)} min wait
         </span>
         <span className="rounded-lg bg-slate-50 px-2 py-1">
-          {entry.roomLabel ?? "Room pending"}
+          {entry.roomLabel ?? model.sitting?.roomLabel ?? "OPD Room"}
         </span>
         <StatusPill status={entry.priority} />
       </div>
@@ -791,7 +958,7 @@ function CurrentConsultation({
           </div>
           <div className="grid grid-cols-2 gap-2 sm:w-52">
             <InfoTile label="Duration" value={`${duration} min`} />
-            <InfoTile label="Room" value={entry.roomLabel ?? "Pending"} />
+            <InfoTile label="Room" value={entry.roomLabel ?? model.sitting?.roomLabel ?? "OPD Room"} />
           </div>
         </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -1187,7 +1354,7 @@ export function DoctorQueuePanel({ model }: { model: DoctorWorkflowModel }) {
                   label="Waiting time"
                   value={`${calculateDemoQueueWaitMinutes(selected)} min`}
                 />
-                <Detail label="Room" value={selected.roomLabel ?? "Pending"} />
+                <Detail label="Room" value={selected.roomLabel ?? model.sitting?.roomLabel ?? "OPD Room"} />
                 <Detail
                   label="Payment"
                   value={selected.snapshot?.billing.paymentStatus ?? "Unavailable"}

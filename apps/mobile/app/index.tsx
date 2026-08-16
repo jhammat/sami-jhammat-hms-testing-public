@@ -1,28 +1,61 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, BackHandler, Linking, Platform, SafeAreaView, StyleSheet, Text, View } from "react-native";
+import {
+  ActivityIndicator,
+  BackHandler,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import { WebView } from "react-native-webview";
 import type { WebViewNavigation } from "react-native-webview";
+import * as SecureStore from "expo-secure-store";
+
+const STORE_KEY = "wonflow_universal_server_url";
+const DEFAULT_FALLBACK_URL = "http://192.168.100.10:3000";
 
 /**
- * The whole product, wrapped: this app has no screens of its own — it's a
- * thin native shell around the real WonFlow web app, which already handles
- * login, role routing, and every portal (admin, reception, doctor, patient,
- * lab, radiology, pharmacy, billing, management, platform). One app covers
- * every role, the same way visiting the website does.
- *
- * Set EXPO_PUBLIC_WONFLOW_APP_URL at build time to point this at a real
- * deployment. The localhost fallback below is for local development only —
- * an Android emulator reaches the host machine at 10.0.2.2, not localhost.
+ * WonFlow Universal Mobile Wrapper:
+ * A unified native iOS & Android wrapper covering EVERY portal:
+ * - 👨‍⚕️ Doctor Workspace (/doctor)
+ * - 📱 Patient Portal (/patient)
+ * - 🏥 Reception Desk (/operations/reception)
+ * - 🏢 Hospital Administration (/organization)
+ * - 🧪 Laboratory, Radiology, Pharmacy & Billing
  */
-const DEFAULT_DEV_URL = Platform.OS === "android" ? "http://10.0.2.2:3000" : "http://localhost:3000";
-const APP_URL = process.env.EXPO_PUBLIC_WONFLOW_APP_URL ?? DEFAULT_DEV_URL;
-
-export default function Home() {
+export default function UniversalPortalWrapper() {
   const webViewRef = useRef<WebView>(null);
+  const [serverUrl, setServerUrl] = useState<string | null>(null);
+  const [editingUrl, setEditingUrl] = useState(DEFAULT_FALLBACK_URL);
+  const [showSettings, setShowSettings] = useState(false);
   const [canGoBack, setCanGoBack] = useState(false);
   const [loadFailed, setLoadFailed] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    async function loadSavedUrl() {
+      try {
+        const saved = await SecureStore.getItemAsync(STORE_KEY);
+        const urlToUse =
+          saved?.trim() ||
+          process.env.EXPO_PUBLIC_WONFLOW_APP_URL?.trim() ||
+          DEFAULT_FALLBACK_URL;
+        setServerUrl(urlToUse);
+        setEditingUrl(urlToUse);
+      } catch {
+        setServerUrl(DEFAULT_FALLBACK_URL);
+        setEditingUrl(DEFAULT_FALLBACK_URL);
+      }
+    }
+    void loadSavedUrl();
+  }, []);
 
   useEffect(() => {
     if (Platform.OS !== "android") return undefined;
@@ -36,18 +69,44 @@ export default function Home() {
     return () => subscription.remove();
   }, [canGoBack]);
 
+  const handleSaveUrl = async () => {
+    let clean = editingUrl.trim().replace(/\/+$/, "");
+    if (!clean.startsWith("http://") && !clean.startsWith("https://")) {
+      clean = `http://${clean}`;
+    }
+    try {
+      await SecureStore.setItemAsync(STORE_KEY, clean);
+    } catch {
+      // SecureStore fallback
+    }
+    setServerUrl(clean);
+    setShowSettings(false);
+    setLoadFailed(false);
+    setLoading(true);
+    setReloadKey((c) => c + 1);
+  };
+
   const handleNavigationStateChange = useCallback((navState: WebViewNavigation) => {
     setCanGoBack(navState.canGoBack);
   }, []);
 
-  const handleShouldStartLoad = useCallback((request: { url: string }) => {
-    // Keep navigation inside the app for the WonFlow origin itself; anything
-    // else (a mailto: link, an external reference) opens in the system
-    // browser instead of inside this WebView.
-    if (request.url.startsWith(APP_URL) || request.url.startsWith("about:") || request.url.startsWith("data:")) return true;
-    void Linking.openURL(request.url);
-    return false;
-  }, []);
+  const handleShouldStartLoad = useCallback(
+    (request: { url: string }) => {
+      if (!serverUrl) return true;
+      const origin = serverUrl.replace(/\/+$/, "");
+      if (
+        request.url.startsWith(origin) ||
+        request.url.startsWith("about:") ||
+        request.url.startsWith("data:") ||
+        request.url.startsWith("blob:")
+      ) {
+        return true;
+      }
+      void Linking.openURL(request.url);
+      return false;
+    },
+    [serverUrl],
+  );
 
   const retry = useCallback(() => {
     setLoadFailed(false);
@@ -55,43 +114,118 @@ export default function Home() {
     setReloadKey((current) => current + 1);
   }, []);
 
+  if (!serverUrl || showSettings) {
+    return (
+      <SafeAreaView style={styles.settingsContainer}>
+        <StatusBar barStyle="light-content" />
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "padding" : "height"}
+          style={styles.settingsCard}
+        >
+          <Text style={styles.settingsTitle}>WonFlow Hospital App</Text>
+          <Text style={styles.settingsSubtitle}>
+            Connect this iPhone to your WonFlow hospital system.
+          </Text>
+
+          <View style={styles.inputGroup}>
+            <Text style={styles.inputLabel}>Server URL</Text>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={setEditingUrl}
+              placeholder="e.g. http://192.168.100.10:3000"
+              placeholderTextColor="#94a3b8"
+              style={styles.urlInput}
+              value={editingUrl}
+            />
+          </View>
+
+          <View style={styles.presets}>
+            <TouchableOpacity
+              onPress={() => setEditingUrl("http://192.168.100.10:3000")}
+              style={styles.presetButton}
+            >
+              <Text style={styles.presetText}>Local Wi-Fi (192.168.100.10:3000)</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity activeOpacity={0.8} onPress={handleSaveUrl} style={styles.connectButton}>
+            <Text style={styles.connectText}>Connect to System</Text>
+          </TouchableOpacity>
+
+          {serverUrl ? (
+            <TouchableOpacity onPress={() => setShowSettings(false)} style={styles.cancelButton}>
+              <Text style={styles.cancelText}>Back to App</Text>
+            </TouchableOpacity>
+          ) : null}
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
   if (loadFailed) {
     return (
       <SafeAreaView style={styles.center}>
-        <Text style={styles.title}>Couldn&apos;t reach WonFlow</Text>
-        <Text style={styles.body}>Check your internet connection, then try again.</Text>
-        <Text onPress={retry} style={styles.retry}>
-          Try again
-        </Text>
+        <StatusBar barStyle="dark-content" />
+        <View style={styles.errorCard}>
+          <Text style={styles.title}>Hospital System Offline</Text>
+          <Text style={styles.body}>
+            Unable to reach:{"\n"}
+            <Text style={{ fontWeight: "700", color: "#4f46e5" }}>{serverUrl}</Text>
+          </Text>
+          <View style={{ flexDirection: "row", gap: 12 }}>
+            <TouchableOpacity activeOpacity={0.8} onPress={retry} style={styles.retryButton}>
+              <Text style={styles.retryText}>Reconnect</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => setShowSettings(true)}
+              style={styles.changeUrlButton}
+            >
+              <Text style={styles.changeUrlText}>Change URL</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </SafeAreaView>
     );
   }
 
   return (
     <SafeAreaView style={styles.flex}>
+      <StatusBar barStyle="light-content" />
       <WebView
         allowsBackForwardNavigationGestures
+        allowsInlineMediaPlayback
+        applicationNameForUserAgent="WonFlowMobileApp/1.0"
+        cacheEnabled
+        domStorageEnabled
+        javaScriptEnabled
         key={reloadKey}
+        mediaCapturePermissionGrantType="grant"
         mediaPlaybackRequiresUserAction={false}
         onError={() => setLoadFailed(true)}
-        onHttpError={(event) => { if (event.nativeEvent.statusCode >= 500) setLoadFailed(true); }}
+        onHttpError={(event) => {
+          if (event.nativeEvent.statusCode >= 500) setLoadFailed(true);
+        }}
         onLoadEnd={() => setLoading(false)}
         onNavigationStateChange={handleNavigationStateChange}
         onShouldStartLoadWithRequest={handleShouldStartLoad}
-        // Auto-grant camera/microphone access for video consultations
-        // instead of WebKit's default repeated prompting (iOS 15+; Android
-        // grants automatically based on the app's own CAMERA/RECORD_AUDIO
-        // manifest permissions, declared in app.json).
-        mediaCapturePermissionGrantType="grant"
+        pullToRefreshEnabled
         ref={webViewRef}
         sharedCookiesEnabled
-        source={{ uri: APP_URL }}
+        source={{
+          uri: serverUrl,
+          headers: {
+            "Bypass-Tunnel-Reminder": "true",
+          },
+        }}
         style={styles.flex}
         thirdPartyCookiesEnabled
       />
       {loading ? (
         <View pointerEvents="none" style={styles.loadingOverlay}>
           <ActivityIndicator color="#4f46e5" size="large" />
+          <Text style={styles.loadingText}>Opening WonFlow…</Text>
         </View>
       ) : null}
     </SafeAreaView>
@@ -99,10 +233,159 @@ export default function Home() {
 }
 
 const styles = StyleSheet.create({
-  flex: { flex: 1 },
-  center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 24, gap: 8 },
-  title: { fontSize: 20, fontWeight: "700" },
-  body: { textAlign: "center", color: "#475569" },
-  retry: { marginTop: 12, color: "#4f46e5", fontWeight: "700" },
-  loadingOverlay: { position: "absolute", inset: 0, alignItems: "center", justifyContent: "center", backgroundColor: "#ffffff" },
+  flex: {
+    flex: 1,
+    backgroundColor: "#090d16",
+  },
+  settingsContainer: {
+    flex: 1,
+    backgroundColor: "#090d16",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: 20,
+  },
+  settingsCard: {
+    width: "100%",
+    maxWidth: 400,
+    backgroundColor: "#1e1b4b",
+    borderRadius: 28,
+    padding: 26,
+    borderWidth: 1,
+    borderColor: "#3730a3",
+  },
+  settingsTitle: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: "#ffffff",
+    textAlign: "center",
+  },
+  settingsSubtitle: {
+    fontSize: 13,
+    color: "#c7d2fe",
+    textAlign: "center",
+    marginTop: 6,
+    marginBottom: 24,
+    lineHeight: 18,
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#e0e7ff",
+    marginBottom: 6,
+  },
+  urlInput: {
+    backgroundColor: "#0f172a",
+    borderWidth: 1,
+    borderColor: "#4338ca",
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "600",
+  },
+  presets: {
+    marginBottom: 20,
+    gap: 8,
+  },
+  presetButton: {
+    backgroundColor: "#312e81",
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    alignSelf: "flex-start",
+  },
+  presetText: {
+    color: "#a5b4fc",
+    fontSize: 11,
+    fontWeight: "700",
+  },
+  connectButton: {
+    backgroundColor: "#6366f1",
+    paddingVertical: 14,
+    borderRadius: 16,
+    alignItems: "center",
+  },
+  connectText: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+  cancelButton: {
+    paddingVertical: 10,
+    alignItems: "center",
+    marginTop: 8,
+  },
+  cancelText: {
+    color: "#94a3b8",
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  center: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#090d16",
+    padding: 24,
+  },
+  errorCard: {
+    backgroundColor: "#1e1b4b",
+    padding: 28,
+    borderRadius: 24,
+    alignItems: "center",
+    maxWidth: 380,
+    borderWidth: 1,
+    borderColor: "#3730a3",
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#ffffff",
+    marginBottom: 8,
+  },
+  body: {
+    textAlign: "center",
+    color: "#c7d2fe",
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 20,
+  },
+  retryButton: {
+    backgroundColor: "#6366f1",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 14,
+  },
+  retryText: {
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  changeUrlButton: {
+    backgroundColor: "#312e81",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 14,
+  },
+  changeUrlText: {
+    color: "#e0e7ff",
+    fontWeight: "700",
+    fontSize: 13,
+  },
+  loadingOverlay: {
+    position: "absolute",
+    inset: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#090d16",
+    gap: 12,
+  },
+  loadingText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#a5b4fc",
+  },
 });

@@ -8,7 +8,7 @@ import {
 } from "@/lib/queue";
 import type { DemoDoctorSitting } from "@/lib/doctor-sittings";
 import type { DemoQueueEntry } from "@/lib/queue";
-import { patchDoctorQueue } from "@/lib/api/doctor-api";
+import { completeDoctorEncounter, createDoctorEncounter, patchDoctorQueue } from "@/lib/api/doctor-api";
 import { WonFlowApiError } from "@/lib/api/phase-one-api";
 
 import {
@@ -82,6 +82,14 @@ export function CompactDoctorPortal({
     }
   }
 
+  /**
+   * Checks start-consultation readiness before attempting the create, so a
+   * block (patient not checked in, prepayment pending, another consultation
+   * still open) shows its own specific reason instead of the create request
+   * simply failing. Creation itself goes through POST /api/v1/doctor/encounters
+   * — the same server-validated route the full consultation hub uses — and
+   * only navigates once the server has confirmed the encounter exists.
+   */
   async function startConsultation(entry: DemoQueueEntry): Promise<void> {
     const sitting = requireAvailableSitting();
     if (sitting === undefined) return;
@@ -94,21 +102,44 @@ export function CompactDoctorPortal({
     }
 
     try {
-      const { appointment } = await patchDoctorQueue(entry.appointmentId, "start");
-      portal.reload();
-      if (appointment.encounter === null) {
-        setMessage("The consultation started, but its clinical encounter could not be opened.");
-        return;
+      const response = await fetch(
+        `/api/v1/readiness/start-consultation?appointmentId=${encodeURIComponent(entry.appointmentId)}`,
+        { credentials: "same-origin" },
+      );
+      if (response.ok) {
+        const readiness = await response.json() as { ready: boolean; blockers: Array<{ reason: string }> };
+        if (!readiness.ready) {
+          setMessage(readiness.blockers[0]?.reason ?? "This consultation cannot start yet.");
+          return;
+        }
       }
-      router.push(`/doctor/encounters/${appointment.encounter.id}`);
+    } catch {
+      // A failed readiness check does not block the attempt — createDoctorEncounter below re-validates server-side regardless.
+    }
+
+    try {
+      const { encounter } = await createDoctorEncounter(entry.appointmentId);
+      portal.reload();
+      router.push(`/doctor/encounters/${encounter.id}`);
     } catch (error) {
       setMessage(describeError(error, "The consultation could not be started."));
     }
   }
 
   async function finishConsultation(entry: DemoQueueEntry): Promise<void> {
+    const openEncounter = portal.encounters.find(
+      (encounter) =>
+        encounter.appointmentId === entry.appointmentId &&
+        encounter.status !== "completed" &&
+        encounter.status !== "cancelled",
+    );
+    if (openEncounter === undefined) {
+      setMessage("No open clinical encounter was found for this patient.");
+      return;
+    }
+
     try {
-      await patchDoctorQueue(entry.appointmentId, "complete");
+      await completeDoctorEncounter(openEncounter.id);
       portal.reload();
       setMessage(
         "Consultation completed. The next waiting patient is ready to be called.",

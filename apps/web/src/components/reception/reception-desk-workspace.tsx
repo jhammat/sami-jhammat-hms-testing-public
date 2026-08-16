@@ -19,11 +19,17 @@ import {
   bookReceptionAppointment,
   checkInReceptionAppointment,
   createReceptionDiagnosticOrders,
+  getReceptionAppointmentSlots,
   getReceptionOverview,
   registerReceptionPatient,
   searchReceptionPatients,
+  updateReceptionPatient,
 } from "@/lib/api/reception-api";
-import type { ReceptionPatient } from "@/lib/api/reception-api";
+import type {
+  ReceptionPatient,
+  ReceptionSlot,
+  ReceptionSlotsResult,
+} from "@/lib/api/reception-api";
 import { phaseOneApi } from "@/lib/api/phase-one-api";
 
 import {
@@ -31,9 +37,6 @@ import {
 } from "@/lib/data";
 
 import {
-  DOCTOR_SITTINGS_CHANGED_EVENT,
-  getActiveDemoDoctorSitting,
-  getDemoDoctorSitting,
   useLiveDoctorSittings,
 } from "@/lib/doctor-sittings";
 
@@ -173,7 +176,9 @@ interface AdditionalService {
   custom?: boolean;
   doctorId?: string | null;
   branchId?: string | null;
-  consultationMode?: "IN_PERSON" | "ONLINE";
+  consultationModes?: ("IN_PERSON" | "ONLINE")[];
+  requiresPrepayment?: boolean;
+  durationMinutes?: number;
 }
 
 interface RecentAppointment {
@@ -435,8 +440,19 @@ function calculateAge(
 }
 
 function readJsonText(source: unknown, key: string): string {
-  if (typeof source !== "object" || source === null) return "";
-  const value = (source as Record<string, unknown>)[key];
+  if (!source) return "";
+  let obj: Record<string, unknown> | null = null;
+  if (typeof source === "string") {
+    try {
+      obj = JSON.parse(source) as Record<string, unknown>;
+    } catch {
+      return source.trim();
+    }
+  } else if (typeof source === "object") {
+    obj = source as Record<string, unknown>;
+  }
+  if (!obj || typeof obj !== "object") return "";
+  const value = obj[key];
   return typeof value === "string" ? value : "";
 }
 
@@ -454,11 +470,19 @@ function receptionPatientToLocal(patient: ReceptionPatient): Patient {
   const identityType: IdentityType = primaryIdentifier?.type === "Passport" ? "Passport" : "CNIC";
   const gender: Gender = patient.sex === "Male" || patient.sex === "Female" || patient.sex === "Other" ? patient.sex : "Other";
 
+  const guardianObj = (typeof patient.guardianData === "object" && patient.guardianData !== null ? patient.guardianData : (typeof patient.guardianData === "string" ? (() => { try { return JSON.parse(patient.guardianData) as Record<string, unknown>; } catch { return {}; } })() : {})) as Record<string, unknown>;
+
+  const fatherName = readJsonText(guardianObj, "fatherName") ||
+    readJsonText(guardianObj, "name") ||
+    readJsonText(guardianObj, "guardianName") ||
+    readJsonText(guardianObj, "guardian") ||
+    (typeof (patient as unknown as { fatherName?: string }).fatherName === "string" ? (patient as unknown as { fatherName?: string }).fatherName! : "");
+
   return {
     id: patient.id,
     mrNumber: patient.patientNumber,
     fullName: [patient.givenName, patient.middleName, patient.familyName].filter(Boolean).join(" "),
-    fatherName: readJsonText(patient.guardianData, "fatherName"),
+    fatherName,
     identityType,
     identityNumber: primaryIdentifier?.value ?? "",
     mobile: patient.phone ?? "",
@@ -466,8 +490,8 @@ function receptionPatientToLocal(patient: ReceptionPatient): Patient {
     age: calculateAge(dateOfBirth) ?? 0,
     dateOfBirth,
     bloodGroup: "",
-    address: readJsonText(patient.address, "text"),
-    emergencyContact: readJsonText(patient.guardianData, "emergencyContact"),
+    address: readJsonText(patient.address, "text") || (typeof patient.address === "string" ? patient.address : ""),
+    emergencyContact: readJsonText(guardianObj, "emergencyContact") || readJsonText(guardianObj, "emergencyContactPhone") || readJsonText(guardianObj, "phone"),
     allergies: "",
     medicalAlert: "",
   };
@@ -1021,18 +1045,6 @@ export function ReceptionDeskWorkspace() {
     setConsultationMode,
   ] = useState<"IN_PERSON" | "ONLINE">("IN_PERSON");
 
-  const [roomRevision, setRoomRevision] = useState(0);
-
-  useEffect(() => {
-    const refreshRooms = () => setRoomRevision((current) => current + 1);
-    window.addEventListener(DOCTOR_SITTINGS_CHANGED_EVENT, refreshRooms);
-    window.addEventListener("storage", refreshRooms);
-    return () => {
-      window.removeEventListener(DOCTOR_SITTINGS_CHANGED_EVENT, refreshRooms);
-      window.removeEventListener("storage", refreshRooms);
-    };
-  }, []);
-
   const [
     visitPurpose,
     setVisitPurpose,
@@ -1127,6 +1139,11 @@ export function ReceptionDeskWorkspace() {
     appointmentTime,
     setAppointmentTime,
   ] = useState("11:30");
+
+  const [
+    selectedSlot,
+    setSelectedSlot,
+  ] = useState<ReceptionSlot | null>(null);
 
   const [
     selectedServiceIds,
@@ -1311,16 +1328,9 @@ export function ReceptionDeskWorkspace() {
   const liveSittings = useLiveDoctorSittings(sittingBusinessDate);
 
   const selectedDoctorSitting = useMemo(() => {
-    void roomRevision;
     if (selectedDoctor === null) return undefined;
-    // The doctor's published sitting is authoritative; the local demo record is
-    // only a fallback for tenants still running on demo data.
-    return liveSittings.findForDoctor(selectedDoctor.id) ?? getDemoDoctorSitting({
-      practitionerId: selectedDoctor.id,
-      branchId: selectedDoctor.primaryBranchId,
-      businessDate: sittingBusinessDate,
-    });
-  }, [liveSittings, roomRevision, selectedDoctor, sittingBusinessDate]);
+    return liveSittings.findForDoctor(selectedDoctor.id);
+  }, [liveSittings, selectedDoctor]);
 
   const normalizedServiceSearch =
     serviceSearch
@@ -1340,9 +1350,9 @@ export function ReceptionDeskWorkspace() {
     (service) =>
       selectedDoctor !== null &&
       service.doctorId === selectedDoctor.id &&
-      // Services without a recorded mode predate this field and are treated
+      // Services without recorded modes predate this field and are treated
       // as in-person-only rather than silently matching either choice.
-      (service.consultationMode ?? "IN_PERSON") === consultationMode,
+      (service.consultationModes ?? ["IN_PERSON"]).includes(consultationMode),
   );
 
   const isDiagnosticCategory = (category: string) => {
@@ -1409,7 +1419,7 @@ export function ReceptionDeskWorkspace() {
         ...customBillingItems,
       ],
       [
-        selectedConsultationService?.id,
+        selectedConsultationService,
         selectedServices,
         customBillingItems,
       ],
@@ -1433,6 +1443,27 @@ export function ReceptionDeskWorkspace() {
     }
     return selectedDoctor.consultationFee;
   }, [selectedConsultationService, selectedDoctor]);
+
+  const tomorrowDateString = useMemo(() => {
+    const tm = new Date();
+    tm.setDate(tm.getDate() + 1);
+    return tm.toISOString().slice(0, 10);
+  }, []);
+
+  const slotsData = useWonFlowAsyncData<ReceptionSlotsResult>({
+    key: `slots:${selectedDoctorId}:${appointmentDate}:${selectedConsultationService?.durationMinutes ?? 20}:${selectedDoctor?.primaryBranchId ?? ""}`,
+    enabled: Boolean(selectedDoctorId && appointmentDate),
+    loader: () =>
+      getReceptionAppointmentSlots({
+        doctorId: selectedDoctorId,
+        branchId: selectedDoctor?.primaryBranchId || undefined,
+        date: appointmentDate,
+        durationMinutes: selectedConsultationService?.durationMinutes ?? 20,
+      }),
+  });
+  const slotResult = slotsData.data;
+  const availableSlots = useMemo(() => slotsData.data?.slots ?? [], [slotsData.data?.slots]);
+  const isLoadingSlots = slotsData.status === "loading" || slotsData.isRefreshing;
 
   const admissionDepositValue =
     Math.max(
@@ -1866,6 +1897,24 @@ export function ReceptionDeskWorkspace() {
         "existing" &&
       selectedPatient !== null
     ) {
+      const nameParts = patientDraft.fullName.trim().split(/\s+/).filter(Boolean);
+      const givenName = nameParts.shift() ?? "";
+      const familyName = nameParts.length > 0 ? nameParts.pop()! : "";
+
+      void updateReceptionPatient(selectedPatient.id, {
+        givenName,
+        familyName,
+        middleName: nameParts.join(" ") || undefined,
+        dateOfBirth: useEstimatedAge ? undefined : patientDraft.dateOfBirth,
+        sex: patientDraft.gender,
+        phone: patientDraft.mobile,
+        fatherName: patientDraft.fatherName.trim(),
+        address: patientDraft.address ? { text: patientDraft.address.trim() } : undefined,
+        guardianData: { fatherName: patientDraft.fatherName.trim(), emergencyContact: patientDraft.emergencyContact.trim() },
+      }).catch(() => {
+        // Fallback for non-blocking local state update
+      });
+
       const updatedPatient:
         Patient = {
           ...selectedPatient,
@@ -1931,8 +1980,9 @@ export function ReceptionDeskWorkspace() {
         dateOfBirth: useEstimatedAge ? undefined : patientDraft.dateOfBirth,
         sex: patientDraft.gender,
         phone: patientDraft.mobile,
+        fatherName: patientDraft.fatherName.trim(),
         address: patientDraft.address ? { text: patientDraft.address } : undefined,
-        guardianData: { fatherName: patientDraft.fatherName, emergencyContact: patientDraft.emergencyContact },
+        guardianData: { fatherName: patientDraft.fatherName.trim(), emergencyContact: patientDraft.emergencyContact.trim() },
         identifiers: [{ type: identityType, system: identityType.toLowerCase(), value: patientDraft.identityNumber, isPrimary: true }],
       });
     const newPatient: Patient = {
@@ -2282,18 +2332,14 @@ export function ReceptionDeskWorkspace() {
         selectedDoctor.id,
         Date.now(),
       ].join(":");
-    // Prefer the doctor's published sitting, ignoring it once they have
-    // finished or not yet started, to match the local helper's semantics.
+    // Only the doctor's published sitting counts, and only while it is
+    // actually active — a finished or not-yet-started sitting cannot take
+    // this patient.
     const publishedSitting = liveSittings.findForDoctor(selectedDoctor.id);
     const activeSitting =
-      (publishedSitting && publishedSitting.status !== "finished" && publishedSitting.status !== "not-started"
+      publishedSitting && publishedSitting.status !== "finished" && publishedSitting.status !== "not-started"
         ? publishedSitting
-        : undefined)
-      ?? getActiveDemoDoctorSitting({
-        practitionerId: selectedDoctor.id,
-        branchId: selectedDoctor.primaryBranchId,
-        businessDate,
-      });
+        : undefined;
 
     // Book and check in against the real appointment/queue tables first, and
     // block on it: this is what makes the visit exist in the database and
@@ -2306,13 +2352,21 @@ export function ReceptionDeskWorkspace() {
     setIsBookingLive(true);
     try {
       const startsAt =
-        appointmentDate && appointmentTime
+        selectedSlot?.startsAt
+          ? new Date(selectedSlot.startsAt)
+          : appointmentDate && appointmentTime
           ? new Date(`${appointmentDate}T${appointmentTime}:00`)
           : new Date();
-      const endsAt = new Date(
-        startsAt.getTime() +
-          Math.max(5, activeSitting?.averageConsultationMinutes ?? 15) * 60_000,
-      );
+      const duration =
+        selectedConsultationService?.durationMinutes ||
+        activeSitting?.averageConsultationMinutes ||
+        20;
+      const endsAt =
+        selectedSlot?.endsAt
+          ? new Date(selectedSlot.endsAt)
+          : new Date(startsAt.getTime() + Math.max(5, duration) * 60_000);
+      const isFutureDate = appointmentDate && appointmentDate > getToday();
+
       const { appointment } = await bookReceptionAppointment({
         patientId: selectedPatient.id,
         doctorId: selectedDoctor.id,
@@ -2324,41 +2378,47 @@ export function ReceptionDeskWorkspace() {
         consultationMode,
         idempotencyKey: nextSourceReference,
       });
-      const { queueEntry: bookedQueueEntry } = await checkInReceptionAppointment(appointment.id, {
-        queueDate: businessDate,
-        priority: 0,
-        notes: billingNotes || undefined,
-      });
 
-      // The real queue row already exists (created above, inside the check-in
-      // transaction). Reload the branch's queue for this date to compute this
-      // patient's position among the doctor's still-waiting entries — the
-      // same ordering (priority desc, token asc) the server itself uses.
-      const { overview } = await getReceptionOverview(businessDate);
-      const doctorQueue = overview.queue
-        .filter(
-          (entry) =>
-            entry.appointment?.doctorId === selectedDoctor.id &&
-            entry.status === "WAITING",
-        )
-        .sort(
-          (left, right) =>
-            right.priority - left.priority || left.tokenNumber - right.tokenNumber,
+      if (!isFutureDate) {
+        const { queueEntry: bookedQueueEntry } = await checkInReceptionAppointment(appointment.id, {
+          queueDate: businessDate,
+          priority: 0,
+          notes: billingNotes || undefined,
+        });
+
+        const { overview } = await getReceptionOverview(businessDate);
+        const doctorQueue = overview.queue
+          .filter(
+            (entry) =>
+              entry.appointment?.doctorId === selectedDoctor.id &&
+              entry.status === "WAITING",
+          )
+          .sort(
+            (left, right) =>
+              right.priority - left.priority || left.tokenNumber - right.tokenNumber,
+          );
+        const position = Math.max(
+          1,
+          doctorQueue.findIndex((entry) => entry.id === bookedQueueEntry.id) + 1,
         );
-      const position = Math.max(
-        1,
-        doctorQueue.findIndex((entry) => entry.id === bookedQueueEntry.id) + 1,
-      );
 
-      setQueueSourceReference(nextSourceReference);
-      setCreatedQueueEntryId(bookedQueueEntry.id);
-      setIssuedToken(`Q-${String(bookedQueueEntry.tokenNumber).padStart(3, "0")}`);
-      setQueuePosition(position);
-      setEstimatedWaitMinutes(
-        Math.max(0, position - 1) *
-          (activeSitting?.averageConsultationMinutes ?? 0),
-      );
-      setIssuedRoomLabel(activeSitting?.roomLabel ?? "");
+        setQueueSourceReference(nextSourceReference);
+        setCreatedQueueEntryId(bookedQueueEntry.id);
+        setIssuedToken(`Q-${String(bookedQueueEntry.tokenNumber).padStart(3, "0")}`);
+        setQueuePosition(position);
+        setEstimatedWaitMinutes(
+          Math.max(0, position - 1) *
+            (activeSitting?.averageConsultationMinutes ?? duration),
+        );
+        setIssuedRoomLabel(selectedSlot?.roomLabel ?? activeSitting?.roomLabel ?? "OPD Room");
+      } else {
+        setQueueSourceReference(nextSourceReference);
+        setCreatedQueueEntryId(appointment.id);
+        setIssuedToken(`APT-${appointment.id.slice(0, 6).toUpperCase()}`);
+        setQueuePosition(0);
+        setEstimatedWaitMinutes(0);
+        setIssuedRoomLabel(selectedSlot?.roomLabel ?? "OPD Room");
+      }
     } catch (caught) {
       setActionError(
         caught instanceof Error
@@ -3361,7 +3421,7 @@ export function ReceptionDeskWorkspace() {
                   }
                   title="Purpose of Visit & Routing"
                 />
-              
+
                 <div className="p-3">
                   <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
                     {(
@@ -3406,7 +3466,7 @@ export function ReceptionDeskWorkspace() {
                       ),
                     )}
                   </div>
-              
+
                   {visitPurpose ===
                   "Scheduled Appointment" ? (
                     <div className="mt-3 grid gap-2.5 lg:grid-cols-3">
@@ -3431,7 +3491,7 @@ export function ReceptionDeskWorkspace() {
                           }
                         />
                       </Field>
-              
+
                       <Field label="Appointment Status">
                         <select
                           className={
@@ -3453,21 +3513,21 @@ export function ReceptionDeskWorkspace() {
                           <option>
                             Booked
                           </option>
-              
+
                           <option>
                             Confirmed
                           </option>
-              
+
                           <option>
                             Arrived
                           </option>
-              
+
                           <option>
                             Cancelled
                           </option>
                         </select>
                       </Field>
-              
+
                       <div className="flex items-end">
                         <div className="flex h-8 w-full items-center rounded-lg bg-blue-50 px-3 text-[9px] font-bold text-blue-700">
                           Existing booking will be checked in, not duplicated.
@@ -3475,7 +3535,7 @@ export function ReceptionDeskWorkspace() {
                       </div>
                     </div>
                   ) : null}
-              
+
                   {visitPurpose ===
                   "Follow-up" ? (
                     <div className="mt-3">
@@ -3502,7 +3562,7 @@ export function ReceptionDeskWorkspace() {
                       </Field>
                     </div>
                   ) : null}
-              
+
                   {requiresDoctorRouting &&
                   visitPurpose !== "Admission / IPD" ? (
                     <div className="mt-3 wf-form-field block min-w-0">
@@ -3545,6 +3605,11 @@ export function ReceptionDeskWorkspace() {
                           Online video
                         </button>
                       </div>
+                      {consultationMode === "ONLINE" ? (
+                        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10px] font-bold leading-4 text-amber-800">
+                          Some online services require payment before they are confirmed. If the selected service does, the patient must transfer payment and upload proof, and the doctor confirms it before the visit.
+                        </p>
+                      ) : null}
                     </div>
                   ) : null}
 
@@ -3571,11 +3636,11 @@ export function ReceptionDeskWorkspace() {
                             setSelectedSpecialty(
                               event.target.value,
                             );
-              
+
                             setSelectedDoctorId(
                               "",
                             );
-              
+
                             setAppointmentPrepared(
                               false,
                             );
@@ -3587,7 +3652,7 @@ export function ReceptionDeskWorkspace() {
                           <option value="">
                             Select specialty first
                           </option>
-              
+
                           {availableSpecialties.map(
                             (specialty) => (
                               <option
@@ -3604,7 +3669,7 @@ export function ReceptionDeskWorkspace() {
                           )}
                         </select>
                       </Field>
-              
+
                       <Field
                         label={
                           visitPurpose ===
@@ -3629,7 +3694,7 @@ export function ReceptionDeskWorkspace() {
                               event.target.value,
                             );
                             setSelectedServiceIds([]);
-              
+
                             setAppointmentPrepared(
                               false,
                             );
@@ -3644,7 +3709,7 @@ export function ReceptionDeskWorkspace() {
                               ? "Select specialty first"
                               : "Select doctor"}
                           </option>
-              
+
                           {/* Name only: the fee comes from the selected service
                               and is shown by the billing calculator. */}
                           {filteredDoctors.map(
@@ -3665,7 +3730,7 @@ export function ReceptionDeskWorkspace() {
                       </Field>
                     </div>
                   ) : null}
-              
+
                   {visitPurpose ===
                   "OPD Walk-in" ? (
                     <div className="mt-3 grid gap-2.5 lg:grid-cols-3">
@@ -3837,60 +3902,190 @@ export function ReceptionDeskWorkspace() {
                         {consultationReason.length}/300
                       </div>
                     </div>
-                  ) : null}
-              
-                  {visitPurpose ===
-                    "Scheduled Appointment" ||
-                  visitPurpose ===
-                    "Follow-up" ? (
-                    <div className="mt-2 grid gap-2.5 lg:grid-cols-2">
-                      <Field
-                        label="Date"
-                        required
-                      >
-                        <input
-                          className={
-                            CONTROL_CLASS_NAME
-                          }
-                          min={getToday()}
-                          onChange={(
-                            event,
-                          ) => {
-                            setAppointmentDate(
-                              event.target.value,
-                            );
-                          }}
-                          type="date"
-                          value={
-                            appointmentDate
-                          }
-                        />
-                      </Field>
-              
-                      <Field
-                        label="Time"
-                        required
-                      >
-                        <input
-                          className={
-                            CONTROL_CLASS_NAME
-                          }
-                          onChange={(
-                            event,
-                          ) => {
-                            setAppointmentTime(
-                              event.target.value,
-                            );
-                          }}
-                          type="time"
-                          value={
-                            appointmentTime
-                          }
-                        />
-                      </Field>
+                  ) : null}                  {requiresDoctorRouting &&
+                  selectedDoctor !== null &&
+                  (visitPurpose === "OPD Walk-in" ||
+                    visitPurpose === "Scheduled Appointment" ||
+                    visitPurpose === "Follow-up") ? (
+                    <div className="mt-3 rounded-2xl border border-indigo-100 bg-white p-3.5 shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                        <div>
+                          <div className="flex items-center gap-1.5 text-xs font-black text-slate-800">
+                            <CalendarDays className="h-4 w-4 text-indigo-600" />
+                            <span>Doctor Schedule & Available Time Slots</span>
+                          </div>
+                          <p className="mt-0.5 text-[10px] text-slate-500">
+                            Choose an appointment date to view real-time available time slots computed from the doctor&apos;s hospital stay.
+                          </p>
+                        </div>
+
+                        {/* Date selection shortcuts & picker */}
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAppointmentDate(getToday());
+                              setSelectedSlot(null);
+                            }}
+                            className={`h-7 px-2.5 rounded-lg text-[10px] font-extrabold transition ${
+                              appointmentDate === getToday()
+                                ? "bg-indigo-600 text-white shadow-sm"
+                                : "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                            }`}
+                          >
+                            Today
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setAppointmentDate(tomorrowDateString);
+                              setSelectedSlot(null);
+                            }}
+                            className={`h-7 px-2.5 rounded-lg text-[10px] font-extrabold transition ${
+                              appointmentDate === tomorrowDateString
+                                ? "bg-indigo-600 text-white shadow-sm"
+                                : "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                            }`}
+                          >
+                            Tomorrow
+                          </button>
+                          <input
+                            type="date"
+                            min={getToday()}
+                            value={appointmentDate}
+                            onChange={(event) => {
+                              setAppointmentDate(event.target.value);
+                              setSelectedSlot(null);
+                            }}
+                            className="h-7 rounded-lg border border-slate-200 bg-slate-50 px-2 text-[10px] font-bold text-slate-700 focus:border-indigo-500 focus:outline-none"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Doctor Stay Timing & Slot Metrics Summary */}
+                      <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 p-2.5 text-[10px]">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <div>
+                            <span className="font-bold text-slate-400 uppercase tracking-wider text-[8px] block">Doctor Timing</span>
+                            <span className="font-black text-indigo-950">
+                              {slotResult?.doctorTimingLabel ?? "09:00 AM – 05:00 PM (8.0 hrs)"}
+                            </span>
+                          </div>
+                          <div className="h-6 w-px bg-slate-200" />
+                          <div>
+                            <span className="font-bold text-slate-400 uppercase tracking-wider text-[8px] block">Time Per Patient</span>
+                            <span className="font-black text-indigo-900">
+                              {selectedConsultationService?.durationMinutes || slotResult?.slotMinutes || 20} mins / service
+                            </span>
+                          </div>
+                          <div className="h-6 w-px bg-slate-200" />
+                          <div>
+                            <span className="font-bold text-slate-400 uppercase tracking-wider text-[8px] block">Max Capacity</span>
+                            <span className="font-black text-slate-700">
+                              {slotResult?.maxSlots ?? availableSlots.length} Total Slots
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-0.5 font-black text-emerald-800 text-[9px]">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                            {availableSlots.filter((s) => s.available).length} Available
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-md bg-slate-200 px-2 py-0.5 font-bold text-slate-600 text-[9px]">
+                            {availableSlots.filter((s) => !s.available).length} Booked
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Selected slot banner if any */}
+                      {selectedSlot ? (
+                        <div className="mt-2 flex items-center justify-between rounded-xl border border-emerald-300 bg-emerald-50/80 px-3 py-1.5 text-xs text-emerald-900">
+                          <div className="flex items-center gap-2">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                            <span className="font-black">Selected Slot: {selectedSlot.label}</span>
+                            {selectedSlot.roomLabel ? (
+                              <span className="rounded bg-emerald-200/70 px-1.5 py-0.5 text-[9px] font-extrabold text-emerald-800">
+                                Room: {selectedSlot.roomLabel}
+                              </span>
+                            ) : null}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedSlot(null);
+                              setAppointmentTime("");
+                            }}
+                            className="text-[10px] font-bold text-emerald-700 hover:underline"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      ) : null}
+
+                      {/* Slots Grid */}
+                      <div className="mt-2.5">
+                        {isLoadingSlots ? (
+                          <div className="flex items-center justify-center py-6 text-xs text-slate-400">
+                            <div className="h-4 w-4 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent mr-2" />
+                            Calculating available doctor slots...
+                          </div>
+                        ) : slotResult?.unavailableReason && availableSlots.length === 0 ? (
+                          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-center text-xs font-semibold text-amber-800">
+                            {slotResult.unavailableReason}
+                          </div>
+                        ) : availableSlots.length > 0 ? (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-56 overflow-y-auto pr-1">
+                            {availableSlots.map((slot) => {
+                              const isSelected = selectedSlot?.startsAt === slot.startsAt || appointmentTime === slot.start;
+                              return (
+                                <button
+                                  key={slot.startsAt}
+                                  type="button"
+                                  disabled={!slot.available}
+                                  onClick={() => {
+                                    setSelectedSlot(slot);
+                                    setAppointmentTime(slot.start);
+                                    setAppointmentPrepared(false);
+                                  }}
+                                  className={`relative flex flex-col items-center justify-center rounded-xl p-2 text-center transition ${
+                                    isSelected
+                                      ? "border-2 border-indigo-600 bg-indigo-50 text-indigo-900 shadow-sm ring-2 ring-indigo-200"
+                                      : slot.available
+                                      ? "border border-slate-200 bg-white text-slate-800 hover:border-indigo-400 hover:bg-indigo-50/30 cursor-pointer"
+                                      : "border border-slate-100 bg-slate-100/70 text-slate-400 cursor-not-allowed opacity-60"
+                                  }`}
+                                >
+                                  <span className="text-[11px] font-black">{slot.label}</span>
+                                  <div className="mt-0.5 flex items-center gap-1">
+                                    {slot.roomLabel ? (
+                                      <span className="text-[8px] font-bold text-slate-400">{slot.roomLabel}</span>
+                                    ) : null}
+                                    <span
+                                      className={`text-[8px] font-extrabold ${
+                                        isSelected
+                                          ? "text-indigo-700"
+                                          : slot.available
+                                          ? "text-emerald-600"
+                                          : "text-slate-400"
+                                      }`}
+                                    >
+                                      {isSelected ? "Selected" : slot.available ? "Available" : "Booked"}
+                                    </span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="py-4 text-center text-xs text-slate-400">
+                            No slots available for this date and doctor.
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ) : null}
-              
+
                   {visitPurpose ===
                   "Emergency" ? (
                     <div className="mt-3 rounded-xl border border-rose-100 bg-rose-50/40 p-3">
@@ -3917,21 +4112,21 @@ export function ReceptionDeskWorkspace() {
                             <option>
                               Walk-in
                             </option>
-              
+
                             <option>
                               Ambulance
                             </option>
-              
+
                             <option>
                               Police
                             </option>
-              
+
                             <option>
                               Referral
                             </option>
                           </select>
                         </Field>
-              
+
                         <Field
                           label="Triage Priority"
                           required
@@ -3956,28 +4151,28 @@ export function ReceptionDeskWorkspace() {
                             <option>
                               Red
                             </option>
-              
+
                             <option>
                               Orange
                             </option>
-              
+
                             <option>
                               Yellow
                             </option>
-              
+
                             <option>
                               Green
                             </option>
                           </select>
                         </Field>
-              
+
                         <div className="flex items-end">
                           <div className="flex h-8 w-full items-center rounded-lg bg-rose-100 px-3 text-[8px] font-black text-rose-700">
                             Treatment must not wait for payment.
                           </div>
                         </div>
                       </div>
-              
+
                       <div className="mt-2">
                         <Field
                           label="Emergency Complaint"
@@ -4003,7 +4198,7 @@ export function ReceptionDeskWorkspace() {
                       </div>
                     </div>
                   ) : null}
-              
+
                   {visitPurpose ===
                   "Admission / IPD" ? (
                     <div className="mt-2 grid gap-2.5 lg:grid-cols-4">
@@ -4031,13 +4226,13 @@ export function ReceptionDeskWorkspace() {
                           <option>
                             Planned
                           </option>
-              
+
                           <option>
                             Urgent
                           </option>
                         </select>
                       </Field>
-              
+
                       <Field
                         label="Ward"
                         required
@@ -4060,29 +4255,29 @@ export function ReceptionDeskWorkspace() {
                           <option value="">
                             Select ward
                           </option>
-              
+
                           <option>
                             Medical Ward
                           </option>
-              
+
                           <option>
                             Surgical Ward
                           </option>
-              
+
                           <option>
                             Oncology Ward
                           </option>
-              
+
                           <option>
                             ICU
                           </option>
-              
+
                           <option>
                             Private Ward
                           </option>
                         </select>
                       </Field>
-              
+
                       <Field label="Room / Bed">
                         <input
                           className={
@@ -4101,7 +4296,7 @@ export function ReceptionDeskWorkspace() {
                           }
                         />
                       </Field>
-              
+
                       <Field label="Admission Deposit">
                         <input
                           className={
@@ -4121,7 +4316,7 @@ export function ReceptionDeskWorkspace() {
                           }
                         />
                       </Field>
-              
+
                       <div className="lg:col-span-4">
                         <Field
                           label="Admission Reason"
@@ -4147,7 +4342,7 @@ export function ReceptionDeskWorkspace() {
                       </div>
                     </div>
                   ) : null}
-              
+
                   {visitPurpose ===
                   "Diagnostics / Procedure" ? (
                     <div className="mt-3 grid gap-2.5 lg:grid-cols-3">
@@ -4175,17 +4370,17 @@ export function ReceptionDeskWorkspace() {
                           <option>
                             Laboratory
                           </option>
-              
+
                           <option>
                             Radiology
                           </option>
-              
+
                           <option>
                             Procedure
                           </option>
                         </select>
                       </Field>
-              
+
                       <Field
                         label="Requested Service"
                         required
@@ -4207,7 +4402,7 @@ export function ReceptionDeskWorkspace() {
                           }
                         />
                       </Field>
-              
+
                       <Field label="Referring Doctor">
                         <input
                           className={
@@ -4226,7 +4421,7 @@ export function ReceptionDeskWorkspace() {
                           }
                         />
                       </Field>
-              
+
                       <Field
                         label="Date"
                         required
@@ -4249,7 +4444,7 @@ export function ReceptionDeskWorkspace() {
                           }
                         />
                       </Field>
-              
+
                       {diagnosticDestination !==
                       "Laboratory" ? (
                         <Field
@@ -4276,7 +4471,7 @@ export function ReceptionDeskWorkspace() {
                       ) : null}
                     </div>
                   ) : null}
-              
+
                   <div className="mt-3 flex justify-end">
                     <button
                       className="flex h-8 min-w-[180px] items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-indigo-600 to-violet-600 px-4 text-[9px] font-black text-white disabled:cursor-not-allowed disabled:opacity-50"
@@ -4291,7 +4486,7 @@ export function ReceptionDeskWorkspace() {
                       <CalendarDays
                         size={12}
                       />
-              
+
                       {prepareActionLabel}
                     </button>
                   </div>

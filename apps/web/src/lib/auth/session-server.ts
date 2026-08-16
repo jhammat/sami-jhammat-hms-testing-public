@@ -24,12 +24,28 @@ export async function createSessionCookie(account: AuthenticatedAccount, context
     ipAddress: headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
     userAgent: headerStore.get("user-agent"), mfaVerifiedAt: options?.mfaVerified ? new Date() : null, expiresAt,
   } });
-  (await cookies()).set(WONFLOW_SESSION_COOKIE, rawToken, { httpOnly: true, sameSite: "lax",
-    secure: process.env.NODE_ENV === "production", path: "/", maxAge: WONFLOW_SESSION_DURATION_SECONDS });
+  const isHttps =
+    headerStore.get("x-forwarded-proto") === "https" ||
+    headerStore.get("referer")?.startsWith("https://") ||
+    process.env.NEXT_PUBLIC_APP_URL?.startsWith("https://");
+  const secure = Boolean(isHttps && process.env.NODE_ENV === "production");
+
+  (await cookies()).set(WONFLOW_SESSION_COOKIE, rawToken, {
+    httpOnly: true,
+    sameSite: "lax",
+    secure,
+    path: "/",
+    maxAge: WONFLOW_SESSION_DURATION_SECONDS,
+  });
   const cookieStore = await cookies();
   if (account.mustChangePassword) {
-    cookieStore.set(WONFLOW_PASSWORD_CHANGE_COOKIE, "1", { httpOnly: true, sameSite: "lax",
-      secure: process.env.NODE_ENV === "production", path: "/", maxAge: WONFLOW_SESSION_DURATION_SECONDS });
+    cookieStore.set(WONFLOW_PASSWORD_CHANGE_COOKIE, "1", {
+      httpOnly: true,
+      sameSite: "lax",
+      secure,
+      path: "/",
+      maxAge: WONFLOW_SESSION_DURATION_SECONDS,
+    });
   } else {
     cookieStore.delete(WONFLOW_PASSWORD_CHANGE_COOKIE);
   }

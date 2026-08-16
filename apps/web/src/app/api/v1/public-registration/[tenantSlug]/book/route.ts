@@ -20,16 +20,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ ten
 
     const { tenantSlug } = await params;
     const body = await request.json().catch(() => null) as Partial<PublicBookingInput> | null;
-    if (!body?.slotId || !body.givenName || !body.familyName || !body.phone || !body.idempotencyKey) {
-      return NextResponse.json({ error: "Fill in your name, mobile number and a booking time." }, { status: 400 });
+    if (!body?.slotId || !body.givenName || !body.familyName || !body.phone || !body.email || !body.password || !body.dateOfBirth || !body.sex || !body.city || !body.idempotencyKey) {
+      return NextResponse.json({ error: "Fill in your details, including email, password, date of birth, sex and city, and choose a booking time." }, { status: 400 });
     }
 
     const appointment = await submitPublicBooking(tenantSlug, {
       slotId: body.slotId,
+      mode: body.mode,
       givenName: body.givenName,
       familyName: body.familyName,
       phone: body.phone,
       email: body.email,
+      password: body.password,
+      dateOfBirth: body.dateOfBirth,
+      sex: body.sex,
+      city: body.city,
       reason: body.reason,
       idempotencyKey: body.idempotencyKey,
     });

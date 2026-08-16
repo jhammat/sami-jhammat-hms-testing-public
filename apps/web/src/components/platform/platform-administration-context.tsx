@@ -913,16 +913,33 @@ export function PlatformAdministrationProvider({
             primaryBranchName: input.primaryBranchName?.trim() || undefined,
             subscription: {
               planCode: input.planCode,
-              status: "TRIAL",
+              status: input.billingStatus ?? "TRIAL",
               currencyCode: input.currencyCode,
               monthlyAmountMinor: input.monthlyAmountMinor,
               seatCount: input.seatCount,
               ...(input.trialEndsAt ? { trialEndsAt: input.trialEndsAt } : {}),
               ...(input.renewsAt ? { renewsAt: input.renewsAt } : {}),
             },
+            entitlements: input.entitlements ?? [],
           }),
         },
       );
+
+      if (input.entitlements && input.entitlements.length > 0) {
+        for (const entitlement of input.entitlements) {
+          try {
+            await phaseOneApi(
+              `/api/v1/platform/organizations/${encodeURIComponent(tenantId)}/entitlements/${encodeURIComponent(entitlement.moduleCode)}`,
+              {
+                method: "PUT",
+                body: JSON.stringify({ enabled: entitlement.enabled }),
+              },
+            );
+          } catch {
+            // Already updated in transaction
+          }
+        }
+      }
 
       await reload();
 

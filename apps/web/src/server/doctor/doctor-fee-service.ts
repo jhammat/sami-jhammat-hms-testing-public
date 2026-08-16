@@ -98,7 +98,7 @@ export class DoctorFeeService {
       durationMinutes: number;
       priceMinorUnits: number;
       publiclyBookable?: boolean;
-      consultationMode?: "IN_PERSON" | "ONLINE";
+      consultationModes?: ("IN_PERSON" | "ONLINE")[];
     },
   ) {
     const { context, doctor, organization } = await resolveDoctor(requestContext);
@@ -143,7 +143,7 @@ export class DoctorFeeService {
           priceMinorUnits: input.priceMinorUnits,
           currencyCode,
           publiclyBookable: input.publiclyBookable ?? false,
-          consultationMode: input.consultationMode ?? "IN_PERSON",
+          consultationModes: input.consultationModes?.length ? input.consultationModes : ["IN_PERSON"],
           handlerMembershipId: doctor.staffProfile.membershipId,
           billingOwner: "DOCTOR",
         },
@@ -166,7 +166,7 @@ export class DoctorFeeService {
       priceMinorUnits?: number;
       publiclyBookable?: boolean;
       isActive?: boolean;
-      consultationMode?: "IN_PERSON" | "ONLINE";
+      consultationModes?: ("IN_PERSON" | "ONLINE")[];
     },
   ) {
     const { context, doctor, organization } = await resolveDoctor(requestContext);
@@ -187,6 +187,9 @@ export class DoctorFeeService {
     }
     if (input.priceMinorUnits !== undefined && (!Number.isInteger(input.priceMinorUnits) || input.priceMinorUnits < 0)) {
       throw new WonFlowApiError(400, "invalid-service-price", "Enter a valid consultation fee.");
+    }
+    if (input.consultationModes !== undefined && input.consultationModes.length === 0) {
+      throw new WonFlowApiError(400, "invalid-service-modes", "Select at least one consultation mode.");
     }
     if (input.priceMinorUnits !== undefined && existing.billingOwner !== "DOCTOR") {
       throw new WonFlowApiError(403, "hospital-controls-fee", existing.billingOwner === "DEPARTMENT" ? "This fee is controlled by the department that owns the service." : "This fee is controlled by hospital administration.");

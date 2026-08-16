@@ -74,6 +74,7 @@ export {
 } from "./generated/prisma/client";
 
 export {
+  PaymentAccountMethod,
   ServiceBillingOwner,
   TokenPurpose,
   WorkspaceCode,

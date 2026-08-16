@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { ArrowRight, Building2, Check, ShieldCheck, CreditCard, Key, Settings, Save } from "lucide-react";
 
@@ -69,7 +68,7 @@ function Field({ label, required = false, hint, error, children }: {
 }
 
 export function PlatformTenantFlowWizard() {
-  const { createTenant, activateTenant, reload, ready, workspace } = usePlatformAdministration();
+  const { createTenant, activateTenant, updateEntitlement, reload, ready, workspace } = usePlatformAdministration();
   
   const [currentStep, setCurrentStep] = useState(1);
   const [tenantId, setTenantId] = useState<string | null>(null);
@@ -199,6 +198,16 @@ export function PlatformTenantFlowWizard() {
     return Object.keys(nextErrors).length === 0;
   }
 
+  async function handleEntitlementsContinue() {
+    if (tenantId) {
+      for (const catalogModule of PLATFORM_MODULE_CATALOG) {
+        const isEnabled = Boolean(selectedEntitlements[catalogModule.code]);
+        void updateEntitlement(tenantId, catalogModule.code, isEnabled);
+      }
+    }
+    setCurrentStep(3);
+  }
+
   async function handleActivationSubmit() {
     if (!tenantId || !validateCredentials()) return;
     
@@ -206,12 +215,11 @@ export function PlatformTenantFlowWizard() {
     setError("");
     
     try {
-      // Convert selected entitlements to array format for backend
-      const entitlementsArray = Object.entries(selectedEntitlements)
-        .filter(([, enabled]) => enabled)
-        .map(([moduleCode, enabled]) => ({ moduleCode, enabled }));
-      
-      console.log('Sending entitlements to backend:', entitlementsArray);
+      // Map all catalog modules with their explicit boolean state
+      const entitlementsArray = PLATFORM_MODULE_CATALOG.map((catalogModule) => ({
+        moduleCode: catalogModule.code,
+        enabled: Boolean(selectedEntitlements[catalogModule.code]),
+      }));
       
       // Activate tenant with subscription, credentials, and entitlements in a single atomic call
       const activationInput: ActivatePlatformTenantInput = {
@@ -229,16 +237,10 @@ export function PlatformTenantFlowWizard() {
         entitlements: entitlementsArray,
       };
       
-      console.log('Full activation input:', activationInput);
-      
       const result = await activateTenant(tenantId, activationInput);
-      
-      console.log('Activation result:', result);
       
       // Reload workspace data to ensure entitlements are reflected
       await reload();
-      
-      console.log('Workspace reloaded');
       
       setCredentials(result);
       setCurrentStep(5);
@@ -446,7 +448,7 @@ export function PlatformTenantFlowWizard() {
             >
               Back
             </button>
-            <PlatformPrimaryButton onClick={() => setCurrentStep(3)}>
+            <PlatformPrimaryButton onClick={handleEntitlementsContinue}>
               Continue to Subscription
               <ArrowRight aria-hidden="true" size={17} />
             </PlatformPrimaryButton>

@@ -12,8 +12,48 @@ import path from "node:path";
 export const documentStorageRoot = path.join(process.cwd(), ".wonflow-private", "patient-documents");
 export const documentUploadStagingRoot = path.join(process.cwd(), ".wonflow-private", "patient-document-uploads");
 
-export const ALLOWED_DOCUMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
-export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+export const ALLOWED_DOCUMENT_TYPES = new Set([
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.ms-excel",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-powerpoint",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "text/plain",
+  "text/csv",
+  "text/markdown",
+  "text/rtf",
+  "application/rtf",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/svg+xml",
+  "image/bmp",
+  "image/tiff",
+  "image/heic",
+  "image/heif",
+  "application/dicom",
+  "application/octet-stream",
+]);
+
+export function isAllowedDocumentType(contentType: string, fileName?: string): boolean {
+  if (ALLOWED_DOCUMENT_TYPES.has(contentType)) return true;
+  if (contentType.startsWith("image/") || contentType.startsWith("text/")) return true;
+  if (fileName) {
+    const ext = path.extname(fileName).toLowerCase();
+    const validExtensions = new Set([
+      ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx",
+      ".txt", ".csv", ".rtf", ".md", ".png", ".jpg", ".jpeg", ".webp",
+      ".gif", ".bmp", ".svg", ".tiff", ".tif", ".heic", ".heif", ".dcm",
+    ]);
+    if (validExtensions.has(ext)) return true;
+  }
+  return false;
+}
+
+export const MAX_DOCUMENT_BYTES = 25 * 1024 * 1024;
 
 /**
  * No external anti-malware vendor is integrated in this environment. The

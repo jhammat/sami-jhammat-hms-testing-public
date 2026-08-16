@@ -17,6 +17,7 @@ export type DemoClinicalEncounterType =
 export type DemoClinicalEncounterStatus =
   | "open"
   | "in-consultation"
+  | "paused"
   | "completed"
   | "cancelled";
 

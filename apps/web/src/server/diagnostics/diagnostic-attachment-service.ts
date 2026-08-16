@@ -4,9 +4,9 @@ import { requireBranchId, requirePermission, requireTenantContext } from "@wonfl
 import type { WonFlowRequestContext } from "@wonflow/contracts";
 import { WonFlowApiError } from "@/server/http/route-handler";
 import {
-  ALLOWED_DOCUMENT_TYPES,
   MAX_DOCUMENT_BYTES,
   documentObjectPath,
+  isAllowedDocumentType,
   persistUploadedDocumentBytes,
 } from "@/server/documents/document-storage";
 
@@ -61,8 +61,8 @@ function attachmentView(document: {
 }
 
 async function validateUpload(file: File): Promise<Buffer> {
-  if (!ALLOWED_DOCUMENT_TYPES.has(file.type)) throw new WonFlowApiError(415, "unsupported-document-type", "Upload a PDF, JPG, PNG or WebP file.");
-  if (file.size < 1 || file.size > MAX_DOCUMENT_BYTES) throw new WonFlowApiError(413, "document-size-invalid", "Files must be between 1 byte and 10 MB.");
+  if (!isAllowedDocumentType(file.type, file.name)) throw new WonFlowApiError(415, "unsupported-document-type", "Upload a PDF, Word document, Excel spreadsheet, PowerPoint, image, or text file.");
+  if (file.size < 1 || file.size > MAX_DOCUMENT_BYTES) throw new WonFlowApiError(413, "document-size-invalid", "Files must be between 1 byte and 25 MB.");
   return Buffer.from(await file.arrayBuffer());
 }
 

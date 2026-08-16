@@ -19,7 +19,9 @@ import {
 } from "@/lib/api";
 
 import {
-  patchDoctorQueue,
+  completeDoctorEncounter,
+  pauseDoctorEncounter,
+  resumeDoctorEncounter,
 } from "@/lib/api/doctor-api";
 
 import {
@@ -121,23 +123,39 @@ function ConsultationWorkspace({
 }) {
   const [actionMessage, setActionMessage] = useState<string | undefined>();
   const [completing, setCompleting] = useState(false);
+  const [pausing, setPausing] = useState(false);
 
   async function completeConsultation(): Promise<void> {
-    if (encounter.appointmentId === null) {
-      setActionMessage("This encounter has no linked appointment to complete.");
-      return;
-    }
-
     setCompleting(true);
 
     try {
-      await patchDoctorQueue(encounter.appointmentId, "complete");
+      await completeDoctorEncounter(encounter.id);
       setActionMessage("Consultation completed.");
       reload();
     } catch (caught) {
       setActionMessage(caught instanceof PhaseOneApiError ? caught.message : "The consultation could not be completed.");
     } finally {
       setCompleting(false);
+    }
+  }
+
+  /** Pause and resume both route through the encounter directly, not the appointment — the queue entry stays in progress either way, so nobody else is called into this room while the doctor is away. */
+  async function togglePause(): Promise<void> {
+    setPausing(true);
+
+    try {
+      if (encounter.status === "PAUSED") {
+        await resumeDoctorEncounter(encounter.id);
+        setActionMessage("Consultation resumed.");
+      } else {
+        await pauseDoctorEncounter(encounter.id);
+        setActionMessage("Consultation paused. The patient remains in progress.");
+      }
+      reload();
+    } catch (caught) {
+      setActionMessage(caught instanceof PhaseOneApiError ? caught.message : "The consultation could not be updated.");
+    } finally {
+      setPausing(false);
     }
   }
 
@@ -152,19 +170,35 @@ function ConsultationWorkspace({
         eyebrow="Consultation"
         title={patientDisplayName(encounter.patient)}
         actions={
-          encounter.status === "IN_PROGRESS" ? (
-            <WonFlowActionButton
-              disabled={completing}
-              onClick={() => {
-                void completeConsultation();
-              }}
-              variant="primary"
-            >
-              {completing ? "Completing…" : "Complete Consultation"}
-            </WonFlowActionButton>
+          encounter.status === "IN_PROGRESS" || encounter.status === "PAUSED" ? (
+            <div className="flex items-center gap-2">
+              <WonFlowActionButton
+                disabled={pausing}
+                onClick={() => {
+                  void togglePause();
+                }}
+              >
+                {pausing ? "Updating…" : encounter.status === "PAUSED" ? "Resume" : "Pause"}
+              </WonFlowActionButton>
+              <WonFlowActionButton
+                disabled={completing}
+                onClick={() => {
+                  void completeConsultation();
+                }}
+                variant="primary"
+              >
+                {completing ? "Completing…" : "Complete Consultation"}
+              </WonFlowActionButton>
+            </div>
           ) : undefined
         }
       />
+
+      {encounter.status === "PAUSED" ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">
+          This consultation is paused. The patient remains in progress and no one else can be called into this room until you resume or complete it.
+        </div>
+      ) : null}
 
       {actionMessage !== undefined ? (
         <div className="rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-700">{actionMessage}</div>
@@ -249,7 +283,7 @@ function ConsultationNotePanel({ encounter, onSaved }: { encounter: EncounterRec
   const { mutate: saveDraft, saveState, error } = useSaveNoteDraft(encounter.id);
   const { mutate: sign, saveState: signState, error: signError } = useSignNote(encounter.id);
 
-  const encounterEditable = encounter.status === "PLANNED" || encounter.status === "IN_PROGRESS";
+  const encounterEditable = encounter.status === "PLANNED" || encounter.status === "IN_PROGRESS" || encounter.status === "PAUSED";
   const textEditable = encounterEditable && (isDraft || amending);
 
   useEffect(() => {
@@ -315,7 +349,10 @@ function ConsultationNotePanel({ encounter, onSaved }: { encounter: EncounterRec
             <WonFlowActionButton
               disabled={signState === "saving"}
               onClick={() => {
-                void sign(noteId).then(onSaved);
+                void (async () => {
+                  await sign(noteId);
+                  onSaved();
+                })();
               }}
             >
               {signState === "saving" ? "Signing…" : "Sign Note"}

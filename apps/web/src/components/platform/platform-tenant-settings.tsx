@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Key, Settings, Save, Check, AlertCircle } from "lucide-react";
+import { Key, Save, Check, AlertCircle } from "lucide-react";
 
 import { PlatformPanel, PlatformPrimaryButton, platformInputClassName } from "./platform-administration-ui";
 import { usePlatformAdministration } from "./platform-administration-context";

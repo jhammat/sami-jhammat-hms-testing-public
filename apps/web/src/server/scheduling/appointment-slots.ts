@@ -6,6 +6,7 @@ import {
   localWallTimeToInstant,
   resolveEffectiveAvailability,
 } from "./effective-availability";
+import type { EffectiveAvailabilityWindow } from "./effective-availability";
 
 /**
  * Server-side slot generation. Slots computed in the browser read a local
@@ -38,6 +39,8 @@ export interface BookableSlot {
 export interface BookableSlotsResult {
   slots: BookableSlot[];
   slotMinutes: number;
+  maxSlots: number;
+  doctorTimingLabel?: string;
   unavailableReason?: string;
 }
 
@@ -69,16 +72,33 @@ export async function listBookableSlots(input: {
   const dateObj = new Date(`${input.date}T00:00:00.000Z`);
 
   if (Number.isNaN(dateObj.getTime())) {
-    return { slots: [], slotMinutes: input.fallbackSlotMinutes, unavailableReason: "The selected date is invalid." };
+    return { slots: [], slotMinutes: input.fallbackSlotMinutes, maxSlots: 0, unavailableReason: "The selected date is invalid." };
   }
 
   const weekday = dateObj.getUTCDay();
 
-  const rules = await database.availabilityRule.findMany({
+  const sitting =
+    (await database.doctorSitting.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        doctorId: input.doctorId,
+        ...(input.branchId ? { branchId: input.branchId } : {}),
+        businessDate: dateObj,
+      },
+    })) ??
+    (await database.doctorSitting.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        doctorId: input.doctorId,
+        businessDate: dateObj,
+      },
+    }));
+
+  let rules = await database.availabilityRule.findMany({
     where: {
       tenantId: input.tenantId,
       doctorId: input.doctorId,
-      branchId: input.branchId,
+      ...(input.branchId ? { branchId: input.branchId } : {}),
       isActive: true,
       weekday,
       validFrom: { lte: dateObj },
@@ -87,25 +107,74 @@ export async function listBookableSlots(input: {
   });
 
   if (rules.length === 0) {
-    return { slots: [], slotMinutes: input.fallbackSlotMinutes, unavailableReason: "The doctor has no scheduled hours at this branch on this date." };
+    rules = await database.availabilityRule.findMany({
+      where: {
+        tenantId: input.tenantId,
+        doctorId: input.doctorId,
+        isActive: true,
+        weekday,
+        validFrom: { lte: dateObj },
+        OR: [{ validUntil: null }, { validUntil: { gte: dateObj } }],
+      },
+    });
   }
 
-  const windows = await resolveEffectiveAvailability({
-    tenantId: input.tenantId,
-    date: input.date,
-    rules: rules.map((rule) => ({
-      id: rule.id,
-      doctorId: rule.doctorId,
-      branchId: rule.branchId,
-      serviceId: rule.serviceId,
-      startsMinute: rule.startsMinute,
-      endsMinute: rule.endsMinute,
-      capacity: rule.capacity,
-    })),
-  });
+  let windows: EffectiveAvailabilityWindow[] = [];
+
+  if (sitting) {
+    if (sitting.status === "FINISHED") {
+      return { slots: [], slotMinutes: input.fallbackSlotMinutes, maxSlots: 0, unavailableReason: "The doctor has finished sitting for this date." };
+    }
+    windows = [{
+      doctorId: input.doctorId,
+      branchId: input.branchId,
+      ruleId: null,
+      serviceId: null,
+      startsMinute: sitting.startsMinute,
+      endsMinute: sitting.endsMinute,
+      capacity: 50,
+      slotMinutes: sitting.averageConsultationMinutes || input.fallbackSlotMinutes,
+      source: "DOCTOR_SITTING",
+      rosterStartsMinute: null,
+      rosterEndsMinute: null,
+      sittingStatus: sitting.status,
+      roomLabel: sitting.roomLabel,
+    }];
+  } else if (rules.length > 0) {
+    windows = await resolveEffectiveAvailability({
+      tenantId: input.tenantId,
+      date: input.date,
+      rules: rules.map((rule) => ({
+        id: rule.id,
+        doctorId: rule.doctorId,
+        branchId: rule.branchId,
+        serviceId: rule.serviceId,
+        startsMinute: rule.startsMinute,
+        endsMinute: rule.endsMinute,
+        capacity: rule.capacity,
+      })),
+    });
+  } else {
+    // Standard clinic timing when no rule or sitting has been explicitly recorded yet
+    windows = [{
+      doctorId: input.doctorId,
+      branchId: input.branchId,
+      ruleId: null,
+      serviceId: null,
+      startsMinute: 540, // 09:00 AM
+      endsMinute: 1020, // 05:00 PM
+      capacity: 50,
+      slotMinutes: input.fallbackSlotMinutes || 20,
+      source: "HOSPITAL_ROSTER",
+      rosterStartsMinute: 540,
+      rosterEndsMinute: 1020,
+      sittingStatus: null,
+      roomLabel: null,
+    }];
+  }
 
   if (windows.length === 0) {
-    return { slots: [], slotMinutes: input.fallbackSlotMinutes, unavailableReason: "The doctor has finished sitting for this date." };
+    return { slots: [], slotMinutes: input.fallbackSlotMinutes, maxSlots: 0, unavailableReason: "The doctor has no available sitting hours for this date." };
   }
 
   const dayStart = new Date(`${input.date}T00:00:00.000Z`);
@@ -178,9 +247,19 @@ export async function listBookableSlots(input: {
     }
   }
 
+  const primaryWindow = windows[0];
+  const totalStayMinutes = primaryWindow ? Math.max(0, primaryWindow.endsMinute - primaryWindow.startsMinute) : 0;
+  const effectiveSlotMinutes = primaryWindow?.slotMinutes ?? input.fallbackSlotMinutes ?? 20;
+  const maxSlots = effectiveSlotMinutes > 0 ? Math.floor(totalStayMinutes / effectiveSlotMinutes) : 0;
+  const doctorTimingLabel = primaryWindow
+    ? `${formatLabel(primaryWindow.startsMinute, primaryWindow.endsMinute)} (${Math.round((totalStayMinutes / 60) * 10) / 10} hrs)`
+    : undefined;
+
   return {
     slots,
-    slotMinutes: windows[0]?.slotMinutes ?? input.fallbackSlotMinutes,
+    slotMinutes: effectiveSlotMinutes,
+    maxSlots,
+    doctorTimingLabel,
     unavailableReason:
       slots.length === 0
         ? "No appointment slots are available for this schedule."

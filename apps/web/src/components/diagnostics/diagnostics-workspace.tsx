@@ -212,7 +212,7 @@ export function DiagnosticAttachmentsPanel({
         <Upload aria-hidden className="size-4" />
         {uploading ? "Uploading…" : "Attach a photo or PDF"}
         <input
-          accept="application/pdf,image/jpeg,image/png,image/webp"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.rtf,.png,.jpg,.jpeg,.webp,.gif,.svg,.bmp,.tiff,.heic,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/*"
           capture="environment"
           className="sr-only"
           disabled={uploading}

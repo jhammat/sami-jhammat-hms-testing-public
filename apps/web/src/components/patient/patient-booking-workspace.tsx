@@ -17,8 +17,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WonFlowPageHeader } from "@/components/workspace";
 
-interface Option { ruleId: string; branchId: string; branchName: string; doctorId: string; doctorName: string; specialty: string | null; serviceId: string; serviceName: string; consultationMode: "IN_PERSON" | "ONLINE"; durationMinutes: number; priceMinorUnits: number | null; currencyCode: string }
-interface Slot { id: string; ruleId: string; branchId: string; doctorId: string; serviceId: string; startsAt: string; endsAt: string; timezone: string }
+interface Option { ruleId: string; branchId: string; branchName: string; doctorId: string; doctorName: string; specialty: string | null; serviceId: string; serviceName: string; consultationModes: ("IN_PERSON" | "ONLINE")[]; requiresPrepayment: boolean; durationMinutes: number; priceMinorUnits: number | null; currencyCode: string }
+interface Slot { id: string; ruleId: string; branchId: string; doctorId: string; serviceId: string; startsAt: string; endsAt: string; timezone: string; available: boolean }
 interface Appointment { id: string; startsAt: string; endsAt: string; status: string; consultationMode: "IN_PERSON" | "ONLINE"; reason: string | null; service: { name: string } | null; branch: { name: string; timezone: string }; doctor: { staffProfile: { membership: { displayName: string } } } | null }
 
 const humanize = (value: string) => value.replaceAll("_", " ").toLowerCase();
@@ -76,6 +76,10 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="truncate font-black text-slate-900">{appointment.service?.name ?? "Hospital appointment"}</span>
           <StatusPill status={appointment.status} />
+          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${appointment.consultationMode === "ONLINE" ? "border-violet-200 bg-violet-50 text-violet-700" : "border-slate-200 bg-slate-50 text-slate-600"}`}>
+            {appointment.consultationMode === "ONLINE" ? <Video aria-hidden className="size-3" /> : <MapPin aria-hidden className="size-3" />}
+            {appointment.consultationMode === "ONLINE" ? "Online" : "In person"}
+          </span>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
           <span className="inline-flex items-center gap-1">
@@ -112,6 +116,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [ruleId, setRuleId] = useState("");
   const [slotId, setSlotId] = useState("");
+  const [chosenMode, setChosenMode] = useState<"IN_PERSON" | "ONLINE" | "">("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -135,10 +140,16 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
 
   const availableSlots = useMemo(() => slots.filter((slot) => slot.ruleId === ruleId), [ruleId, slots]);
   const selectedOption = options.find((option) => option.ruleId === ruleId);
+  // A service offering only one mode never needs an explicit choice; one
+  // offering both requires the patient to pick, so chosenMode stays empty
+  // (and the confirm button stays disabled) until they do.
+  const mode = selectedOption?.consultationModes.length === 1 ? selectedOption.consultationModes[0]! : chosenMode;
+  const modeRequiresChoice = (selectedOption?.consultationModes.length ?? 0) > 1;
+  const requiresPrepayment = mode === "ONLINE" && selectedOption?.requiresPrepayment === true;
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!slotId) return;
+    if (!slotId || !mode) return;
     setBusy(true);
     setError("");
     setMessage("");
@@ -147,12 +158,17 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
       const response = await fetch("/api/v1/patient/booking", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ slotId, reason: data.get("reason"), idempotencyKey: crypto.randomUUID() }),
+        body: JSON.stringify({ slotId, mode, reason: data.get("reason"), idempotencyKey: crypto.randomUUID() }),
       });
       const body = await response.json() as { error?: string };
       if (!response.ok) throw new Error(body.error);
-      setMessage("Appointment confirmed. Reception and your doctor can now see this booking.");
+      setMessage(
+        requiresPrepayment
+          ? "Appointment reserved. Pay and upload proof to confirm it — see the payment screen for this appointment."
+          : "Appointment confirmed. Reception and your doctor can now see this booking.",
+      );
       setSlotId("");
+      setChosenMode("");
       await load();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Appointment could not be booked.");
@@ -255,7 +271,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
             <span className="text-xs font-black uppercase tracking-wide text-slate-500">Specialty, doctor and service</span>
             <select
               className="mt-1.5 w-full rounded-xl border border-slate-200 px-3 py-3 font-semibold text-slate-900"
-              onChange={(event) => { setRuleId(event.target.value); setSlotId(""); }}
+              onChange={(event) => { setRuleId(event.target.value); setSlotId(""); setChosenMode(""); }}
               value={ruleId}
             >
               <option value="">No published schedules</option>
@@ -269,24 +285,61 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
         </div>
 
         {selectedOption ? (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-bold text-slate-700">
-            <span className="inline-flex items-center gap-1.5">
-              <Stethoscope aria-hidden className="size-4 text-blue-600" />
-              {selectedOption.doctorName}
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <Clock aria-hidden className="size-4 text-blue-600" />
-              {selectedOption.durationMinutes} minutes
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              <MapPin aria-hidden className="size-4 text-blue-600" />
-              {selectedOption.consultationMode === "ONLINE" ? "Online video consultation" : selectedOption.branchName}
-            </span>
-            <span className="ml-auto font-black text-slate-900">
-              {selectedOption.priceMinorUnits === null
-                ? "Fee confirmed by hospital"
-                : `${selectedOption.currencyCode} ${(selectedOption.priceMinorUnits / 100).toLocaleString("en-PK")}`}
-            </span>
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-bold text-slate-700">
+              <span className="inline-flex items-center gap-1.5">
+                <Stethoscope aria-hidden className="size-4 text-blue-600" />
+                {selectedOption.doctorName}
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Clock aria-hidden className="size-4 text-blue-600" />
+                {selectedOption.durationMinutes} minutes
+              </span>
+              {!modeRequiresChoice ? (
+                <span className="inline-flex items-center gap-1.5">
+                  <MapPin aria-hidden className="size-4 text-blue-600" />
+                  {mode === "ONLINE" ? "Online video consultation" : selectedOption.branchName}
+                </span>
+              ) : null}
+              <span className="ml-auto font-black text-slate-900">
+                {selectedOption.priceMinorUnits === null
+                  ? "Fee confirmed by hospital"
+                  : `${selectedOption.currencyCode} ${(selectedOption.priceMinorUnits / 100).toLocaleString("en-PK")}`}
+              </span>
+            </div>
+
+            {modeRequiresChoice ? (
+              <fieldset className="rounded-2xl border border-slate-200 p-3">
+                <legend className="px-1 text-xs font-black uppercase tracking-wide text-slate-500">How would you like this consultation?</legend>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button
+                    aria-pressed={mode === "IN_PERSON"}
+                    className={`rounded-xl border px-4 py-2.5 text-sm font-black transition ${mode === "IN_PERSON" ? "border-blue-100 bg-blue-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-700 hover:border-blue-100 hover:bg-blue-50"}`}
+                    onClick={() => setChosenMode("IN_PERSON")}
+                    type="button"
+                  >
+                    <MapPin aria-hidden className="mr-1.5 inline size-4" />
+                    In person at {selectedOption.branchName}
+                  </button>
+                  <button
+                    aria-pressed={mode === "ONLINE"}
+                    className={`rounded-xl border px-4 py-2.5 text-sm font-black transition ${mode === "ONLINE" ? "border-blue-100 bg-blue-600 text-white shadow-sm" : "border-slate-200 bg-white text-slate-700 hover:border-blue-100 hover:bg-blue-50"}`}
+                    onClick={() => setChosenMode("ONLINE")}
+                    type="button"
+                  >
+                    <Video aria-hidden className="mr-1.5 inline size-4" />
+                    Online video consultation
+                  </button>
+                </div>
+              </fieldset>
+            ) : null}
+
+            {requiresPrepayment ? (
+              <div className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-900">
+                <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+                Online consultations for this service require payment before confirmation. After booking you will need to transfer payment and upload proof — your doctor confirms it before the visit.
+              </div>
+            ) : null}
           </div>
         ) : null}
 
@@ -300,12 +353,16 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
                   <button
                     aria-pressed={selected}
                     className={`rounded-xl border px-4 py-2.5 text-sm font-black transition ${
-                      selected
-                        ? "border-blue-100 bg-blue-600 text-white shadow-sm"
-                        : "border-slate-200 bg-white text-slate-700 hover:border-blue-100 hover:bg-blue-50"
+                      !slot.available
+                        ? "cursor-not-allowed border-slate-100 bg-slate-50 text-slate-400 line-through"
+                        : selected
+                          ? "border-blue-100 bg-blue-600 text-white shadow-sm"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-blue-100 hover:bg-blue-50"
                     }`}
+                    disabled={!slot.available}
                     key={slot.id}
                     onClick={() => setSlotId(slot.id)}
+                    title={slot.available ? undefined : "This time is already booked."}
                     type="button"
                   >
                     {new Intl.DateTimeFormat("en-PK", { timeStyle: "short", timeZone: slot.timezone }).format(new Date(slot.startsAt))}
@@ -315,7 +372,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
             </div>
           ) : (
             <p className="mt-2.5 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm font-semibold text-slate-500">
-              {ruleId ? "No available times for this date. Try another day." : "Choose a specialty and doctor to see available times."}
+              {ruleId ? "No clinic scheduled for this doctor on this date. Try another day." : "Choose a specialty and doctor to see available times."}
             </p>
           )}
         </fieldset>
@@ -333,10 +390,10 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
 
         <button
           className="w-full rounded-xl bg-blue-600 p-3.5 font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={busy || !slotId}
+          disabled={busy || !slotId || !mode}
           type="submit"
         >
-          {busy ? "Confirming…" : slotId ? "Confirm appointment" : "Select a time to continue"}
+          {busy ? "Confirming…" : !slotId ? "Select a time to continue" : !mode ? "Choose in person or online" : "Confirm appointment"}
         </button>
       </form>
     </div>

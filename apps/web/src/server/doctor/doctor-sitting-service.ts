@@ -192,6 +192,7 @@ export class DoctorSittingService {
       throw new WonFlowApiError(409, "sitting-conflicts-appointments", `${conflicting} booked ${conflicting === 1 ? "appointment falls" : "appointments fall"} outside these hours. Move or cancel them before changing your sitting.`);
     }
 
+    const now = new Date();
     return database.$transaction(async (transaction) => {
       const sitting = existing
         ? await transaction.doctorSitting.update({
@@ -202,6 +203,7 @@ export class DoctorSittingService {
             averageConsultationMinutes,
             roomLabel: input.roomLabel?.trim() || null,
             ...(input.status ? { status: input.status } : {}),
+            ...(input.status === "AVAILABLE" ? { actualStartedAt: existing.actualStartedAt ?? now, actualEndedAt: null } : {}),
           },
         })
         : await transaction.doctorSitting.create({
@@ -215,6 +217,7 @@ export class DoctorSittingService {
             averageConsultationMinutes,
             roomLabel: input.roomLabel?.trim() || null,
             status: input.status ?? "PLANNED",
+            actualStartedAt: input.status === "AVAILABLE" ? now : null,
           },
         });
 

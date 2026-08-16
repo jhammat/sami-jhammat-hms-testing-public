@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { DOCTOR_SITTINGS_CHANGED_EVENT } from "./legacy-local-sitting-cache";
+import { subscribeApiCacheTag } from "@/lib/api/cache";
 
 export interface LiveDoctorSitting {
   id: string;
@@ -60,15 +60,16 @@ export function useLiveDoctorSittings(businessDate: string) {
   }, [businessDate]);
 
   useEffect(() => {
-    // Refresh when a doctor changes their sitting in this browser, and poll so
-    // a change made on the doctor's own machine reaches the desk.
+    // Refresh instantly when a doctor's sitting mutation completes in this
+    // tab, and poll so a change made on another machine or browser reaches
+    // the desk without a manual refresh.
     const handler = () => void load();
     const initial = window.setTimeout(handler, 0);
-    window.addEventListener(DOCTOR_SITTINGS_CHANGED_EVENT, handler);
+    const unsubscribe = subscribeApiCacheTag("doctor-sittings", handler);
     const timer = window.setInterval(handler, 60_000);
     return () => {
       window.clearTimeout(initial);
-      window.removeEventListener(DOCTOR_SITTINGS_CHANGED_EVENT, handler);
+      unsubscribe();
       window.clearInterval(timer);
     };
   }, [load]);

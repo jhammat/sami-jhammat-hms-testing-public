@@ -3,6 +3,8 @@ import { database } from "@wonflow/database";
 
 import { WonFlowApiError } from "@/server/http/route-handler";
 import { assertWithinEffectiveWindow, resolveEffectiveAvailability } from "@/server/scheduling/effective-availability";
+import { hashPassword } from "@/lib/auth/password";
+import { createOneTimeToken } from "@/lib/auth/one-time-token";
 
 /**
  * Unauthenticated intake for a hospital's own public-facing site: a doctor
@@ -97,29 +99,75 @@ export async function getPublicBookingCatalog(tenantSlug: string, date: string, 
   const windows = await resolveEffectiveAvailability({ tenantId: tenant.id, date, rules });
   const ruleById = new Map(rules.map((rule) => [rule.id, rule]));
 
+  const allServices = await database.serviceDefinition.findMany({
+    where: {
+      tenantId: tenant.id,
+      isActive: true,
+      publiclyBookable: true,
+    },
+  });
+  const servicesByDoctorId = new Map<string, typeof allServices>();
+  for (const s of allServices) {
+    if (!s.doctorId) continue;
+    const existing = servicesByDoctorId.get(s.doctorId) ?? [];
+    existing.push(s);
+    servicesByDoctorId.set(s.doctorId, existing);
+  }
+
+  const activeDoctors = await database.doctorProfile.findMany({
+    where: {
+      tenantId: tenant.id,
+      publiclyBookable: true,
+      ...(doctorId ? { id: doctorId } : {}),
+    },
+    include: {
+      staffProfile: { include: { membership: true } },
+    },
+  });
+  const doctorById = new Map(activeDoctors.map((doc) => [doc.id, doc]));
+
+  const branches = await database.branch.findMany({
+    where: { organizationId: organization.id, status: "ACTIVE", archivedAt: null },
+  });
+  const branchById = new Map(branches.map((b) => [b.id, b]));
+
   const slots = windows.flatMap((window) => {
-    const rule = ruleById.get(window.ruleId!);
-    if (!rule) return [];
-    const duration = window.slotMinutes ?? rule.service?.durationMinutes ?? rule.doctor.durationMinutes;
-    const output: Array<{ id: string; ruleId: string; branchId: string; branchName: string; doctorId: string; doctorName: string; serviceId: string; serviceName: string; startsAt: string; endsAt: string }> = [];
-    if (!rule.serviceId || duration < 1) return output;
-    for (let minute = window.startsMinute; minute + duration <= window.endsMinute; minute += duration) {
-      const startsAt = localMinuteToUtc(date, minute, rule.branch.timezone);
-      const endsAt = localMinuteToUtc(date, minute + duration, rule.branch.timezone);
-      if (startsAt <= new Date()) continue;
-      const reserved = appointments.filter((appointment) => appointment.doctorId === rule.doctorId && appointment.startsAt < endsAt && appointment.endsAt > startsAt).length;
-      if (reserved < window.capacity) {
+    const rule = window.ruleId ? ruleById.get(window.ruleId) : undefined;
+    const doctor = doctorById.get(window.doctorId) ?? rule?.doctor;
+    if (!doctor) return [];
+
+    const branch = (rule?.branch ?? branchById.get(window.branchId)) ?? branches[0];
+    if (!branch) return [];
+
+    const services = rule?.service ? [rule.service] : (servicesByDoctorId.get(window.doctorId) ?? []);
+    if (services.length === 0) return [];
+
+    const output: Array<{ id: string; ruleId: string; branchId: string; branchName: string; doctorId: string; doctorName: string; serviceId: string; serviceName: string; consultationModes: ("IN_PERSON" | "ONLINE")[]; requiresPrepayment: boolean; startsAt: string; endsAt: string; available: boolean }> = [];
+
+    for (const service of services) {
+      const duration = service.durationMinutes > 0 ? service.durationMinutes : (window.slotMinutes ?? doctor.durationMinutes ?? 20);
+      if (duration < 1) continue;
+
+      for (let minute = window.startsMinute; minute + duration <= window.endsMinute; minute += duration) {
+        const startsAt = localMinuteToUtc(date, minute, branch.timezone);
+        const endsAt = localMinuteToUtc(date, minute + duration, branch.timezone);
+        if (startsAt <= new Date()) continue;
+        const reserved = appointments.filter((appointment) => appointment.doctorId === window.doctorId && appointment.startsAt < endsAt && appointment.endsAt > startsAt).length;
+
         output.push({
-          id: `${rule.id}:${startsAt.toISOString()}`,
-          ruleId: rule.id,
-          branchId: rule.branchId,
-          branchName: rule.branch.name,
-          doctorId: rule.doctorId,
-          doctorName: rule.doctor.staffProfile.membership.displayName,
-          serviceId: rule.serviceId,
-          serviceName: rule.service!.name,
+          id: `${rule?.id ?? window.doctorId}:${service.id}:${startsAt.toISOString()}`,
+          ruleId: rule?.id ?? window.doctorId,
+          branchId: branch.id,
+          branchName: branch.name,
+          doctorId: window.doctorId,
+          doctorName: doctor.staffProfile.membership.displayName,
+          serviceId: service.id,
+          serviceName: service.name,
+          consultationModes: service.consultationModes,
+          requiresPrepayment: service.requiresPrepayment,
           startsAt: startsAt.toISOString(),
           endsAt: endsAt.toISOString(),
+          available: reserved < window.capacity,
         });
       }
     }
@@ -131,22 +179,58 @@ export async function getPublicBookingCatalog(tenantSlug: string, date: string, 
 
 export interface PublicBookingInput {
   slotId: string;
+  mode?: "IN_PERSON" | "ONLINE";
   givenName: string;
   familyName: string;
   phone: string;
-  email?: string;
+  email: string;
+  password: string;
+  /** YYYY-MM-DD */
+  dateOfBirth: string;
+  sex: string;
+  city: string;
   reason?: string;
   idempotencyKey: string;
 }
 
+function isUniqueConstraintError(caught: unknown): boolean {
+  return typeof caught === "object" && caught !== null && (caught as { code?: string }).code === "P2002";
+}
+
+/**
+ * Registers a real patient portal account and books an appointment in one
+ * submission, from a hospital's own public website. The appointment is
+ * created immediately (holding the slot) but stays PENDING until the
+ * patient verifies their email — see /api/v1/auth/verify-email, which
+ * confirms it. A booking is never silently attached to somebody else's
+ * existing record: a duplicate email is refused outright (an account is a
+ * login credential, not a fuzzy match) rather than merged.
+ */
 export async function submitPublicBooking(tenantSlug: string, input: PublicBookingInput) {
   const { tenant } = await resolveTenantBySlug(tenantSlug);
 
   const givenName = input.givenName.trim();
   const familyName = input.familyName.trim();
   const phone = input.phone.trim();
+  const email = input.email.trim();
+  const normalizedEmail = normalizeOptional(email);
+  const city = input.city.trim();
+  const sex = input.sex.trim();
+
   if (givenName.length < 2 || familyName.length < 2) throw new WonFlowApiError(400, "patient-name-required", "Enter the patient's full name.");
   if (phone.length < 7) throw new WonFlowApiError(400, "patient-phone-required", "Enter a valid mobile number.");
+  if (!normalizedEmail || !normalizedEmail.includes("@")) throw new WonFlowApiError(400, "patient-email-required", "Enter a valid email address — it is used to verify and confirm your booking.");
+  if (!city) throw new WonFlowApiError(400, "patient-city-required", "Enter your city.");
+  if (!sex) throw new WonFlowApiError(400, "patient-sex-required", "Select your sex.");
+  const dateOfBirth = new Date(`${input.dateOfBirth}T00:00:00.000Z`);
+  if (Number.isNaN(dateOfBirth.getTime()) || dateOfBirth > new Date()) throw new WonFlowApiError(400, "invalid-date-of-birth", "Enter a valid date of birth.");
+
+  let passwordHash: string;
+  try {
+    passwordHash = await hashPassword(input.password);
+  } catch (caught) {
+    throw new WonFlowApiError(400, "weak-password", caught instanceof Error ? caught.message : "Choose a stronger password.");
+  }
 
   const separator = input.slotId.indexOf(":");
   if (separator < 1) throw new WonFlowApiError(400, "invalid-booking-slot", "Select a valid appointment time.");
@@ -154,63 +238,101 @@ export async function submitPublicBooking(tenantSlug: string, input: PublicBooki
   const startsAt = new Date(input.slotId.slice(separator + 1));
   if (Number.isNaN(startsAt.getTime()) || startsAt <= new Date()) throw new WonFlowApiError(400, "invalid-booking-slot", "Select a future appointment time.");
 
-  return database.$transaction(async (transaction) => {
-    const existing = await transaction.idempotencyRecord.findUnique({ where: { tenantId_key_operation: { tenantId: tenant.id, key: input.idempotencyKey, operation: "public.appointment.book" } } });
-    if (existing?.responsePayload && typeof existing.responsePayload === "object" && "appointmentId" in existing.responsePayload) {
-      const appointment = await transaction.appointment.findUnique({ where: { id: String(existing.responsePayload.appointmentId) }, include: { patient: true } });
-      if (appointment) return appointment;
-    }
+  if (await database.identity.findUnique({ where: { normalizedEmail } })) {
+    throw new WonFlowApiError(409, "account-already-exists", "An account already exists with this email. Sign in to book instead.");
+  }
 
-    const rule = await transaction.availabilityRule.findFirst({
-      where: { id: ruleId, tenantId: tenant.id, isActive: true, doctor: { publiclyBookable: true }, service: { isActive: true, publiclyBookable: true } },
-      include: { branch: true, service: true },
-    });
-    if (!rule?.serviceId || !rule.service) throw new WonFlowApiError(409, "booking-slot-unavailable", "This appointment option is no longer available.");
-    const endsAt = new Date(startsAt.getTime() + rule.service.durationMinutes * 60_000);
-    const withinWindow = await assertWithinEffectiveWindow(transaction, { tenantId: tenant.id, doctorId: rule.doctorId, branchId: rule.branchId, startsAt, endsAt, timezone: rule.branch.timezone, rosterStartsMinute: rule.startsMinute, rosterEndsMinute: rule.endsMinute });
-    if (!withinWindow.ok) throw new WonFlowApiError(409, "booking-slot-unavailable", withinWindow.reason);
-    const reserved = await transaction.appointment.count({ where: { tenantId: tenant.id, branchId: rule.branchId, doctorId: rule.doctorId, status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_QUEUE", "IN_PROGRESS"] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } });
-    if (reserved >= rule.capacity) throw new WonFlowApiError(409, "booking-slot-taken", "That appointment time was just taken. Choose another time.");
+  let result: { appointment: Awaited<ReturnType<typeof database.appointment.create>>; identityId: string };
+  try {
+    result = await database.$transaction(async (transaction) => {
+      const existing = await transaction.idempotencyRecord.findUnique({ where: { tenantId_key_operation: { tenantId: tenant.id, key: input.idempotencyKey, operation: "public.appointment.book" } } });
+      if (existing?.responsePayload && typeof existing.responsePayload === "object" && "appointmentId" in existing.responsePayload && "identityId" in existing.responsePayload) {
+        const found = await transaction.appointment.findUnique({ where: { id: String(existing.responsePayload.appointmentId) }, include: { patient: true } });
+        if (found) return { appointment: found, identityId: String(existing.responsePayload.identityId) };
+      }
 
-    const patient = await transaction.patient.create({
-      data: {
-        tenantId: tenant.id,
-        patientNumber: patientNumber(),
-        givenName,
-        familyName,
-        phone,
-        normalizedPhone: normalizeOptional(phone),
-        email: input.email?.trim() || null,
-        normalizedEmail: normalizeOptional(input.email),
-        // "online-booking" matches the same referralSource vocabulary reception's
-        // own registration form already uses (see patient-registration-workflow.tsx),
-        // so the doctor sees one consistent set of source labels everywhere,
-        // not a second parallel vocabulary invented for this one channel.
-        consentData: { consentToContact: true, referralSource: "online-booking" },
-      },
-    });
+      const rule = await transaction.availabilityRule.findFirst({
+        where: { id: ruleId, tenantId: tenant.id, isActive: true, doctor: { publiclyBookable: true }, service: { isActive: true, publiclyBookable: true } },
+        include: { branch: true, service: true },
+      });
+      if (!rule?.serviceId || !rule.service) throw new WonFlowApiError(409, "booking-slot-unavailable", "This appointment option is no longer available.");
+      const availableModes = rule.service.consultationModes;
+      const mode = availableModes.length === 1 ? availableModes[0]! : input.mode;
+      if (!mode) throw new WonFlowApiError(400, "consultation-mode-required", "Choose whether this is an in-person or online consultation.");
+      if (!availableModes.includes(mode)) throw new WonFlowApiError(400, "consultation-mode-unavailable", `This service does not offer ${mode === "ONLINE" ? "online" : "in-person"} consultations.`);
+      const endsAt = new Date(startsAt.getTime() + rule.service.durationMinutes * 60_000);
+      const withinWindow = await assertWithinEffectiveWindow(transaction, { tenantId: tenant.id, doctorId: rule.doctorId, branchId: rule.branchId, startsAt, endsAt, timezone: rule.branch.timezone, rosterStartsMinute: rule.startsMinute, rosterEndsMinute: rule.endsMinute });
+      if (!withinWindow.ok) throw new WonFlowApiError(409, "booking-slot-unavailable", withinWindow.reason);
+      const reserved = await transaction.appointment.count({ where: { tenantId: tenant.id, branchId: rule.branchId, doctorId: rule.doctorId, status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_QUEUE", "IN_PROGRESS"] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } });
+      if (reserved >= rule.capacity) throw new WonFlowApiError(409, "booking-slot-taken", "That appointment time was just taken. Choose another time.");
+      const requiresPrepayment = mode === "ONLINE" && rule.service.requiresPrepayment;
 
-    const appointment = await transaction.appointment.create({
-      data: {
-        tenantId: tenant.id,
-        patientId: patient.id,
-        doctorId: rule.doctorId,
-        branchId: rule.branchId,
-        serviceId: rule.serviceId,
-        consultationMode: rule.service.consultationMode,
-        status: "PENDING",
-        source: "public-website",
-        reason: input.reason?.trim() || null,
-        startsAt,
-        endsAt,
-        idempotencyKey: input.idempotencyKey,
-      },
-      include: { patient: true, branch: true, doctor: { include: { staffProfile: { include: { membership: true } } } } },
-    });
+      const identity = await transaction.identity.create({ data: { email, normalizedEmail, passwordHash, status: "ACTIVE" } });
 
-    await transaction.idempotencyRecord.create({ data: { tenantId: tenant.id, key: input.idempotencyKey, operation: "public.appointment.book", responsePayload: { appointmentId: appointment.id }, expiresAt: new Date(Date.now() + 86_400_000) } });
-    await transaction.auditEvent.create({ data: { tenantId: tenant.id, branchId: rule.branchId, requestId: input.idempotencyKey, action: "public.appointment.booked", entityType: "appointment", entityId: appointment.id, severity: "INFORMATION", sourceApplication: "public-booking-page" } });
+      const patient = await transaction.patient.create({
+        data: {
+          tenantId: tenant.id,
+          patientNumber: patientNumber(),
+          givenName,
+          familyName,
+          phone,
+          normalizedPhone: normalizeOptional(phone),
+          email,
+          normalizedEmail,
+          dateOfBirth,
+          sex,
+          address: { city },
+          // "online-booking" matches the same referralSource vocabulary reception's
+          // own registration form already uses (see patient-registration-workflow.tsx),
+          // so the doctor sees one consistent set of source labels everywhere,
+          // not a second parallel vocabulary invented for this one channel.
+          consentData: { consentToContact: true, referralSource: "online-booking" },
+        },
+      });
 
-    return appointment;
-  }, { isolationLevel: "Serializable" });
+      await transaction.patientAccess.create({ data: { patientId: patient.id, identityId: identity.id, isPrimary: true, isActive: true } });
+
+      const appointment = await transaction.appointment.create({
+        data: {
+          tenantId: tenant.id,
+          patientId: patient.id,
+          doctorId: rule.doctorId,
+          branchId: rule.branchId,
+          serviceId: rule.serviceId,
+          consultationMode: mode,
+          paymentStatus: requiresPrepayment ? "AWAITING_PAYMENT" : "NOT_REQUIRED",
+          status: "PENDING",
+          source: "public-website",
+          reason: input.reason?.trim() || null,
+          startsAt,
+          endsAt,
+          idempotencyKey: input.idempotencyKey,
+        },
+        include: { patient: true, branch: true, doctor: { include: { staffProfile: { include: { membership: true } } } } },
+      });
+
+      await transaction.idempotencyRecord.create({ data: { tenantId: tenant.id, key: input.idempotencyKey, operation: "public.appointment.book", responsePayload: { appointmentId: appointment.id, identityId: identity.id }, expiresAt: new Date(Date.now() + 86_400_000) } });
+      await transaction.auditEvent.create({ data: { tenantId: tenant.id, branchId: rule.branchId, requestId: input.idempotencyKey, action: "public.appointment.booked", entityType: "appointment", entityId: appointment.id, severity: "INFORMATION", sourceApplication: "public-booking-page" } });
+
+      return { appointment, identityId: identity.id };
+    }, { isolationLevel: "Serializable" });
+  } catch (caught) {
+    if (isUniqueConstraintError(caught)) throw new WonFlowApiError(409, "account-already-exists", "An account already exists with this email. Sign in to book instead.");
+    throw caught;
+  }
+
+  // Verification happens outside the transaction: the token and outbox event
+  // reference rows that transaction has already committed, and there is
+  // nothing in the booking itself to roll back if this step fails.
+  const token = await createOneTimeToken({ identityId: result.identityId, purpose: "EMAIL_VERIFICATION", lifetimeMinutes: 60 * 24 });
+  await database.outboxEvent.create({
+    data: {
+      type: "auth.email-verification.requested",
+      aggregateType: "identity",
+      aggregateId: result.identityId,
+      payload: { identityId: result.identityId, email, token, appointmentId: result.appointment.id },
+    },
+  });
+
+  return result.appointment;
 }

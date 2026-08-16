@@ -41,7 +41,7 @@ export function useSittingBranch(preferredBranchId?: string) {
   // Prefer the portal's own branch when it maps to a real one.
   const resolvedBranchId = (preferredBranchId && branches.some((branch) => branch.id === preferredBranchId))
     ? preferredBranchId
-    : preferredBranchId ?? defaultBranchId;
+    : defaultBranchId ?? branches[0]?.id;
 
   return { branches, resolvedBranchId };
 }

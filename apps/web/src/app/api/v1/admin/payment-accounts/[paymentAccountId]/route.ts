@@ -1,0 +1,3 @@
+import{NextResponse}from"next/server";import{requireRequestContext}from"@/lib/auth/permission-service";import{safeApiError}from"@/lib/api/route-helpers";import{paymentAccountsService as s}from"@/server/admin/payment-accounts-service";
+export async function PATCH(r:Request,{params}:{params:Promise<{paymentAccountId:string}>}){try{return NextResponse.json({paymentAccount:await s.updatePaymentAccount(await requireRequestContext(),(await params).paymentAccountId,await r.json())})}catch(e){return safeApiError(e)}}
+export async function DELETE(_r:Request,{params}:{params:Promise<{paymentAccountId:string}>}){try{return NextResponse.json(await s.deletePaymentAccount(await requireRequestContext(),(await params).paymentAccountId))}catch(e){return safeApiError(e)}}

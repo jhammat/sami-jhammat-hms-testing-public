@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   FilePenLine,
   ListOrdered,
+  Pause,
   Pill,
   Play,
   Printer,
@@ -20,6 +21,9 @@ import {
   useState,
 } from "react";
 
+import { ActionReadiness } from "@wonflow/ui";
+import type { ActionReadinessBlocker } from "@wonflow/ui";
+
 import type {
   DemoClinicalEncounter,
 } from "@/lib/clinical";
@@ -29,7 +33,12 @@ import {
 import type {
   DemoQueueEntry,
 } from "@/lib/queue";
-import { patchDoctorQueue } from "@/lib/api/doctor-api";
+import {
+  completeDoctorEncounter,
+  createDoctorEncounter,
+  pauseDoctorEncounter,
+  resumeDoctorEncounter,
+} from "@/lib/api/doctor-api";
 import { WonFlowApiError } from "@/lib/api/phase-one-api";
 
 import {
@@ -69,6 +78,56 @@ import type {
   ConsultationRecord,
   ReadyRecord,
 } from "./doctor-consultation-hub-support";
+
+const RESOLVER_LABELS: Record<string, string> = {
+  self: "You",
+  administrator: "An administrator",
+  reception: "Reception",
+  billing: "Billing",
+  doctor: "The doctor",
+};
+
+/** Checks the start-consultation readiness endpoint for one appointment — called per ready-record card so each patient's own blockers (not checked in, payment pending, a different doctor's booking) show individually. */
+function useStartConsultationReadiness(
+  appointmentId: string,
+): { blockers: ActionReadinessBlocker[]; loading: boolean } {
+  const [blockers, setBlockers] = useState<ActionReadinessBlocker[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const load = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(
+          `/api/v1/readiness/start-consultation?appointmentId=${encodeURIComponent(appointmentId)}`,
+          { credentials: "same-origin", signal: controller.signal },
+        );
+        if (!response.ok) return;
+        const body = await response.json() as {
+          blockers: Array<{ code: string; reason: string; resolverRole: string; resolutionHref: string }>;
+        };
+        setBlockers(
+          body.blockers.map((blocker) => ({
+            code: blocker.code,
+            reason: blocker.reason,
+            resolverLabel: RESOLVER_LABELS[blocker.resolverRole] ?? blocker.resolverRole,
+            resolutionHref: blocker.resolutionHref,
+            resolutionLabel: "Fix this",
+          })),
+        );
+      } catch (caught) {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
+    };
+    void load();
+    return () => controller.abort();
+  }, [appointmentId]);
+
+  return { blockers, loading };
+}
 
 export interface DoctorConsultationHubProps {
   initialQueueEntryId?: string;
@@ -419,21 +478,21 @@ export function DoctorConsultationHub({
     hub.reload();
   }
 
+  /**
+   * Creates the clinical encounter via POST /api/v1/doctor/encounters —
+   * validated server-side against the same start-consultation readiness the
+   * ready-record cards check before enabling this button, so a stale client
+   * check never lets a request through the server would refuse anyway.
+   * Navigation only happens once the server has confirmed the encounter
+   * exists; nothing here assumes success ahead of that response.
+   */
   async function startConsultation(
     queueEntry: DemoQueueEntry,
   ): Promise<void> {
     try {
-      const { appointment } = await patchDoctorQueue(queueEntry.appointmentId, "start");
+      const { encounter } = await createDoctorEncounter(queueEntry.appointmentId);
       reload();
-      if (appointment.encounter === null) {
-        setMessage("The consultation started, but its clinical encounter could not be opened.");
-        return;
-      }
-      router.push(
-        `/doctor/encounters/${encodeURIComponent(
-          appointment.encounter.id,
-        )}`,
-      );
+      router.push(`/doctor/encounters/${encodeURIComponent(encounter.id)}`);
     } catch (error) {
       setMessage(
         error instanceof WonFlowApiError
@@ -447,12 +506,8 @@ export function DoctorConsultationHub({
   async function finishConsultation(
     record: ConsultationRecord,
   ): Promise<void> {
-    const appointmentId =
-      record.queueEntry?.appointmentId ??
-      record.encounter.appointmentId;
-
     try {
-      await patchDoctorQueue(appointmentId, "complete");
+      await completeDoctorEncounter(record.encounter.id);
       reload();
       const token = record.queueEntry?.tokenNumber;
       setMessage(
@@ -465,6 +520,41 @@ export function DoctorConsultationHub({
         error instanceof WonFlowApiError
           ? error.message
           : "The consultation could not be completed.",
+      );
+      reload();
+    }
+  }
+
+  /** Pauses without releasing the patient — the queue entry stays in progress, so nobody else can be called into the same room. */
+  async function pauseConsultation(
+    record: ConsultationRecord,
+  ): Promise<void> {
+    try {
+      await pauseDoctorEncounter(record.encounter.id);
+      reload();
+      setMessage("Consultation paused. The patient remains in progress.");
+    } catch (error) {
+      setMessage(
+        error instanceof WonFlowApiError
+          ? error.message
+          : "The consultation could not be paused.",
+      );
+      reload();
+    }
+  }
+
+  async function resumeConsultation(
+    record: ConsultationRecord,
+  ): Promise<void> {
+    try {
+      await resumeDoctorEncounter(record.encounter.id);
+      reload();
+      setMessage("Consultation resumed.");
+    } catch (error) {
+      setMessage(
+        error instanceof WonFlowApiError
+          ? error.message
+          : "The consultation could not be resumed.",
       );
       reload();
     }
@@ -704,6 +794,12 @@ export function DoctorConsultationHub({
                           ?.tokenNumber ??
                           "Token unavailable"}
                       </StatusPill>
+                      {activeRecord.encounter
+                        .status === "paused" ? (
+                        <StatusPill className="bg-amber-50 text-amber-700 ring-amber-200">
+                          Paused — patient still in progress
+                        </StatusPill>
+                      ) : null}
                       <StatusPill className="bg-violet-50 text-violet-700 ring-violet-200">
                         {activeRecord
                           .documentation?.status ===
@@ -823,6 +919,33 @@ export function DoctorConsultationHub({
                     activeRecord.patient
                   }
                 />
+                {activeRecord.encounter.status === "paused" ? (
+                  <button
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-violet-200 bg-violet-50 px-3 text-[10px] font-black text-violet-700 transition hover:bg-violet-100"
+                    onClick={() => {
+                      resumeConsultation(
+                        activeRecord,
+                      );
+                    }}
+                    type="button"
+                  >
+                    <Play size={13} />
+                    Resume
+                  </button>
+                ) : (
+                  <button
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 text-[10px] font-black text-amber-700 transition hover:bg-amber-100"
+                    onClick={() => {
+                      pauseConsultation(
+                        activeRecord,
+                      );
+                    }}
+                    type="button"
+                  >
+                    <Pause size={13} />
+                    Pause
+                  </button>
+                )}
                 <button
                   className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-[10px] font-black text-emerald-700 transition hover:bg-emerald-100"
                   onClick={() => {
@@ -860,119 +983,22 @@ export function DoctorConsultationHub({
             />
           ) : (
             <div className="space-y-2">
-              {readyRecords.map((record) => {
-                const highlighted =
-                  record.queueEntry.id ===
-                  initialQueueEntryId;
-                const startDisabled =
-                  !sittingAvailable ||
-                  hasServingConflict;
-                return (
-                  <article
-                    className={[
-                      "rounded-xl border bg-white p-3",
-                      highlighted
-                        ? "border-indigo-400 ring-2 ring-indigo-100"
-                        : record.queueEntry
-                              .priority ===
-                            "routine"
-                          ? "border-amber-200"
-                          : "border-rose-200",
-                    ].join(" ")}
-                    key={record.queueEntry.id}
-                  >
-                    <div className="flex items-start gap-2.5">
-                      <div className="flex h-9 min-w-12 shrink-0 items-center justify-center rounded-xl bg-slate-950 px-2 text-[10px] font-black text-white">
-                        {
-                          record.queueEntry
-                            .tokenNumber
-                        }
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-start justify-between gap-1.5">
-                          <div className="min-w-0">
-                            <h3 className="truncate text-xs font-black text-slate-950">
-                              {
-                                record.patient
-                                  .displayName
-                              }
-                            </h3>
-                            <p className="mt-0.5 text-[10px] font-bold text-indigo-600">
-                              {
-                                record.patient
-                                  .mrNumber
-                              }
-                            </p>
-                          </div>
-                          <StatusPill
-                            className={priorityClassName(
-                              record.queueEntry
-                                .priority,
-                            )}
-                          >
-                            {humanize(
-                              record.queueEntry
-                                .priority,
-                            )}
-                          </StatusPill>
-                        </div>
-                        <p className="mt-1.5 line-clamp-2 text-[10px] font-medium leading-4 text-slate-600">
-                          {getReason(
-                            undefined,
-                            record.queueEntry,
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px] sm:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
-                      <span className="rounded-lg bg-slate-50 px-2 py-1.5 font-bold text-slate-600">
-                        Wait: {formatWait(
-                          record.queueEntry,
-                        )}
-                      </span>
-                      <span className="rounded-lg bg-slate-50 px-2 py-1.5 font-bold text-slate-600">
-                        {record.queueEntry
-                          .roomLabel ??
-                          portal.sitting
-                            ?.roomLabel ??
-                          "Room not assigned"}
-                      </span>
-                      <span className="rounded-lg bg-amber-50 px-2 py-1.5 font-bold text-amber-700">
-                        Called {formatTime(
-                          record.queueEntry
-                            .calledAt,
-                        )}
-                      </span>
-                    </div>
-                    <div className="mt-2.5 flex flex-wrap gap-2">
-                      <button
-                        className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-[10px] font-black text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300"
-                        disabled={startDisabled}
-                        onClick={() => {
-                          startConsultation(
-                            record.queueEntry,
-                          );
-                        }}
-                        title={
-                          !sittingAvailable
-                            ? "An available sitting is required."
-                            : hasServingConflict
-                              ? "Finish or restore the serving consultation first."
-                              : undefined
-                        }
-                        type="button"
-                      >
-                        <Play size={12} />
-                        Start Consultation
-                      </button>
-                      <PatientLink
-                        label="Open Patient"
-                        patient={record.patient}
-                      />
-                    </div>
-                  </article>
-                );
-              })}
+              {readyRecords.map((record) => (
+                <ReadyRecordCard
+                  hasServingConflict={hasServingConflict}
+                  highlighted={
+                    record.queueEntry.id ===
+                    initialQueueEntryId
+                  }
+                  key={record.queueEntry.id}
+                  onStart={startConsultation}
+                  record={record}
+                  sittingAvailable={sittingAvailable}
+                  sittingRoomLabel={
+                    portal.sitting?.roomLabel
+                  }
+                />
+              ))}
             </div>
           )}
         </SectionShell>
@@ -1209,5 +1235,107 @@ export function DoctorConsultationHub({
         Prescription printing is offered only for finalized documentation containing stored medicine items.
       </div>
     </div>
+  );
+}
+
+interface ReadyRecordCardProps {
+  record: ReadyRecord;
+  highlighted: boolean;
+  sittingAvailable: boolean;
+  hasServingConflict: boolean;
+  sittingRoomLabel?: string;
+  onStart: (queueEntry: DemoQueueEntry) => void;
+}
+
+/**
+ * One "ready to start" patient card. Its own component (not inlined in the
+ * list map) because it needs to call the start-consultation readiness hook
+ * per appointment — every patient can be blocked for a different reason
+ * (not checked in, prepayment pending, booked with someone else), so each
+ * card fetches and shows its own blockers rather than one shared check.
+ */
+function ReadyRecordCard({
+  record,
+  highlighted,
+  sittingAvailable,
+  hasServingConflict,
+  sittingRoomLabel,
+  onStart,
+}: ReadyRecordCardProps) {
+  const { blockers, loading } = useStartConsultationReadiness(record.queueEntry.appointmentId);
+
+  const localBlockReason = !sittingAvailable
+    ? "An available sitting is required."
+    : hasServingConflict
+      ? "Finish or restore the serving consultation first."
+      : undefined;
+  const startDisabled = !sittingAvailable || hasServingConflict || loading || blockers.length > 0;
+
+  return (
+    <article
+      className={[
+        "rounded-xl border bg-white p-3",
+        highlighted
+          ? "border-indigo-400 ring-2 ring-indigo-100"
+          : record.queueEntry.priority === "routine"
+            ? "border-amber-200"
+            : "border-rose-200",
+      ].join(" ")}
+    >
+      <div className="flex items-start gap-2.5">
+        <div className="flex h-9 min-w-12 shrink-0 items-center justify-center rounded-xl bg-slate-950 px-2 text-[10px] font-black text-white">
+          {record.queueEntry.tokenNumber}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-start justify-between gap-1.5">
+            <div className="min-w-0">
+              <h3 className="truncate text-xs font-black text-slate-950">
+                {record.patient.displayName}
+              </h3>
+              <p className="mt-0.5 text-[10px] font-bold text-indigo-600">
+                {record.patient.mrNumber}
+              </p>
+            </div>
+            <StatusPill className={priorityClassName(record.queueEntry.priority)}>
+              {humanize(record.queueEntry.priority)}
+            </StatusPill>
+          </div>
+          <p className="mt-1.5 line-clamp-2 text-[10px] font-medium leading-4 text-slate-600">
+            {getReason(undefined, record.queueEntry)}
+          </p>
+        </div>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-1.5 text-[10px] sm:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
+        <span className="rounded-lg bg-slate-50 px-2 py-1.5 font-bold text-slate-600">
+          Wait: {formatWait(record.queueEntry)}
+        </span>
+        <span className="rounded-lg bg-slate-50 px-2 py-1.5 font-bold text-slate-600">
+          {record.queueEntry.roomLabel ?? sittingRoomLabel ?? "Room not assigned"}
+        </span>
+        <span className="rounded-lg bg-amber-50 px-2 py-1.5 font-bold text-amber-700">
+          Called {formatTime(record.queueEntry.calledAt)}
+        </span>
+      </div>
+
+      {blockers.length > 0 ? (
+        <ActionReadiness blockers={blockers} className="mt-2" />
+      ) : null}
+
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        <button
+          className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-[10px] font-black text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          disabled={startDisabled}
+          onClick={() => {
+            onStart(record.queueEntry);
+          }}
+          title={localBlockReason}
+          type="button"
+        >
+          <Play size={12} />
+          Start Consultation
+        </button>
+        <PatientLink label="Open Patient" patient={record.patient} />
+      </div>
+    </article>
   );
 }

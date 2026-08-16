@@ -14,8 +14,19 @@ import { createInitialPatientRegistrationDraft } from "./registration";
 import type { DemoPatientRegistrationResult } from "./registration";
 
 const readText = (source: unknown, key: string): string => {
-  if (typeof source !== "object" || source === null) return "";
-  const value = (source as Record<string, unknown>)[key];
+  if (!source) return "";
+  let obj: Record<string, unknown> | null = null;
+  if (typeof source === "string") {
+    try {
+      obj = JSON.parse(source) as Record<string, unknown>;
+    } catch {
+      return source.trim();
+    }
+  } else if (typeof source === "object") {
+    obj = source as Record<string, unknown>;
+  }
+  if (!obj || typeof obj !== "object") return "";
+  const value = obj[key];
   return typeof value === "string" ? value : "";
 };
 
@@ -61,7 +72,7 @@ export function toDirectoryEntry(patient: PatientRecord): DemoPatientRegistratio
       ...draft,
       givenName: patient.givenName,
       middleName: patient.middleName ?? "",
-      fatherName: readText(patient.guardianData, "fatherName"),
+      fatherName: readText(patient.guardianData, "fatherName") || readText(patient.guardianData, "name") || readText(patient.guardianData, "guardianName") || "",
       gender: toGender(patient.sex),
       dateOfBirth: patient.dateOfBirth ? patient.dateOfBirth.slice(0, 10) : "",
       mobileNumber: patient.phone ?? "",

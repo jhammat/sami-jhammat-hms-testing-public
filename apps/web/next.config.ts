@@ -12,8 +12,6 @@ const appDirectory = path.dirname(fileURLToPath(import.meta.url));
  */
 const workspaceRoot = path.resolve(appDirectory, "../..");
 
-const isProduction = process.env.NODE_ENV === "production";
-
 /**
  * Content Security Policy.
  *
@@ -25,16 +23,15 @@ const isProduction = process.env.NODE_ENV === "production";
  */
 const contentSecurityPolicy = [
   "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"}`,
+  "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self' data:",
-  `connect-src 'self'${isProduction ? "" : " ws: wss:"}`,
+  "connect-src 'self' ws: wss: *",
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",
   "frame-ancestors 'none'",
-  ...(isProduction ? ["upgrade-insecure-requests"] : []),
 ].join("; ");
 
 const securityHeaders = [
@@ -49,9 +46,6 @@ const securityHeaders = [
    */
   { key: "Permissions-Policy", value: "camera=(self), microphone=(self), geolocation=(), payment=()" },
   { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
-  ...(isProduction
-    ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }]
-    : []),
 ];
 
 /**
@@ -72,15 +66,24 @@ const publicBookingHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=()" },
-  ...(isProduction
-    ? [{ key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" }]
-    : []),
 ];
 
 const nextConfig: NextConfig = {
   output: "standalone",
   outputFileTracingRoot: workspaceRoot,
   poweredByHeader: false,
+  allowedDevOrigins: [
+    "http://192.168.100.10:3000",
+    "192.168.100.10:3000",
+    "192.168.100.10",
+    "192.168.10.12",
+    "http://192.168.*",
+    "192.168.*",
+    "*.loca.lt",
+    "localhost",
+    "127.0.0.1",
+    "[::1]",
+  ],
   async headers() {
     return [
       { source: "/((?!book/|api/v1/public-registration/).*)", headers: securityHeaders },
@@ -97,13 +100,6 @@ const nextConfig: NextConfig = {
       },
     ];
   },
-  /**
-   * Loopback hosts used for local development and the Playwright suite. Without
-   * these, Next.js blocks `/_next/*` development resources as cross-origin when
-   * the browser reaches the server on a different loopback name than the one it
-   * was started with, which leaves the client unable to hydrate.
-   */
-  allowedDevOrigins: ["127.0.0.1", "localhost", "[::1]", "192.168.10.12"],
   turbopack: {
     root: workspaceRoot,
   },

@@ -1,0 +1,3 @@
+import{NextResponse}from"next/server";import{requireRequestContext}from"@/lib/auth/permission-service";import{safeApiError}from"@/lib/api/route-helpers";import{paymentAccountsService as s}from"@/server/admin/payment-accounts-service";
+export async function GET(){try{return NextResponse.json({paymentAccounts:await s.listPaymentAccounts(await requireRequestContext())})}catch(e){return safeApiError(e)}}
+export async function POST(r:Request){try{return NextResponse.json({paymentAccount:await s.createPaymentAccount(await requireRequestContext(),await r.json())},{status:201})}catch(e){return safeApiError(e)}}

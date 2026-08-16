@@ -16,6 +16,7 @@ import type { UseApiMutationResult } from "./use-api-mutation";
 export type EncounterStatus =
   | "PLANNED"
   | "IN_PROGRESS"
+  | "PAUSED"
   | "COMPLETED"
   | "CANCELLED"
   | "ENTERED_IN_ERROR";

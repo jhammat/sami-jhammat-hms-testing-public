@@ -586,13 +586,14 @@ function DoctorPortalShellContent({
   const sitting =
     rawSittings.find(
       (item) =>
-        item.practitionerId ===
-          doctorId &&
-        matchesLegacyBranch(
-          item.branchId,
-        ) &&
-        item.businessDate ===
-          businessDate,
+        item.practitionerId === doctorId &&
+        matchesLegacyBranch(item.branchId) &&
+        item.businessDate.slice(0, 10) === businessDate.slice(0, 10),
+    ) ??
+    rawSittings.find(
+      (item) =>
+        item.practitionerId === doctorId &&
+        item.businessDate.slice(0, 10) === businessDate.slice(0, 10),
     );
 
   const queueEntries =

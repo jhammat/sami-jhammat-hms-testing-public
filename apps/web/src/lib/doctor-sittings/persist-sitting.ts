@@ -1,12 +1,24 @@
+import { mutate } from "@/lib/api/mutate";
+import type { MutationResult } from "@/lib/api/mutate";
+
 import type { DemoDoctorSittingStatus } from "./sittings";
 
 /**
- * Bridges the doctor portal's sitting controls to the tenant database.
+ * Writes the doctor's sitting to the real `DoctorSitting` table. Reception
+ * and the patient portal resolve bookable slots from that table, not from
+ * anything in this browser — so this is the only path that makes a sitting
+ * visible to anyone else.
  *
- * The portal's local records drive the demo queue, but reception and the
- * patient portal resolve bookable slots from `DoctorSitting` rows on the
- * server. Without this write-through, a doctor's actual hours never leave
- * their browser and every other user still sees the hospital roster.
+ * There used to be a `serverIdByLocalId` module-level Map here, mapping a
+ * locally-generated id to the server's real id so a later status change
+ * could find the right row. It was deleted: the server's own sitting
+ * record — fetched into `DoctorWorkflowModel.sitting` — already carries the
+ * real database id (`toDemoDoctorSitting` in doctor-api.ts maps `id:
+ * sitting.id` straight from the row), so there was never a reason to track
+ * a second, browser-only id. That Map going empty on every page refresh is
+ * exactly why Take Break and End Sitting stopped working after a reload:
+ * the real id was sitting right there in server-fetched state the whole
+ * time.
  */
 const STATUS_MAP: Record<DemoDoctorSittingStatus, "PLANNED" | "AVAILABLE" | "ON_BREAK" | "FINISHED"> = {
   "not-started": "PLANNED",
@@ -20,23 +32,23 @@ function timeToMinute(value: string): number {
   return Number(hours) * 60 + Number(minutes);
 }
 
-/** Server id for a persisted sitting, keyed by the local record's id. */
-const serverIdByLocalId = new Map<string, string>();
-
-export function rememberServerSittingId(localId: string, serverId: string): void {
-  serverIdByLocalId.set(localId, serverId);
+/** The real, full DoctorSitting row — the server returns this from both endpoints below, so a caller never has to guess a field it didn't receive. */
+export interface PersistedSitting {
+  id: string;
+  doctorId: string;
+  branchId: string;
+  businessDate: string;
+  startsMinute: number;
+  endsMinute: number;
+  averageConsultationMinutes: number;
+  roomLabel: string | null;
+  status: "PLANNED" | "AVAILABLE" | "ON_BREAK" | "FINISHED";
+  actualStartedAt: string | null;
+  actualEndedAt: string | null;
 }
 
-export function getServerSittingId(localId: string): string | undefined {
-  return serverIdByLocalId.get(localId);
-}
-
-/**
- * Writes the sitting to the database. Resolves to an error string when the
- * write fails so the caller can surface it; never throws.
- */
+/** Creates or updates today's sitting. Resolves only once the server has confirmed the write. */
 export async function persistDoctorSitting(input: {
-  localId: string;
   branchId: string;
   businessDate: string;
   sittingStartTime: string;
@@ -44,55 +56,30 @@ export async function persistDoctorSitting(input: {
   averageConsultationMinutes: number;
   roomLabel: string;
   status: DemoDoctorSittingStatus;
-}): Promise<string | undefined> {
-  try {
-    const response = await fetch("/api/v1/doctor/sittings", {
-      method: "PUT",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        branchId: input.branchId,
-        businessDate: input.businessDate,
-        startsMinute: timeToMinute(input.sittingStartTime),
-        endsMinute: timeToMinute(input.sittingEndTime),
-        averageConsultationMinutes: input.averageConsultationMinutes,
-        roomLabel: input.roomLabel,
-        status: STATUS_MAP[input.status],
-      }),
-    });
-    const body = await response.json().catch(() => ({})) as { error?: string; sitting?: { id: string } };
-    if (!response.ok) {
-      return body.error ?? "Your sitting was saved locally but could not be published to reception.";
-    }
-    if (body.sitting?.id) rememberServerSittingId(input.localId, body.sitting.id);
-    return undefined;
-  } catch {
-    return "Your sitting was saved locally but could not be published to reception.";
-  }
+}): Promise<MutationResult<{ sitting: PersistedSitting }>> {
+  return mutate<{ sitting: PersistedSitting }>("/api/v1/doctor/sittings", {
+    method: "PUT",
+    body: {
+      branchId: input.branchId,
+      businessDate: input.businessDate,
+      startsMinute: timeToMinute(input.sittingStartTime),
+      endsMinute: timeToMinute(input.sittingEndTime),
+      averageConsultationMinutes: input.averageConsultationMinutes,
+      roomLabel: input.roomLabel,
+      status: STATUS_MAP[input.status],
+    },
+    invalidates: ["doctor-sittings"],
+  });
 }
 
-/** Publishes a status change (arrived, on break, finished) to the database. */
+/** Publishes a status change (arrived, on break, finished) for an already-persisted sitting. `sittingId` must be the real server id. */
 export async function persistDoctorSittingStatus(
-  localId: string,
+  sittingId: string,
   status: DemoDoctorSittingStatus,
-): Promise<string | undefined> {
-  const serverId = serverIdByLocalId.get(localId);
-  if (serverId === undefined) {
-    return "This sitting is not published to reception yet. Save it again to publish.";
-  }
-  try {
-    const response = await fetch(`/api/v1/doctor/sittings/${encodeURIComponent(serverId)}/status`, {
-      method: "POST",
-      credentials: "same-origin",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status: STATUS_MAP[status] }),
-    });
-    if (!response.ok) {
-      const body = await response.json().catch(() => ({})) as { error?: string };
-      return body.error ?? "The status changed locally but could not be published to reception.";
-    }
-    return undefined;
-  } catch {
-    return "The status changed locally but could not be published to reception.";
-  }
+): Promise<MutationResult<{ sitting: PersistedSitting }>> {
+  return mutate<{ sitting: PersistedSitting }>(`/api/v1/doctor/sittings/${encodeURIComponent(sittingId)}/status`, {
+    method: "POST",
+    body: { status: STATUS_MAP[status] },
+    invalidates: ["doctor-sittings"],
+  });
 }

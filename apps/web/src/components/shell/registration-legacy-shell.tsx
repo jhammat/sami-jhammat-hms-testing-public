@@ -29,6 +29,7 @@ import {
   FlaskConical,
   HeartPulse,
   History,
+  Landmark,
   LayoutDashboard,
   ListOrdered,
   LogOut,
@@ -863,6 +864,13 @@ const adminNavigationGroups:
           activePrefixes: [
             "/admin/catalogue",
           ],
+        },
+        {
+          label: "Payment Accounts",
+          href: "/admin/payment-accounts",
+          icon: Landmark,
+          description:
+            "Bank, JazzCash and Easypaisa accounts patients pay online consultations to",
         },
         {
           label: "Policies & Content",

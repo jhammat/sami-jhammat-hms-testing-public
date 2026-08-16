@@ -61,7 +61,7 @@ interface ServiceOverview {
     currencyCode: string;
     publiclyBookable: boolean;
     billingOwner: BillingOwner;
-    consultationMode: "IN_PERSON" | "ONLINE";
+    consultationModes: ("IN_PERSON" | "ONLINE")[];
     branch: { id: string; name: string } | null;
     handlerWorkspace: WorkspaceCode | null;
     handlerMembership: { id: string; displayName: string; primaryWorkspace: WorkspaceCode | null } | null;
@@ -86,6 +86,21 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 function ErrorMessage({ message }: { message: string }) {
   return message ? <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700" role="alert">{message}</p> : null;
+}
+
+/** A service may be offered in person, online, or both — never neither, so the caller keeps the last checked box on if it would otherwise leave the set empty. */
+function ConsultationModeCheckboxes({ value, onChange }: { value: ("IN_PERSON" | "ONLINE")[]; onChange(next: ("IN_PERSON" | "ONLINE")[]): void }) {
+  function toggle(mode: "IN_PERSON" | "ONLINE") {
+    const isOn = value.includes(mode);
+    if (isOn && value.length === 1) return;
+    onChange(isOn ? value.filter((entry) => entry !== mode) : [...value, mode]);
+  }
+  return (
+    <div className="flex flex-wrap gap-3">
+      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700"><input checked={value.includes("IN_PERSON")} onChange={() => toggle("IN_PERSON")} type="checkbox" />In person</label>
+      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700"><input checked={value.includes("ONLINE")} onChange={() => toggle("ONLINE")} type="checkbox" />Online video consultation</label>
+    </div>
+  );
 }
 
 function AuthoritySelector({ authority, onSaved }: { authority: FeeAuthority; onSaved(): void }) {
@@ -139,7 +154,7 @@ function ServiceCard({ authority, onSaved, service }: { authority: FeeAuthority;
   const [price, setPrice] = useState(service.priceMinorUnits === null ? "" : String(service.priceMinorUnits / 100));
   const [duration, setDuration] = useState(String(service.durationMinutes));
   const [publiclyBookable, setPubliclyBookable] = useState(service.publiclyBookable);
-  const [consultationMode, setConsultationMode] = useState(service.consultationMode);
+  const [consultationModes, setConsultationModes] = useState(service.consultationModes);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
@@ -155,7 +170,7 @@ function ServiceCard({ authority, onSaved, service }: { authority: FeeAuthority;
           durationMinutes: Number(duration),
           priceMinorUnits: hospitalMaySetPrice ? (price === "" ? null : Math.round(Number(price) * 100)) : undefined,
           publiclyBookable,
-          consultationMode,
+          consultationModes,
         }),
       });
       setEditing(false);
@@ -200,7 +215,7 @@ function ServiceCard({ authority, onSaved, service }: { authority: FeeAuthority;
             {hospitalMaySetPrice ? <Field label={`Price (${service.currencyCode})`}><input className={fieldClass} min="0" step="0.01" type="number" value={price} onChange={(event) => setPrice(event.target.value)} /></Field> : <p className="self-end rounded-xl bg-amber-50 px-3 py-2 text-[10px] font-bold leading-4 text-amber-800">The assigned doctor controls this fee.</p>}
             <Field label="Minutes"><input className={fieldClass} min="5" required type="number" value={duration} onChange={(event) => setDuration(event.target.value)} /></Field>
           </div>
-          {service.category === "CONSULTATION" ? <Field label="Consultation delivery"><select className={fieldClass} value={consultationMode} onChange={(event) => setConsultationMode(event.target.value as "IN_PERSON" | "ONLINE")}><option value="IN_PERSON">In person</option><option value="ONLINE">Online video consultation</option></select></Field> : null}
+          {service.category === "CONSULTATION" ? <Field label="Consultation delivery"><ConsultationModeCheckboxes onChange={setConsultationModes} value={consultationModes} /></Field> : null}
           <label className="flex items-center gap-2 text-xs font-semibold text-slate-700"><input checked={publiclyBookable} onChange={(event) => setPubliclyBookable(event.target.checked)} type="checkbox" />Available for booking</label>
           <ErrorMessage message={error} />
           <div className="flex gap-2"><button className={buttonClass} disabled={saving || duration === ""} onClick={save} type="button"><Save aria-hidden="true" size={16} />{saving ? "Saving" : "Save service"}</button><button className="min-h-11 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700" disabled={saving} onClick={() => setEditing(false)} type="button">Cancel</button></div>
@@ -216,7 +231,7 @@ function ServiceCard({ authority, onSaved, service }: { authority: FeeAuthority;
 }
 
 function ServiceCatalogue({ overview, onCreated }: { overview: ServiceOverview; onCreated(): void }) {
-  const [form, setForm] = useState({ codeMode: "AUTOMATIC" as "AUTOMATIC" | "CUSTOM", code: "", name: "", category: "CONSULTATION", handler: "", doctorId: "", branchId: "", duration: "15", price: "", publiclyBookable: false, billingOwner: "HOSPITAL" as BillingOwner, consultationMode: "IN_PERSON" as "IN_PERSON" | "ONLINE" });
+  const [form, setForm] = useState({ codeMode: "AUTOMATIC" as "AUTOMATIC" | "CUSTOM", code: "", name: "", category: "CONSULTATION", handler: "", doctorId: "", branchId: "", duration: "15", price: "", publiclyBookable: false, billingOwner: "HOSPITAL" as BillingOwner, consultationModes: ["IN_PERSON"] as ("IN_PERSON" | "ONLINE")[] });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const servicePages = useWonFlowPagination(overview.services, 8);
@@ -255,11 +270,11 @@ function ServiceCatalogue({ overview, onCreated }: { overview: ServiceOverview; 
           priceMinorUnits: selectedBillingOwner === "DOCTOR" || form.price === "" ? undefined : Math.round(Number(form.price) * 100),
           publiclyBookable: form.publiclyBookable,
           billingOwner: selectedBillingOwner,
-          consultationMode: form.consultationMode,
+          consultationModes: form.consultationModes,
           currencyCode: "PKR",
         }),
       });
-      setForm({ codeMode: form.codeMode, code: "", name: "", category: isDoctorManaged ? "LABORATORY" : "CONSULTATION", handler: "", doctorId: "", branchId: "", duration: "15", price: "", publiclyBookable: false, billingOwner: "HOSPITAL", consultationMode: "IN_PERSON" });
+      setForm({ codeMode: form.codeMode, code: "", name: "", category: isDoctorManaged ? "LABORATORY" : "CONSULTATION", handler: "", doctorId: "", branchId: "", duration: "15", price: "", publiclyBookable: false, billingOwner: "HOSPITAL", consultationModes: ["IN_PERSON"] });
       onCreated();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The service could not be created.");
@@ -320,7 +335,7 @@ function ServiceCatalogue({ overview, onCreated }: { overview: ServiceOverview; 
               ) : null}
             </select>
           </div>
-          {!isDoctorManaged && form.doctorId ? <Field label="Consultation delivery"><select className={fieldClass} value={form.consultationMode} onChange={(event) => setForm({ ...form, consultationMode: event.target.value as "IN_PERSON" | "ONLINE" })}><option value="IN_PERSON">In person</option><option value="ONLINE">Online video consultation</option></select></Field> : null}
+          {!isDoctorManaged && form.doctorId ? <Field label="Consultation delivery"><ConsultationModeCheckboxes onChange={(modes) => setForm({ ...form, consultationModes: modes })} value={form.consultationModes} /></Field> : null}
           <Field label="Branch"><select className={fieldClass} value={form.branchId} onChange={(event) => setForm({ ...form, branchId: event.target.value })}><option value="">All branches</option>{overview.configuration.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></Field>
           <div className="grid grid-cols-2 gap-3"><Field label="Minutes"><input className={fieldClass} min="5" required type="number" value={form.duration} onChange={(event) => setForm({ ...form, duration: event.target.value })} /></Field>{selectedBillingOwner === "DOCTOR" ? null : <Field label="Price (PKR)"><input className={fieldClass} min="0" placeholder="0" required step="0.01" type="number" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} /></Field>}</div>
           <div className="space-y-1.5">

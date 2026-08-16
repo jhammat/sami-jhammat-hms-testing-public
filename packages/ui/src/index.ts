@@ -18,5 +18,7 @@ export { IconButton, Textarea, Select, Combobox, Checkbox, Radio, Switch, DatePi
 export { StatusDot, Alert, Toast, Spinner, ProgressBar, ErrorState, NotAuthorized, NotConfigured } from "./components/feedback";
 export { DataLoading, DataEmpty, DataError, SaveIndicator } from "./components/data-states";
 export type { DataLoadingShape, DataEmptyAction, SaveState } from "./components/data-states";
+export { ActionReadiness, ActionResult, StatusBadge, PrerequisiteCard } from "./components/action-status";
+export type { ActionReadinessBlocker, ActionResultState, StatusBadgeTone } from "./components/action-status";
 export { Modal, Drawer, Popover, Tooltip, ConfirmDialog } from "./components/overlay";
 export { Tabs, Breadcrumb, SidebarNav, CommandPalette } from "./components/navigation";

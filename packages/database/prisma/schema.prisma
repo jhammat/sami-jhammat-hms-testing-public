@@ -39,6 +39,12 @@ enum ServiceBillingOwner {
   DOCTOR
 }
 
+enum AppointmentPaymentStatus {
+  NOT_REQUIRED
+  AWAITING_PAYMENT
+  PAYMENT_CONFIRMED
+}
+
 enum BranchStatus {
   ACTIVE
   INACTIVE
@@ -149,6 +155,7 @@ enum VideoCallStatus {
 enum EncounterStatus {
   PLANNED
   IN_PROGRESS
+  PAUSED
   COMPLETED
   CANCELLED
   ENTERED_IN_ERROR
@@ -448,6 +455,7 @@ model Tenant {
   purchaseReceipts       PurchaseReceipt[]
   pharmacyReturns        PharmacyReturn[]
   serviceFeeHistory      ServiceFeeHistory[]
+  paymentAccounts        PaymentAccount[]
   onboardingState        TenantOnboardingState?
 
   @@index([status])
@@ -997,6 +1005,33 @@ model PolicyDocumentVersion {
   @@index([tenantId, policyId])
 }
 
+enum PaymentAccountMethod {
+  BANK_TRANSFER
+  JAZZCASH
+  EASYPAISA
+}
+
+/// Where a patient sends money for an online consultation that requires
+/// prepayment. Tenant data, configured by the hospital's own admin — never
+/// hardcoded, since bank details differ per hospital and change over time.
+model PaymentAccount {
+  id            String               @id @default(uuid()) @db.Uuid
+  tenantId      String               @db.Uuid
+  method        PaymentAccountMethod @default(BANK_TRANSFER)
+  bankName      String?              @db.VarChar(200)
+  accountTitle  String               @db.VarChar(200)
+  accountNumber String               @db.VarChar(100)
+  iban          String?              @db.VarChar(50)
+  isEnabled     Boolean              @default(true)
+  displayOrder  Int                  @default(0)
+  createdAt     DateTime             @default(now()) @db.Timestamptz(6)
+  updatedAt     DateTime             @updatedAt @db.Timestamptz(6)
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, isEnabled, displayOrder])
+}
+
 model ServiceDefinition {
   id                  String              @id @default(uuid()) @db.Uuid
   tenantId            String              @db.Uuid
@@ -1014,9 +1049,18 @@ model ServiceDefinition {
   priceMinorUnits     Int?
   currencyCode        String              @default("PKR") @db.Char(3)
   publiclyBookable    Boolean             @default(false)
-  consultationMode    ConsultationMode    @default(IN_PERSON)
+  /// Every mode this service can be booked under at this location. A
+  /// service offering both in-person and video visits carries both values;
+  /// booking then asks the patient which one, rather than the service
+  /// dictating a single fixed mode. Never empty — see the CHECK constraint
+  /// added by the migration that introduced this field.
+  consultationModes   ConsultationMode[]  @default([IN_PERSON])
   /// Who may set this service price. DOCTOR is only valid on a doctor-linked service.
   billingOwner        ServiceBillingOwner @default(HOSPITAL)
+  /// When true, an appointment against this service is created with
+  /// paymentStatus AWAITING_PAYMENT and start-consultation readiness blocks
+  /// until it is confirmed.
+  requiresPrepayment  Boolean             @default(false)
   isActive            Boolean             @default(true)
   createdAt           DateTime            @default(now()) @db.Timestamptz(6)
   updatedAt           DateTime            @updatedAt @db.Timestamptz(6)
@@ -1135,6 +1179,8 @@ model Appointment {
   cancellationReason String?           @db.VarChar(1000)
   cancelledAt        DateTime?         @db.Timestamptz(6)
   idempotencyKey     String?           @db.VarChar(160)
+  paymentStatus      AppointmentPaymentStatus @default(NOT_REQUIRED)
+  paymentProofDocumentId String?       @db.Uuid
   version            Int               @default(1)
   createdAt          DateTime          @default(now()) @db.Timestamptz(6)
   updatedAt          DateTime          @updatedAt @db.Timestamptz(6)
@@ -1144,10 +1190,17 @@ model Appointment {
   doctor           DoctorProfile?     @relation(fields: [doctorId], references: [id], onDelete: SetNull)
   branch           Branch             @relation(fields: [branchId], references: [id], onDelete: Restrict)
   service          ServiceDefinition? @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+  paymentProofDocument DocumentRecord? @relation(fields: [paymentProofDocumentId], references: [id], onDelete: SetNull)
   encounter        Encounter?
   queueEntry       QueueEntry?
   videoCallSession VideoCallSession?
 
+  // A partial unique index — "Appointment_doctor_branch_start_active_key" on
+  // (doctorId, branchId, startsAt) WHERE status is one of the active
+  // statuses — is enforced by migration 20260816110542 directly in SQL.
+  // Prisma's schema DSL cannot express a WHERE clause on @@unique, so it is
+  // not declared here; do not remove it when generating a future migration
+  // that appears not to reference it.
   @@unique([tenantId, idempotencyKey])
   @@index([tenantId, branchId, startsAt, status])
   @@index([tenantId, doctorId, startsAt])
@@ -1511,6 +1564,7 @@ model DocumentRecord {
   diagnosticOrder DiagnosticOrder? @relation(fields: [diagnosticOrderId], references: [id], onDelete: Cascade)
 
   accessTokens DocumentAccessToken[]
+  paymentProofFor Appointment[]
 
   @@index([tenantId, patientId, status])
   @@index([objectId])

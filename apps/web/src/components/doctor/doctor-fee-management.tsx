@@ -52,7 +52,7 @@ interface DoctorServiceOverview {
     priceMinorUnits: number | null;
     currencyCode: string;
     publiclyBookable: boolean;
-    consultationMode: "IN_PERSON" | "ONLINE";
+    consultationModes: ("IN_PERSON" | "ONLINE")[];
     isActive: boolean;
     branch: { id: string; name: string } | null;
   }>;
@@ -65,12 +65,27 @@ function ErrorMessage({ message }: { message: string }) {
   return message ? <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700" role="alert">{message}</p> : null;
 }
 
+/** A service may be offered in person, online, or both — never neither. */
+function ConsultationModeCheckboxes({ value, onChange }: { value: ("IN_PERSON" | "ONLINE")[]; onChange(next: ("IN_PERSON" | "ONLINE")[]): void }) {
+  function toggle(mode: "IN_PERSON" | "ONLINE") {
+    const isOn = value.includes(mode);
+    if (isOn && value.length === 1) return;
+    onChange(isOn ? value.filter((entry) => entry !== mode) : [...value, mode]);
+  }
+  return (
+    <div className="flex flex-wrap gap-3">
+      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700"><input checked={value.includes("IN_PERSON")} onChange={() => toggle("IN_PERSON")} type="checkbox" />In person</label>
+      <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700"><input checked={value.includes("ONLINE")} onChange={() => toggle("ONLINE")} type="checkbox" />Online video consultation</label>
+    </div>
+  );
+}
+
 function ServiceEditor({ service, onSaved }: { service: DoctorServiceOverview["services"][number]; onSaved(): void }) {
   const [editing, setEditing] = useState(false);
   const [price, setPrice] = useState(service.priceMinorUnits === null ? "" : String(service.priceMinorUnits / 100));
   const [duration, setDuration] = useState(String(service.durationMinutes));
   const [publiclyBookable, setPubliclyBookable] = useState(service.publiclyBookable);
-  const [consultationMode, setConsultationMode] = useState(service.consultationMode);
+  const [consultationModes, setConsultationModes] = useState(service.consultationModes);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
@@ -86,7 +101,7 @@ function ServiceEditor({ service, onSaved }: { service: DoctorServiceOverview["s
           priceMinorUnits: Math.round(Number(price) * 100),
           durationMinutes: Number(duration),
           publiclyBookable,
-          consultationMode,
+          consultationModes,
         }),
       });
       setEditing(false);
@@ -115,7 +130,7 @@ function ServiceEditor({ service, onSaved }: { service: DoctorServiceOverview["s
   return (
     <article className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       {confirmDialog}
-      {editing ? <label className="mb-3 block space-y-1"><span className="text-xs font-bold text-slate-700">Consultation delivery</span><select className={fieldClass} value={consultationMode} onChange={(event) => setConsultationMode(event.target.value as "IN_PERSON" | "ONLINE")}><option value="IN_PERSON">In person</option><option value="ONLINE">Online video consultation</option></select></label> : null}
+      {editing ? <div className="mb-3 space-y-1"><span className="block text-xs font-bold text-slate-700">Consultation delivery</span><ConsultationModeCheckboxes onChange={setConsultationModes} value={consultationModes} /></div> : null}
       <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-bold text-slate-950">{service.name}</h3><p className="mt-1 text-xs text-slate-500">{service.code} · {service.branch?.name ?? "All branches"}</p></div><span className={`rounded-full px-2.5 py-1 text-[9px] font-bold ${service.isActive ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{service.isActive ? "ACTIVE" : "INACTIVE"}</span></div>
       {editing ? <div className="mt-4 space-y-3"><div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Fee ({service.currencyCode})</span><input className={fieldClass} min="0" required step="0.01" type="number" value={price} onChange={(event) => setPrice(event.target.value)} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Minutes</span><input className={fieldClass} min="5" required type="number" value={duration} onChange={(event) => setDuration(event.target.value)} /></label></div><label className="flex items-center gap-2 text-xs font-semibold text-slate-700"><input checked={publiclyBookable} onChange={(event) => setPubliclyBookable(event.target.checked)} type="checkbox" />Available for patient booking</label><ErrorMessage message={error} /><div className="flex gap-2"><button className={buttonClass} disabled={saving || price === ""} onClick={save} type="button"><Save aria-hidden="true" size={16} />{saving ? "Saving" : "Save changes"}</button><button className="min-h-11 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700" disabled={saving} onClick={() => setEditing(false)} type="button">Cancel</button></div></div> : <div className="mt-4 flex items-end justify-between gap-3"><div><p className="text-[10px] font-bold uppercase tracking-wide text-slate-400">Consultation fee</p><p className="mt-1 text-xl font-bold text-blue-700">{service.priceMinorUnits === null ? "Not set" : new Intl.NumberFormat("en-PK", { style: "currency", currency: service.currencyCode, maximumFractionDigits: 0 }).format(service.priceMinorUnits / 100)}</p><p className="mt-1 text-xs text-slate-500">{service.durationMinutes} minutes · {service.publiclyBookable ? "Public booking enabled" : "Internal booking only"}</p></div><button className="min-h-10 rounded-xl border border-blue-200 px-4 text-xs font-bold text-blue-700 hover:bg-blue-50" onClick={() => setEditing(true)} type="button">Edit service</button></div>}
       {!editing ? <div className="mt-3 flex justify-end"><button className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-rose-200 px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60" disabled={deleting} onClick={() => void remove()} type="button"><Trash2 size={14} />{deleting ? "Deleting..." : "Delete service"}</button></div> : null}
@@ -124,7 +139,7 @@ function ServiceEditor({ service, onSaved }: { service: DoctorServiceOverview["s
 }
 
 function CreateDoctorService({ overview, onCreated }: { overview: DoctorServiceOverview; onCreated(): void }) {
-  const [form, setForm] = useState({ code: "INITIAL", name: "Initial consultation", branchId: overview.branches[0]?.id ?? "", duration: "15", price: "", publiclyBookable: false, consultationMode: "IN_PERSON" as "IN_PERSON" | "ONLINE" });
+  const [form, setForm] = useState({ code: "INITIAL", name: "Initial consultation", branchId: overview.branches[0]?.id ?? "", duration: "15", price: "", publiclyBookable: false, consultationModes: ["IN_PERSON"] as ("IN_PERSON" | "ONLINE")[] });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -135,9 +150,9 @@ function CreateDoctorService({ overview, onCreated }: { overview: DoctorServiceO
     try {
       await phaseOneApi("/api/v1/doctor/services", {
         method: "POST",
-        body: JSON.stringify({ code: form.code, name: form.name, branchId: form.branchId || undefined, durationMinutes: Number(form.duration), priceMinorUnits: Math.round(Number(form.price) * 100), publiclyBookable: form.publiclyBookable, consultationMode: form.consultationMode }),
+        body: JSON.stringify({ code: form.code, name: form.name, branchId: form.branchId || undefined, durationMinutes: Number(form.duration), priceMinorUnits: Math.round(Number(form.price) * 100), publiclyBookable: form.publiclyBookable, consultationModes: form.consultationModes }),
       });
-      setForm({ code: "FOLLOWUP", name: "Follow-up consultation", branchId: overview.branches[0]?.id ?? "", duration: "15", price: "", publiclyBookable: false, consultationMode: "IN_PERSON" });
+      setForm({ code: "FOLLOWUP", name: "Follow-up consultation", branchId: overview.branches[0]?.id ?? "", duration: "15", price: "", publiclyBookable: false, consultationModes: ["IN_PERSON"] });
       onCreated();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The consultation service could not be created.");
@@ -147,7 +162,7 @@ function CreateDoctorService({ overview, onCreated }: { overview: DoctorServiceO
   }
 
   return (
-    <section className="wf-admin-panel rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-bold text-slate-950">Add consultation service</h2><p className="mt-1 text-xs text-slate-500">Create an in-person or secure online video consultation.</p><form className="mt-4 space-y-3" onSubmit={create}><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Short code</span><input className={fieldClass} required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Service name</span><input className={fieldClass} required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Consultation delivery</span><select className={fieldClass} value={form.consultationMode} onChange={(event) => setForm({ ...form, consultationMode: event.target.value as "IN_PERSON" | "ONLINE" })}><option value="IN_PERSON">In person at the selected branch</option><option value="ONLINE">Online video consultation</option></select></label><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Branch</span><select className={fieldClass} value={form.branchId} onChange={(event) => setForm({ ...form, branchId: event.target.value })}><option value="">All branches</option>{overview.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label><div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Minutes</span><input className={fieldClass} min="5" required type="number" value={form.duration} onChange={(event) => setForm({ ...form, duration: event.target.value })} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Fee (PKR)</span><input className={fieldClass} min="0" required step="0.01" type="number" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} /></label></div><label className="flex items-center gap-2 text-xs font-semibold text-slate-700"><input checked={form.publiclyBookable} onChange={(event) => setForm({ ...form, publiclyBookable: event.target.checked })} type="checkbox" />Available for patient booking</label><ErrorMessage message={error} /><button className={`${buttonClass} w-full`} disabled={saving} type="submit"><Plus aria-hidden="true" size={17} />{saving ? "Creating" : "Add consultation service"}</button></form></section>
+    <section className="wf-admin-panel rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm"><h2 className="font-bold text-slate-950">Add consultation service</h2><p className="mt-1 text-xs text-slate-500">Create an in-person or secure online video consultation.</p><form className="mt-4 space-y-3" onSubmit={create}><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Short code</span><input className={fieldClass} required value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value.toUpperCase() })} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Service name</span><input className={fieldClass} required value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} /></label><div className="space-y-1"><span className="block text-xs font-bold text-slate-700">Consultation delivery</span><ConsultationModeCheckboxes onChange={(modes) => setForm({ ...form, consultationModes: modes })} value={form.consultationModes} /></div><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Branch</span><select className={fieldClass} value={form.branchId} onChange={(event) => setForm({ ...form, branchId: event.target.value })}><option value="">All branches</option>{overview.branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></label><div className="grid grid-cols-2 gap-3"><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Minutes</span><input className={fieldClass} min="5" required type="number" value={form.duration} onChange={(event) => setForm({ ...form, duration: event.target.value })} /></label><label className="space-y-1"><span className="text-xs font-bold text-slate-700">Fee (PKR)</span><input className={fieldClass} min="0" required step="0.01" type="number" value={form.price} onChange={(event) => setForm({ ...form, price: event.target.value })} /></label></div><label className="flex items-center gap-2 text-xs font-semibold text-slate-700"><input checked={form.publiclyBookable} onChange={(event) => setForm({ ...form, publiclyBookable: event.target.checked })} type="checkbox" />Available for patient booking</label><ErrorMessage message={error} /><button className={`${buttonClass} w-full`} disabled={saving} type="submit"><Plus aria-hidden="true" size={17} />{saving ? "Creating" : "Add consultation service"}</button></form></section>
   );
 }
 

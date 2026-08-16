@@ -12,16 +12,13 @@ import {
   EyeOff,
   KeyRound,
   Mail,
+  Loader2,
 } from "lucide-react";
 import Link from "next/link";
 import {
-  useRouter,
   useSearchParams,
 } from "next/navigation";
 
-import {
-  useWonFlowRouteTransition,
-} from "@/app/_providers";
 import {
   AuthFrame,
 } from "@/components/auth";
@@ -34,12 +31,7 @@ const inputClassName = [
 ].join(" ");
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const {
-    beginTransition,
-    endTransition,
-  } = useWonFlowRouteTransition();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -49,9 +41,7 @@ function LoginForm() {
   const [status, setStatus] = useState<string>();
   const [busy, setBusy] = useState(false);
 
-  async function handleSubmit(
-    event: FormEvent<HTMLFormElement>,
-  ) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(undefined);
     setStatus(undefined);
@@ -69,19 +59,16 @@ function LoginForm() {
     setBusy(true);
 
     try {
-      const response = await fetch(
-        "/api/auth/login",
-        {
-          body: JSON.stringify({
-            email,
-            password,
-          }),
-          headers: {
-            "Content-Type": "application/json",
-          },
-          method: "POST",
+      const response = await fetch("/api/auth/login", {
+        body: JSON.stringify({
+          email: email.trim(),
+          password,
+        }),
+        headers: {
+          "Content-Type": "application/json",
         },
-      );
+        method: "POST",
+      });
 
       const data = (await response.json()) as {
         error?: string;
@@ -89,38 +76,22 @@ function LoginForm() {
         passwordChangeRequired?: boolean;
       };
 
-      if (
-        !response.ok ||
-        !data.homePath
-      ) {
-        setError(
-          data.error ??
-          "Unable to sign in.",
-        );
+      if (!response.ok || !data.homePath) {
+        setError(data.error ?? "Invalid email or password.");
+        setBusy(false);
         return;
       }
 
-      const requestedPath =
-        searchParams.get("next");
+      const requestedPath = searchParams.get("next");
+      const destination = data.passwordChangeRequired
+        ? "/auth/change-password"
+        : requestedPath && requestedPath.startsWith("/") && requestedPath !== "/"
+            ? requestedPath
+            : data.homePath;
 
-      const destination =
-        data.passwordChangeRequired
-          ? "/auth/change-password"
-          : requestedPath &&
-        requestedPath.startsWith("/") &&
-        requestedPath !== "/"
-          ? requestedPath
-          : data.homePath;
-
-      beginTransition("Opening workspace…");
-      router.push(destination);
-      router.refresh();
+      window.location.replace(destination);
     } catch {
-      endTransition();
-      setError(
-        "Something went wrong. Please try again.",
-      );
-    } finally {
+      setError("Network error. Please check your connection and try again.");
       setBusy(false);
     }
   }
@@ -220,7 +191,6 @@ function LoginForm() {
             onChange={(event) => setRemember(event.target.checked)}
             type="checkbox"
           />
-
           Keep me signed in on this device
         </label>
 
@@ -244,28 +214,22 @@ function LoginForm() {
         ) : null}
 
         <button
-          className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-gradient-to-r from-blue-700 via-blue-600 to-violet-600 px-4 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(37,99,235,0.24)] transition hover:shadow-[0_16px_36px_rgba(37,99,235,0.30)] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200"
+          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-700 via-blue-600 to-violet-600 px-4 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(37,99,235,0.24)] transition hover:shadow-[0_16px_36px_rgba(37,99,235,0.30)] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200"
           disabled={busy}
           type="submit"
         >
-          {busy ? "Signing in…" : "Sign in"}
-        </button>
-
-        <button
-          className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-blue-200 hover:bg-slate-50"
-          onClick={() => {
-            setError(undefined);
-            setStatus(
-              "Single sign-on is not connected yet.",
-            );
-          }}
-          type="button"
-        >
-          Sign in with SSO
+          {busy ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Signing in…
+            </>
+          ) : (
+            "Sign in"
+          )}
         </button>
 
         <p className="pt-1 text-center text-xs leading-5 text-slate-400">
-          Use only credentials issued by your organization.
+          Use credentials issued by your organization.
         </p>
       </form>
     </AuthFrame>

@@ -87,7 +87,7 @@ export function PlatformDeletedTenants() {
   }
 
   useEffect(() => {
-    void load();
+    void Promise.resolve().then(() => load());
   }, []);
 
   if (tenants === null && error === null) return <PlatformLoadingState label="Loading deleted tenant backups…" />;

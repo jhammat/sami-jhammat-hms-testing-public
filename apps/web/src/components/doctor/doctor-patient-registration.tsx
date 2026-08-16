@@ -123,7 +123,7 @@ function PreviousHistoryUpload({ patientId }: { patientId: string }) {
       <label className="mt-3 flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-indigo-300 bg-white px-3 text-sm font-bold text-indigo-700 transition hover:bg-indigo-50">
         {uploading ? "Uploading…" : "Add a photo or PDF"}
         <input
-          accept="application/pdf,image/jpeg,image/png,image/webp"
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.rtf,.png,.jpg,.jpeg,.webp,.gif,.svg,.bmp,.tiff,.heic,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/*"
           capture="environment"
           className="sr-only"
           disabled={uploading}

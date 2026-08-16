@@ -34,7 +34,7 @@ export interface DoctorDashboardQueueEntry {
 
 export interface DoctorDashboardEncounter {
   id: string;
-  status: "PLANNED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED" | "ENTERED_IN_ERROR";
+  status: "PLANNED" | "IN_PROGRESS" | "PAUSED" | "COMPLETED" | "CANCELLED" | "ENTERED_IN_ERROR";
   reason: string | null;
   startedAt: string | null;
   endedAt: string | null;
@@ -106,6 +106,32 @@ export const setDoctorSittingStatus = (sittingId: string, status: "PLANNED" | "A
 export const patchDoctorQueue = (appointmentId: string, action: DoctorQueueAction) =>
   phaseOneApi<{ appointment: DoctorDashboardAppointment }>(`/api/v1/doctor/queue/${appointmentId}`, { method: "PATCH", body: JSON.stringify({ action }) });
 
+export interface DoctorEncounterRecord {
+  id: string;
+  status: "PLANNED" | "IN_PROGRESS" | "PAUSED" | "COMPLETED" | "CANCELLED" | "ENTERED_IN_ERROR";
+  appointmentId: string | null;
+  patientId: string;
+  startedAt: string | null;
+  endedAt: string | null;
+}
+
+/** Creates the clinical encounter that starting a consultation requires — validated server-side against the same start-consultation readiness the UI checks before enabling the button. */
+export const createDoctorEncounter = (appointmentId: string) =>
+  phaseOneApi<{ encounter: DoctorEncounterRecord }>("/api/v1/doctor/encounters", { method: "POST", body: JSON.stringify({ appointmentId }) });
+
+export const completeDoctorEncounter = (encounterId: string) =>
+  phaseOneApi<{ encounter: DoctorEncounterRecord }>(`/api/v1/doctor/encounters/${encodeURIComponent(encounterId)}/complete`, { method: "POST" });
+
+/** Pauses without releasing the patient — the appointment and queue entry stay in progress. */
+export const pauseDoctorEncounter = (encounterId: string) =>
+  phaseOneApi<{ encounter: DoctorEncounterRecord }>(`/api/v1/doctor/encounters/${encodeURIComponent(encounterId)}/pause`, { method: "POST" });
+
+export const resumeDoctorEncounter = (encounterId: string) =>
+  phaseOneApi<{ encounter: DoctorEncounterRecord }>(`/api/v1/doctor/encounters/${encodeURIComponent(encounterId)}/resume`, { method: "POST" });
+
+export const cancelDoctorEncounter = (encounterId: string, reason: string) =>
+  phaseOneApi<{ encounter: DoctorEncounterRecord }>(`/api/v1/doctor/encounters/${encodeURIComponent(encounterId)}/cancel`, { method: "POST", body: JSON.stringify({ reason }) });
+
 /**
  * Adapters below translate real, database-backed dashboard/sitting responses
  * into the browser-local "Demo*" shapes the doctor portal UI already reads
@@ -134,6 +160,7 @@ const SITTING_STATUS_MAP: Record<DoctorSittingRecord["status"], DemoDoctorSittin
 const ENCOUNTER_STATUS_MAP: Record<DoctorDashboardEncounter["status"], DemoClinicalEncounterStatus> = {
   PLANNED: "open",
   IN_PROGRESS: "in-consultation",
+  PAUSED: "paused",
   COMPLETED: "completed",
   CANCELLED: "cancelled",
   ENTERED_IN_ERROR: "cancelled",
@@ -170,25 +197,36 @@ export function findActiveSitting(
   branchId: string,
   businessDate: string,
 ): DoctorSittingRecord | undefined {
-  return sittings.find((sitting) => sitting.branchId === branchId && sitting.businessDate === businessDate);
+  const targetDate = businessDate.slice(0, 10);
+  return (
+    sittings.find((sitting) => {
+      const sDate = String(sitting.businessDate).slice(0, 10);
+      return (!branchId || sitting.branchId === branchId) && sDate === targetDate;
+    }) ??
+    sittings.find((sitting) => {
+      const sDate = String(sitting.businessDate).slice(0, 10);
+      return sDate === targetDate;
+    })
+  );
 }
 
 export function toDemoDoctorSitting(sitting: DoctorSittingRecord): DemoDoctorSitting {
+  const sDate = String(sitting.businessDate).slice(0, 10);
   return {
     id: sitting.id,
     practitionerId: sitting.doctorId,
     branchId: sitting.branchId,
-    businessDate: sitting.businessDate,
+    businessDate: sDate,
     roomId: sitting.id,
     roomLabel: sitting.roomLabel ?? "Not assigned",
     sittingStartTime: minutesToTime(sitting.startsMinute),
     sittingEndTime: minutesToTime(sitting.endsMinute),
     averageConsultationMinutes: sitting.averageConsultationMinutes,
-    status: SITTING_STATUS_MAP[sitting.status],
+    status: SITTING_STATUS_MAP[sitting.status] ?? "not-started",
     actualStartedAt: sitting.actualStartedAt ?? undefined,
     actualEndedAt: sitting.actualEndedAt ?? undefined,
-    createdAt: sitting.actualStartedAt ?? sitting.businessDate,
-    updatedAt: sitting.actualEndedAt ?? sitting.actualStartedAt ?? sitting.businessDate,
+    createdAt: sitting.actualStartedAt ?? sDate,
+    updatedAt: sitting.actualEndedAt ?? sitting.actualStartedAt ?? sDate,
   };
 }
 

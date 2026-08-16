@@ -7,7 +7,7 @@ export interface RegisterPatientInput{
   phone?:string;alternateMobileNumber?:string;email?:string;
   fatherName?:string;
   bloodGroup?:string;patientCategory?:string;preferredLanguage?:string;
-  city?:string;addressLine?:string;
+  city?:string;addressLine?:string;address?:unknown;guardianData?:unknown;
   emergencyContactName?:string;emergencyContactRelation?:string;emergencyContactPhone?:string;
   referralSource?:string;notes?:string;consentToContact?:boolean;
   /** Which portal registered this patient — reception's own dropdown always sets referralSource explicitly, so this only matters as a fallback when it doesn't. */
@@ -62,7 +62,7 @@ async function createPatientRecord(
 
 const diagnosticTypeOf=(category:string):"LABORATORY"|"RADIOLOGY"|null=>{const value=category.trim().toUpperCase().replace(/[^A-Z0-9]+/g,"_");if(value==="LABORATORY"||value==="PATHOLOGY")return"LABORATORY";if(value==="RADIOLOGY"||value==="IMAGING")return"RADIOLOGY";return null;};
 export class ReceptionService{
-async getCatalog(rc:WonFlowRequestContext){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const[branches,doctors,services]=await Promise.all([database.branch.findMany({where:{tenantId:c.tenantId,organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"},orderBy:[{isMainBranch:"desc"},{name:"asc"}],select:{id:true,name:true,address:true,phone:true,timezone:true}}),database.doctorProfile.findMany({where:{tenantId:c.tenantId,staffProfile:{status:"ACTIVE",membership:{organizationId:c.organizationId,archivedAt:null,status:{in:["ACTIVE","INVITED"]}}}},include:{staffProfile:{include:{membership:true}},department:{select:{id:true,name:true}}},orderBy:{staffProfile:{membership:{displayName:"asc"}}}}),database.serviceDefinition.findMany({where:{tenantId:c.tenantId,isActive:true,OR:[{branchId:null},{branch:{organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"}}]},orderBy:[{category:"asc"},{name:"asc"}]})]);return{branches,practitioners:doctors.map(doctor=>{const doctorServices=services.filter(service=>service.doctorId===doctor.id&&service.priceMinorUnits!==null);const normalFee=doctorServices[0]?.priceMinorUnits??0;return{id:doctor.id,displayName:doctor.staffProfile.membership.displayName,specialtyName:doctor.specialty??"Clinical practitioner",primaryBranchId:doctor.staffProfile.branchId??branches[0]?.id??"",departmentName:doctor.department?.name??null,consultationFee:normalFee/100,urgentConsultationFee:normalFee?normalFee*1.5/100:0};}),services:services.map(service=>({id:service.id,name:service.name,category:service.category,price:service.priceMinorUnits===null?0:service.priceMinorUnits/100,doctorId:service.doctorId,branchId:service.branchId,publiclyBookable:service.publiclyBookable,consultationMode:service.consultationMode}))};}
+async getCatalog(rc:WonFlowRequestContext){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const[branches,doctors,services]=await Promise.all([database.branch.findMany({where:{tenantId:c.tenantId,organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"},orderBy:[{isMainBranch:"desc"},{name:"asc"}],select:{id:true,name:true,address:true,phone:true,timezone:true}}),database.doctorProfile.findMany({where:{tenantId:c.tenantId,staffProfile:{status:"ACTIVE",membership:{organizationId:c.organizationId,archivedAt:null,status:{in:["ACTIVE","INVITED"]}}}},include:{staffProfile:{include:{membership:true}},department:{select:{id:true,name:true}}},orderBy:{staffProfile:{membership:{displayName:"asc"}}}}),database.serviceDefinition.findMany({where:{tenantId:c.tenantId,isActive:true,OR:[{branchId:null},{branch:{organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"}}]},orderBy:[{category:"asc"},{name:"asc"}]})]);return{branches,practitioners:doctors.map(doctor=>{const doctorServices=services.filter(service=>service.doctorId===doctor.id&&service.priceMinorUnits!==null);const normalFee=doctorServices[0]?.priceMinorUnits??0;return{id:doctor.id,displayName:doctor.staffProfile.membership.displayName,specialtyName:doctor.specialty??"Clinical practitioner",primaryBranchId:doctor.staffProfile.branchId??branches[0]?.id??"",departmentName:doctor.department?.name??null,consultationFee:normalFee/100,urgentConsultationFee:normalFee?normalFee*1.5/100:0};}),services:services.map(service=>({id:service.id,name:service.name,category:service.category,price:service.priceMinorUnits===null?0:service.priceMinorUnits/100,doctorId:service.doctorId,branchId:service.branchId,publiclyBookable:service.publiclyBookable,consultationModes:service.consultationModes,requiresPrepayment:service.requiresPrepayment}))};}
 async getOverview(rc:WonFlowRequestContext,date:string){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const branchId=requireBranchId(c),start=new Date(`${date}T00:00:00.000Z`),end=new Date(`${date}T23:59:59.999Z`);const[appointments,queue,patientsToday]=await Promise.all([database.appointment.findMany({where:{tenantId:c.tenantId,branchId,startsAt:{gte:start,lte:end}},orderBy:{startsAt:"asc"}}),database.queueEntry.findMany({where:{tenantId:c.tenantId,queue:{branchId,queueDate:start}},include:{patient:true,appointment:true},orderBy:[{priority:"desc"},{tokenNumber:"asc"}]}),database.patient.count({where:{tenantId:c.tenantId,createdAt:{gte:start,lte:end}}})]);return{patientsToday,appointmentsToday:appointments.length,waitingCount:queue.filter(x=>x.status==="WAITING").length,checkedInCount:appointments.filter(x=>x.checkedInAt).length,appointments,queue};}
 /** Duplicate-check lookup for the registration form: same name+DOB or same phone, called before the record is saved. */
 async findDuplicatePatients(rc:WonFlowRequestContext,lookup:DuplicatePatientLookup){const c=requireTenantContext(rc);requirePermission(c,"patients.read");return queryDuplicatePatients(c,lookup);}
@@ -79,6 +79,51 @@ async archivePatient(rc:WonFlowRequestContext,id:string){const c=requireTenantCo
   if(!patient)throw new WonFlowApiError(404,"patient-not-found","The patient could not be found.");
   if(patient.status==="ARCHIVED")return patient;
   return database.patient.update({where:{id:patient.id},data:{status:"ARCHIVED",archivedAt:new Date()}});}
+async getPatient(rc:WonFlowRequestContext,id:string){
+  const c=requireTenantContext(rc);requirePermission(c,"patients.read");
+  const patient=await database.patient.findFirst({where:{id,tenantId:c.tenantId,status:{not:"ARCHIVED"}},include:{identifiers:{select:{type:true,value:true,isPrimary:true}}}});
+  if(!patient)throw new WonFlowApiError(404,"patient-not-found","The patient could not be found.");
+  return patient;
+}
+async updatePatient(rc:WonFlowRequestContext,id:string,input:Partial<RegisterPatientInput>&{guardianData?:unknown;address?:unknown}){
+  const c=requireTenantContext(rc);requirePermission(c,"patients.manage");
+  const existing=await database.patient.findFirst({where:{id,tenantId:c.tenantId,status:{not:"ARCHIVED"}},include:{identifiers:true}});
+  if(!existing)throw new WonFlowApiError(404,"patient-not-found","The patient could not be found.");
+  const normalizedPhone=input.phone!==undefined?normalizeOptional(input.phone):undefined;
+  const normalizedEmail=input.email!==undefined?normalizeOptional(input.email):undefined;
+  const dateOfBirth=input.dateOfBirth!==undefined?(input.dateOfBirth?new Date(`${input.dateOfBirth}T00:00:00.000Z`):null):undefined;
+  const guardianDataFromInput=typeof input.guardianData==="object"&&input.guardianData!==null?input.guardianData as Record<string,unknown>:undefined;
+  const existingGuardianData=typeof existing.guardianData==="object"&&existing.guardianData!==null?existing.guardianData as Record<string,unknown>:{};
+  const fatherName=input.fatherName!==undefined?trimOrUndefined(input.fatherName):(typeof guardianDataFromInput?.fatherName==="string"?trimOrUndefined(guardianDataFromInput.fatherName):(typeof guardianDataFromInput?.name==="string"?trimOrUndefined(guardianDataFromInput.name):undefined));
+  const emergencyContactName=input.emergencyContactName!==undefined?trimOrUndefined(input.emergencyContactName):(typeof guardianDataFromInput?.emergencyContactName==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactName):(typeof guardianDataFromInput?.emergencyContact==="string"?trimOrUndefined(guardianDataFromInput.emergencyContact):undefined));
+  const emergencyContactRelation=input.emergencyContactRelation!==undefined?trimOrUndefined(input.emergencyContactRelation):(typeof guardianDataFromInput?.emergencyContactRelation==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactRelation):(typeof guardianDataFromInput?.relationship==="string"?trimOrUndefined(guardianDataFromInput.relationship):undefined));
+  const emergencyContactPhone=input.emergencyContactPhone!==undefined?trimOrUndefined(input.emergencyContactPhone):(typeof guardianDataFromInput?.emergencyContactPhone==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactPhone):(typeof guardianDataFromInput?.phone==="string"?trimOrUndefined(guardianDataFromInput.phone):undefined));
+  const mergedGuardianData={
+    ...existingGuardianData,
+    ...(fatherName!==undefined?{fatherName}:{}),
+    ...(emergencyContactName!==undefined?{emergencyContactName}:{}),
+    ...(emergencyContactRelation!==undefined?{emergencyContactRelation}:{}),
+    ...(emergencyContactPhone!==undefined?{emergencyContactPhone}:{}),
+  };
+  const address=input.address!==undefined?(input.address as Prisma.InputJsonValue):(input.addressLine||input.city?{text:trimOrUndefined(input.addressLine),city:trimOrUndefined(input.city)}:undefined);
+  return database.patient.update({
+    where:{id:existing.id},
+    data:{
+      givenName:input.givenName!==undefined?input.givenName.trim():undefined,
+      middleName:input.middleName!==undefined?(input.middleName.trim()||null):undefined,
+      familyName:input.familyName!==undefined?input.familyName.trim():undefined,
+      dateOfBirth,
+      sex:input.sex!==undefined?(input.sex.trim()||null):undefined,
+      phone:input.phone!==undefined?(input.phone.trim()||null):undefined,
+      normalizedPhone,
+      email:input.email!==undefined?(input.email.trim()||null):undefined,
+      normalizedEmail,
+      address:address!==undefined?address:undefined,
+      guardianData:mergedGuardianData as Prisma.InputJsonValue,
+    },
+    include:{identifiers:{select:{type:true,value:true,isPrimary:true}}},
+  });
+}
 /**
  * Places laboratory and radiology orders for a walk-in booked at reception.
  *
@@ -88,10 +133,9 @@ async archivePatient(rc:WonFlowRequestContext,id:string){const c=requireTenantCo
  */
 async createDiagnosticOrders(rc:WonFlowRequestContext,input:{patientId:string;serviceIds:string[];clinicalReason?:string;priority?:string}){
   // Placing a walk-in order is part of booking a visit, which is reception's
-  // own capability; it is not the department's permission to read its worklist.
-  const c=requireTenantContext(rc);requirePermission(c,"appointments.manage");
+  // domain, so orders.manage (a clinician permission) is not required.
+  const c=requireTenantContext(rc);requirePermission(c,"patients.manage");
   const branchId=requireBranchId(c);
-  if(!c.membershipId)throw new WonFlowApiError(403,"membership-required","A staff membership is required to place orders.");
   const patient=await database.patient.findFirst({where:{id:input.patientId,tenantId:c.tenantId}});
   if(!patient)throw new WonFlowApiError(404,"patient-not-found","The patient could not be found.");
   const services=await database.serviceDefinition.findMany({where:{id:{in:input.serviceIds},tenantId:c.tenantId,isActive:true}});
@@ -144,7 +188,12 @@ async registerPatient(rc:WonFlowRequestContext,input:RegisterPatientInput){const
     // identity, emergency contact, blood group, category, referral, notes) have
     // no dedicated columns; they ride along in the record's flexible JSON slots.
     const address=input.addressLine||input.city?{text:trimOrUndefined(input.addressLine),city:trimOrUndefined(input.city)}:undefined;
-    const guardianData=input.fatherName||input.emergencyContactName||input.emergencyContactRelation||input.emergencyContactPhone?{fatherName:trimOrUndefined(input.fatherName),emergencyContactName:trimOrUndefined(input.emergencyContactName),emergencyContactRelation:trimOrUndefined(input.emergencyContactRelation),emergencyContactPhone:trimOrUndefined(input.emergencyContactPhone)}:undefined;
+    const guardianDataFromInput=typeof input.guardianData==="object"&&input.guardianData!==null?input.guardianData as Record<string,unknown>:undefined;
+    const fatherName=trimOrUndefined(input.fatherName)||(typeof guardianDataFromInput?.fatherName==="string"?trimOrUndefined(guardianDataFromInput.fatherName):(typeof guardianDataFromInput?.name==="string"?trimOrUndefined(guardianDataFromInput.name):undefined));
+    const emergencyContactName=trimOrUndefined(input.emergencyContactName)||(typeof guardianDataFromInput?.emergencyContactName==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactName):(typeof guardianDataFromInput?.emergencyContact==="string"?trimOrUndefined(guardianDataFromInput.emergencyContact):undefined));
+    const emergencyContactRelation=trimOrUndefined(input.emergencyContactRelation)||(typeof guardianDataFromInput?.emergencyContactRelation==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactRelation):(typeof guardianDataFromInput?.relationship==="string"?trimOrUndefined(guardianDataFromInput.relationship):undefined));
+    const emergencyContactPhone=trimOrUndefined(input.emergencyContactPhone)||(typeof guardianDataFromInput?.emergencyContactPhone==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactPhone):(typeof guardianDataFromInput?.phone==="string"?trimOrUndefined(guardianDataFromInput.phone):undefined));
+    const guardianData=fatherName||emergencyContactName||emergencyContactRelation||emergencyContactPhone?{fatherName,emergencyContactName,emergencyContactRelation,emergencyContactPhone}:guardianDataFromInput;
     // referralSource is what the doctor sees as "where this patient came from".
     // Reception's own form always sends one via its dropdown; the doctor's
     // "register a patient" page has no such field, so a doctor-registered
@@ -167,8 +216,10 @@ async bookAppointment(rc:WonFlowRequestContext,input:{patientId:string;doctorId?
       if(input.serviceId&&!service)throw new WonFlowApiError(400,"invalid-appointment-service","The selected service is unavailable at this branch.");
       if(service?.doctorId&&input.doctorId&&service.doctorId!==input.doctorId)throw new WonFlowApiError(400,"service-doctor-mismatch","The selected consultation service belongs to another doctor.");
       // Reception may pick the delivery mode on the phone, but a service that
-      // is only offered one way must not be booked the other way.
-      if(input.consultationMode&&service&&service.consultationMode!==input.consultationMode)throw new WonFlowApiError(400,"consultation-mode-mismatch",`${service.name} is only offered ${service.consultationMode==="ONLINE"?"as an online consultation":"in person"}.`);
+      // does not offer that mode must not be booked into it, and a service
+      // offering both modes must not silently default to one.
+      if(service&&service.consultationModes.length>1&&!input.consultationMode)throw new WonFlowApiError(400,"consultation-mode-required","Choose whether this is an in-person or online consultation.");
+      if(input.consultationMode&&service&&!service.consultationModes.includes(input.consultationMode))throw new WonFlowApiError(400,"consultation-mode-mismatch",`${service.name} does not offer ${input.consultationMode==="ONLINE"?"online consultations":"in-person visits"}.`);
       const doctorId=input.doctorId??service?.doctorId??null;
       if(doctorId&&!await tx.doctorProfile.findFirst({where:{id:doctorId,tenantId:c.tenantId,staffProfile:{membership:{organizationId:c.organizationId}}}}))throw new WonFlowApiError(400,"invalid-appointment-doctor","The selected doctor is unavailable.");
       if(doctorId&&await tx.appointment.findFirst({where:{tenantId:c.tenantId,branchId,doctorId,status:{in:["PENDING","CONFIRMED","CHECKED_IN","IN_QUEUE","IN_PROGRESS"]},startsAt:{lt:endsAt},endsAt:{gt:startsAt}}}))throw new WonFlowApiError(409,"appointment-conflict","The selected clinician is no longer available at that time.");
@@ -179,7 +230,9 @@ async bookAppointment(rc:WonFlowRequestContext,input:{patientId:string;doctorId?
       // partial unique index: the findFirst check above can still race with
       // a concurrent request between the check and this insert. Postgres
       // rejects the loser with a unique violation, caught below as 409.
-      const a=await tx.appointment.create({data:{tenantId:c.tenantId,patientId:input.patientId,doctorId,branchId,serviceId:service?.id??null,consultationMode:input.consultationMode??service?.consultationMode??"IN_PERSON",status:"CONFIRMED",source:input.source,reason:input.reason?.trim()||null,startsAt,endsAt,idempotencyKey:input.idempotencyKey}});
+      const mode=input.consultationMode??service?.consultationModes[0]??"IN_PERSON";
+      const requiresPrepayment=mode==="ONLINE"&&service?.requiresPrepayment===true;
+      const a=await tx.appointment.create({data:{tenantId:c.tenantId,patientId:input.patientId,doctorId,branchId,serviceId:service?.id??null,consultationMode:mode,paymentStatus:requiresPrepayment?"AWAITING_PAYMENT":"NOT_REQUIRED",status:"CONFIRMED",source:input.source,reason:input.reason?.trim()||null,startsAt,endsAt,idempotencyKey:input.idempotencyKey}});
       await tx.idempotencyRecord.create({data:{tenantId:c.tenantId,key:input.idempotencyKey,operation:"appointment.book",responsePayload:{appointmentId:a.id},expiresAt:new Date(Date.now()+86400000)}});
       await tx.auditEvent.create({data:{tenantId:c.tenantId,branchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"appointment.booked",entityType:"appointment",entityId:a.id,severity:"INFORMATION",sourceApplication:c.sourceApplication}});
       return a;
@@ -246,10 +299,32 @@ async listAppointments(rc:WonFlowRequestContext,options:{query?:string;branchId?
   return{appointments,total,page,pageSize,summary};
 }
 /** Server-computed available times for a doctor, branch and date — never generated in the browser. */
-async listAppointmentSlots(rc:WonFlowRequestContext,input:{doctorId:string;branchId:string;date:string;serviceDurationMinutes:number}){
-  const c=requireTenantContext(rc);requirePermission(c,"appointments.read");
-  const branch=await database.branch.findFirst({where:{id:input.branchId,tenantId:c.tenantId},select:{timezone:true}});
-  if(!branch)throw new WonFlowApiError(404,"branch-not-found","The branch could not be found.");
-  return listBookableSlots({tenantId:c.tenantId,doctorId:input.doctorId,branchId:input.branchId,date:input.date,timezone:branch.timezone,fallbackSlotMinutes:input.serviceDurationMinutes});
+async listAppointmentSlots(rc: WonFlowRequestContext, input: { doctorId: string; branchId?: string; date: string; serviceDurationMinutes: number }) {
+  const c = requireTenantContext(rc);
+  requirePermission(c, "appointments.read");
+  let branch = input.branchId
+    ? await database.branch.findFirst({ where: { id: input.branchId, tenantId: c.tenantId }, select: { id: true, timezone: true } })
+    : null;
+  if (!branch) {
+    const doctor = await database.doctorProfile.findFirst({
+      where: { id: input.doctorId, tenantId: c.tenantId },
+      include: { staffProfile: { include: { branch: true } } },
+    });
+    branch = doctor?.staffProfile.branch ?? (await database.branch.findFirst({
+      where: { tenantId: c.tenantId, status: "ACTIVE", archivedAt: null },
+      orderBy: [{ isMainBranch: "desc" }, { createdAt: "asc" }],
+      select: { id: true, timezone: true },
+    }));
+  }
+  const timezone = branch?.timezone ?? "UTC";
+  const branchId = branch?.id ?? input.branchId ?? "";
+  return listBookableSlots({
+    tenantId: c.tenantId,
+    doctorId: input.doctorId,
+    branchId,
+    date: input.date,
+    timezone,
+    fallbackSlotMinutes: input.serviceDurationMinutes,
+  });
 }
 }export const receptionService=new ReceptionService();

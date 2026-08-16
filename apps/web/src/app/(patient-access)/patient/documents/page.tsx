@@ -145,7 +145,7 @@ export default function PatientDocumentsPage() {
           <option value="PREVIOUS_MEDICAL_HISTORY">Previous medical history</option>
           <option value="OTHER_MEDICAL_RECORD">Other medical record</option>
         </select></label>
-        <input accept="application/pdf,image/jpeg,image/png,image/webp" capture="environment" className="md:col-span-2 rounded-xl border border-dashed border-indigo-300 bg-indigo-50 p-4" disabled={busy} name="file" required type="file" />
+        <input accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.rtf,.png,.jpg,.jpeg,.webp,.gif,.svg,.bmp,.tiff,.heic,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,image/*" capture="environment" className="md:col-span-2 rounded-xl border border-dashed border-indigo-300 bg-indigo-50 p-4" disabled={busy} name="file" required type="file" />
 
         {uploadState.phase === "uploading" || uploadState.phase === "resuming" ? (
           <div className="md:col-span-2">

@@ -2,10 +2,6 @@ import type {
   DemoAppointmentBooking,
 } from "@/lib/appointments";
 
-import {
-  getActiveDemoDoctorSitting,
-} from "@/lib/doctor-sittings";
-
 import type {
   DemoDoctorSitting,
 } from "@/lib/doctor-sittings";
@@ -320,12 +316,6 @@ export function createDemoQueueEntryFromAppointment(
       appointment.appointmentDate,
     );
 
-  const activeSitting = getActiveDemoDoctorSitting({
-    practitionerId: appointment.practitionerId,
-    branchId: appointment.branchId,
-    businessDate: appointment.appointmentDate,
-  });
-
   const entry:
     DemoQueueEntry = {
     id:
@@ -360,9 +350,9 @@ export function createDemoQueueEntryFromAppointment(
 
     status: "waiting",
 
-    doctorSittingId: activeSitting?.id,
-    roomId: activeSitting?.roomId,
-    roomLabel: activeSitting?.roomLabel,
+    doctorSittingId: undefined,
+    roomId: undefined,
+    roomLabel: undefined,
 
     checkedInAt:
       new Date().toISOString(),

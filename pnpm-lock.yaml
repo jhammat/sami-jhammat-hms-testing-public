@@ -17,22 +17,61 @@ importers:
 
   apps/doctor-mobile:
     dependencies:
+      '@babel/runtime':
+        specifier: ^7.25.0
+        version: 7.29.7
+      '@expo/metro-runtime':
+        specifier: ~5.0.4
+        version: 5.0.5(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))
+      '@react-navigation/native':
+        specifier: ^7.0.0
+        version: 7.3.14(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0)
       expo:
         specifier: ~53.0.0
         version: 53.0.27(@babel/core@7.29.7(supports-color@8.1.1))(@expo/metro-runtime@5.0.5(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1)))(react-native-webview@13.13.5(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0))(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0)(supports-color@8.1.1)
+      expo-constants:
+        specifier: ~17.1.0
+        version: 17.1.8(expo@53.0.27(@babel/core@7.29.7(supports-color@8.1.1))(@expo/metro-runtime@5.0.5(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1)))(react-native-webview@13.13.5(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0))(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0)(supports-color@8.1.1))(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(supports-color@8.1.1)
+      expo-linking:
+        specifier: ~7.1.0
+        version: 7.1.7(expo@53.0.27(@babel/core@7.29.7(supports-color@8.1.1))(@expo/metro-runtime@5.0.5(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1)))(react-native-webview@13.13.5(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0))(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0)(supports-color@8.1.1))(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0)(supports-color@8.1.1)
+      expo-modules-core:
+        specifier: ~2.5.0
+        version: 2.5.0
       expo-router:
         specifier: ~5.1.0
-        version: 5.1.11(4a0ef26dd1db7cd0cdf5cff1c26a464b)
+        version: 5.1.11(52e61ccc6d99fc42380e42a8236df024)
       expo-secure-store:
         specifier: ~14.2.0
         version: 14.2.4(expo@53.0.27(@babel/core@7.29.7(supports-color@8.1.1))(@expo/metro-runtime@5.0.5(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1)))(react-native-webview@13.13.5(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0))(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0)(supports-color@8.1.1))
+      expo-status-bar:
+        specifier: ~2.2.3
+        version: 2.2.3(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0)
+      invariant:
+        specifier: ^2.2.4
+        version: 2.2.4
       react:
         specifier: 19.0.0
         version: 19.0.0
       react-native:
         specifier: 0.79.0
         version: 0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1)
+      react-native-safe-area-context:
+        specifier: 5.4.0
+        version: 5.4.0(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0)
+      react-native-screens:
+        specifier: ~4.11.1
+        version: 4.11.1(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0)
+      react-native-webview:
+        specifier: 13.13.5
+        version: 13.13.5(react-native@0.79.0(@babel/core@7.29.7(supports-color@8.1.1))(@types/react@19.2.17)(react@19.0.0)(supports-color@8.1.1))(react@19.0.0)
+      whatwg-fetch:
+        specifier: ^3.6.20
+        version: 3.6.20
     devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.1
       '@types/react':
         specifier: ^19.2.0
         version: 19.2.17
@@ -7696,14 +7735,14 @@ snapshots:
     dependencies:
       '@jest/fake-timers': 29.7.0
       '@jest/types': 29.6.3
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       jest-mock: 29.7.0
 
   '@jest/fake-timers@29.7.0':
     dependencies:
       '@jest/types': 29.6.3
       '@sinonjs/fake-timers': 10.3.0
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       jest-message-util: 29.7.0
       jest-mock: 29.7.0
       jest-util: 29.7.0
@@ -7737,7 +7776,7 @@ snapshots:
       '@jest/schemas': 29.6.3
       '@types/istanbul-lib-coverage': 2.0.6
       '@types/istanbul-reports': 3.0.4
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       '@types/yargs': 17.0.35
       chalk: 4.1.2
 
@@ -8516,7 +8555,7 @@ snapshots:
 
   '@types/graceful-fs@4.1.9':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
 
   '@types/istanbul-lib-coverage@2.0.6': {}
 
@@ -8544,13 +8583,13 @@ snapshots:
 
   '@types/pg@8.20.0':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       pg-protocol: 1.15.0
       pg-types: 2.2.0
 
   '@types/qrcode@1.5.6':
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
 
   '@types/react-dom@19.2.3(@types/react@19.2.17)':
     dependencies:
@@ -9358,7 +9397,7 @@ snapshots:
 
   chrome-launcher@0.15.2(supports-color@8.1.1):
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       escape-string-regexp: 4.0.0
       is-wsl: 2.2.0
       lighthouse-logger: 1.4.2(supports-color@8.1.1)
@@ -9367,7 +9406,7 @@ snapshots:
 
   chromium-edge-launcher@0.2.0(supports-color@8.1.1):
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       escape-string-regexp: 4.0.0
       is-wsl: 2.2.0
       lighthouse-logger: 1.4.2(supports-color@8.1.1)
@@ -10986,7 +11025,7 @@ snapshots:
       '@jest/environment': 29.7.0
       '@jest/fake-timers': 29.7.0
       '@jest/types': 29.6.3
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       jest-mock: 29.7.0
       jest-util: 29.7.0
 
@@ -10996,7 +11035,7 @@ snapshots:
     dependencies:
       '@jest/types': 29.6.3
       '@types/graceful-fs': 4.1.9
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       anymatch: 3.1.3
       fb-watchman: 2.0.2
       graceful-fs: 4.2.11
@@ -11023,7 +11062,7 @@ snapshots:
   jest-mock@29.7.0:
     dependencies:
       '@jest/types': 29.6.3
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       jest-util: 29.7.0
 
   jest-regex-util@29.6.3: {}
@@ -11031,7 +11070,7 @@ snapshots:
   jest-util@29.7.0:
     dependencies:
       '@jest/types': 29.6.3
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       chalk: 4.1.2
       ci-info: 3.9.0
       graceful-fs: 4.2.11
@@ -11048,7 +11087,7 @@ snapshots:
 
   jest-worker@29.7.0:
     dependencies:
-      '@types/node': 20.19.43
+      '@types/node': 22.20.1
       jest-util: 29.7.0
       merge-stream: 2.0.0
       supports-color: 8.1.1
