@@ -4,7 +4,6 @@ import type { NextRequest } from "next/server";
 import { WONFLOW_PASSWORD_CHANGE_COOKIE, WONFLOW_SESSION_COOKIE } from "@/lib/auth/session";
 
 const PUBLIC_PREFIXES = [
-  "/showcase",
   "/login",
   "/api/auth",
   "/book",
