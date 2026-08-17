@@ -11,7 +11,9 @@ import { execFileSync } from "node:child_process";
  * hospitalOperations flag that is now enabled) no longer described the product.
  */
 
-const DEFERRED_ROOT = "deferred/phase-two";
+const DEFERRED_ROOT = existsSync("future/deferred/phase-two")
+  ? "future/deferred/phase-two"
+  : "deferred/phase-two";
 
 /**
  * Each deferred module, with the aliases and route prefixes that must not

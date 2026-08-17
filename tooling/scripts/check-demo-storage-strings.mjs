@@ -23,6 +23,7 @@ const selfPath = path.relative(
 const sourceExtensions = /\.(ts|tsx|js|jsx|mjs|cjs)$/;
 
 const excludedRoots = [
+  "future/",
   "deferred/",
 ];
 
