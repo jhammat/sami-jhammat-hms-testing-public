@@ -102,6 +102,26 @@ function LoginForm() {
       productName="WonFlow Hospital Platform"
       title="Welcome back"
     >
+      <div className="mb-4">
+        <Link
+          href="/showcase"
+          className="group flex items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-gradient-to-r from-indigo-50 via-purple-50 to-blue-50 p-3 text-xs transition hover:border-indigo-400 hover:shadow-md"
+        >
+          <div className="flex items-center gap-2">
+            <span className="flex h-6 w-6 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-sm">
+              ✨
+            </span>
+            <div>
+              <div className="font-bold text-indigo-950">Visual Mind Map & System Showcase</div>
+              <div className="text-[11px] text-indigo-700">Interactive 10-portal architecture & screen gallery</div>
+            </div>
+          </div>
+          <span className="font-bold text-indigo-600 group-hover:translate-x-0.5 transition-transform">
+            Explore →
+          </span>
+        </Link>
+      </div>
+
       <form
         className="space-y-4"
         noValidate
