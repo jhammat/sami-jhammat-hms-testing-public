@@ -933,6 +933,40 @@ export class PlatformAdministrationService {
     };
   }
 
+  async resetTenantAdminPassword(
+    context: WonFlowPlatformRequestContext,
+    input: { tenantId: string; password?: string },
+  ) {
+    requirePermission(context, "platform.tenants.manage");
+    const newPassword = input.password?.trim() || "WonFlowDemo2026!";
+    validateNewPassword(newPassword);
+    const passwordHash = await hashPassword(newPassword);
+
+    return database.$transaction(async (transaction) => {
+      const membership = await transaction.tenantMembership.findFirst({
+        where: { tenantId: input.tenantId, workspaceCodes: { has: "ADMIN" } },
+        include: { identity: true },
+      });
+      if (!membership?.identity) {
+        throw new WonFlowApiError(404, "admin-identity-not-found", "No admin identity found for tenant.");
+      }
+
+      await transaction.identity.update({
+        where: { id: membership.identity.id },
+        data: {
+          passwordHash,
+          mustChangePassword: false,
+          passwordChangedAt: new Date(),
+          status: "ACTIVE",
+          failedLoginCount: 0,
+          lockedUntil: null,
+        },
+      });
+
+      return { success: true, email: membership.identity.email, temporaryPassword: newPassword };
+    });
+  }
+
   async listAudit(context: WonFlowPlatformRequestContext) {
     requirePermission(context, "platform.audit.read");
     return database.auditEvent.findMany({ orderBy: { createdAt: "desc" }, take: 200 });

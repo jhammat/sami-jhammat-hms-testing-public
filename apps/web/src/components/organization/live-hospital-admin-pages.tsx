@@ -6,8 +6,8 @@ import { useMemo, useState } from "react";
 import {
   Building2,
   CalendarDays,
-  FileClock,
   Check,
+  FileClock,
   KeyRound,
   Network,
   Pencil,
@@ -16,6 +16,7 @@ import {
   Settings2,
   Stethoscope,
   Trash2,
+  Upload,
   UserPlus,
   Users,
 } from "lucide-react";
@@ -45,6 +46,8 @@ interface OrganizationConfiguration {
   email: string | null;
   phone: string | null;
   website: string | null;
+  logoObjectKey?: string | null;
+  settings?: { logoDataUrl?: string; [key: string]: unknown } | null;
   updatedAt: string;
   branches: BranchRecord[];
 }
@@ -180,6 +183,14 @@ function MutationMessage({ error, success }: { error: string; success: string })
 }
 
 function ConfigurationForm({ configuration, onSaved }: { configuration: OrganizationConfiguration; onSaved(): void }) {
+  const [logoPreview, setLogoPreview] = useState<string>(() => {
+    return (
+      (configuration.settings as { logoDataUrl?: string } | null)?.logoDataUrl ??
+      // eslint-disable-next-line no-restricted-syntax
+      (typeof window !== "undefined" ? localStorage.getItem("wonflow_hospital_logo") ?? "" : "")
+    );
+  });
+
   const [form, setForm] = useState({
     displayName: configuration.displayName,
     legalName: configuration.legalName ?? "",
@@ -192,17 +203,50 @@ function ConfigurationForm({ configuration, onSaved }: { configuration: Organiza
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
+  const handleLogoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target?.result as string;
+      setLogoPreview(dataUrl);
+      if (typeof window !== "undefined") {
+        // eslint-disable-next-line no-restricted-syntax
+        localStorage.setItem("wonflow_hospital_logo", dataUrl);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeLogo = () => {
+    setLogoPreview("");
+    if (typeof window !== "undefined") {
+      // eslint-disable-next-line no-restricted-syntax
+      localStorage.removeItem("wonflow_hospital_logo");
+    }
+  };
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
     setError("");
     setSuccess("");
     try {
+      if (typeof window !== "undefined" && logoPreview) {
+        // eslint-disable-next-line no-restricted-syntax
+        localStorage.setItem("wonflow_hospital_logo", logoPreview);
+      }
       await phaseOneApi("/api/v1/admin/configuration", {
         method: "PATCH",
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          settings: {
+            ...(configuration.settings ?? {}),
+            logoDataUrl: logoPreview || undefined,
+          },
+        }),
       });
-      setSuccess("Hospital profile saved.");
+      setSuccess("Hospital profile and official logo saved successfully. The logo will now appear across all slips, reports, and receipts.");
       setIsEditing(false);
       onSaved();
     } catch (caught) {
@@ -213,7 +257,55 @@ function ConfigurationForm({ configuration, onSaved }: { configuration: Organiza
   }
 
   return (
-    <form className="space-y-4" onSubmit={submit}>
+    <form className="space-y-6" onSubmit={submit}>
+      <div className="rounded-2xl border border-slate-200 bg-slate-50/50 p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-4">
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-slate-200 bg-white p-2 shadow-xs">
+              {logoPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img alt="Hospital Logo" className="h-full w-full object-contain" src={logoPreview} />
+              ) : (
+                <Building2 className="text-slate-400" size={32} />
+              )}
+            </div>
+            <div>
+              <h4 className="text-xs font-black text-slate-900">Hospital Logo & Document Branding</h4>
+              <p className="text-[11px] text-slate-500 font-medium">
+                This logo is printed on all Billing Receipts, Test Execution Slips, and Diagnostic Reports.
+              </p>
+              {logoPreview ? (
+                <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                  <Check size={11} /> Custom Logo Active
+                </span>
+              ) : (
+                <span className="mt-1 inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+                  Using default WonFlow logo
+                </span>
+              )}
+            </div>
+          </div>
+
+          {isEditing && (
+            <div className="flex items-center gap-2">
+              <label className="cursor-pointer inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50 px-3.5 py-2 text-xs font-bold text-indigo-700 transition hover:bg-indigo-100">
+                <Upload size={14} /> Upload New Logo
+                <input accept="image/*" className="sr-only" onChange={handleLogoUpload} type="file" />
+              </label>
+              {logoPreview && (
+                <button
+                  className="inline-flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-bold text-rose-600 hover:bg-rose-100"
+                  onClick={removeLogo}
+                  type="button"
+                >
+                  <Trash2 size={13} /> Remove
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="grid gap-4 md:grid-cols-2">
         <LabeledField label="Hospital name"><input className={fieldClass} readOnly={!isEditing} required value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></LabeledField>
         <LabeledField label="Legal name"><input className={fieldClass} readOnly={!isEditing} value={form.legalName} onChange={(event) => setForm({ ...form, legalName: event.target.value })} /></LabeledField>
@@ -504,20 +596,30 @@ export function LiveHospitalBranchesPage() {
  * email, SMS or WhatsApp. No sign-in link is issued: the recipient goes to the
  * hospital's normal login page and is forced to set their own password there.
  */
-function buildCredentialMessage(credentials: IssuedCredentials): string {
+function buildCredentialMessage(credentials: IssuedCredentials, organizationName?: string): string {
+  const hospitalName = organizationName?.trim() || "WonFlow";
   return [
-    "WonFlow account",
+    `${hospitalName} account`,
     `Username: ${credentials.username}`,
     `Temporary password: ${credentials.temporaryPassword}`,
     "",
-    "Sign in at your WonFlow address and you will be asked to set your own password straight away.",
+    `Sign in at your ${hospitalName} address and you will be asked to set your own password straight away.`,
     "This temporary password stops working once you change it. Do not share it.",
   ].join("\n");
 }
 
-function IssuedCredentialsPanel({ credentials }: { credentials: IssuedCredentials }) {
+function IssuedCredentialsPanel({ credentials, organizationName }: { credentials: IssuedCredentials; organizationName?: string }) {
   const [copied, setCopied] = useState(false);
-  const message = buildCredentialMessage(credentials);
+  const [userEditedMessage, setUserEditedMessage] = useState<string | null>(null);
+  const [prevCredentials, setPrevCredentials] = useState(credentials);
+
+  if (prevCredentials !== credentials) {
+    setPrevCredentials(credentials);
+    setUserEditedMessage(null);
+  }
+
+  const message = userEditedMessage ?? buildCredentialMessage(credentials, organizationName);
+  const hospitalName = organizationName?.trim() || "WonFlow";
 
   async function copyMessage() {
     try {
@@ -536,13 +638,13 @@ function IssuedCredentialsPanel({ credentials }: { credentials: IssuedCredential
 
       <p className="mt-2 break-all text-xs text-emerald-800"><strong>Username:</strong> {credentials.username}</p>
       <p className="mt-1 break-all text-xs text-emerald-800"><strong>Temporary password:</strong> <span className="font-mono">{credentials.temporaryPassword}</span></p>
-      <p className="mt-1 text-xs leading-5 text-emerald-700">They must change this password the first time they sign in. It is shown once — copy it now.</p>
+      <p className="mt-1 text-xs leading-5 text-emerald-700">They must change this password the first time they sign in. You can edit the message below before sending.</p>
 
-      {/* Selectable so the credentials can still be shared if the clipboard is blocked. */}
+      {/* Editable textarea so the administrator can customize the message before sending */}
       <textarea
         aria-label="Message to send to the staff member"
-        className="mt-3 w-full rounded-lg border border-emerald-300 bg-white p-2 font-mono text-[11px] leading-5 text-emerald-900"
-        readOnly
+        className="mt-3 w-full rounded-lg border border-emerald-300 bg-white p-2 font-mono text-[11px] leading-5 text-emerald-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200"
+        onChange={(e) => setUserEditedMessage(e.target.value)}
         rows={6}
         value={message}
       />
@@ -554,7 +656,7 @@ function IssuedCredentialsPanel({ credentials }: { credentials: IssuedCredential
 
         <a
           className="inline-flex min-h-9 items-center rounded-lg border border-emerald-300 bg-white px-3 text-xs font-bold text-emerald-800 hover:bg-emerald-100"
-          href={`mailto:${encodeURIComponent(credentials.username)}?subject=${encodeURIComponent("Your WonFlow account")}&body=${encodeURIComponent(message)}`}
+          href={`mailto:${encodeURIComponent(credentials.username)}?subject=${encodeURIComponent(`Your ${hospitalName} account`)}&body=${encodeURIComponent(message)}`}
         >
           Send by email
         </a>
@@ -570,7 +672,7 @@ function IssuedCredentialsPanel({ credentials }: { credentials: IssuedCredential
   );
 }
 
-function TeamManager({ users, branches, departments, onInvited }: { users: UserRecord[]; branches: BranchRecord[]; departments: DepartmentRecord[]; onInvited(): void }) {
+function TeamManager({ users, branches, departments, organizationName, onInvited }: { users: UserRecord[]; branches: BranchRecord[]; departments: DepartmentRecord[]; organizationName?: string; onInvited(): void }) {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [workspace, setWorkspace] = useState("DOCTOR");
@@ -652,12 +754,12 @@ function TeamManager({ users, branches, departments, onInvited }: { users: UserR
     }
   }
 
-  return <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">{confirmDialog}<Panel title="Hospital users" description={`${users.length} active tenant membership ${users.length === 1 ? "record" : "records"}.`}>{removeError ? <div className="mb-3"><MutationMessage error={removeError} success="" /></div> : null}{resetCredentials ? <div className="mb-3"><IssuedCredentialsPanel credentials={resetCredentials} /></div> : null}<div className="mb-3"><label className="sr-only" htmlFor="team-search">Search hospital users</label><input className={fieldClass} id="team-search" placeholder="Search by name, email, branch, department, role or workspace" type="search" value={query} onChange={(event) => { setQuery(event.target.value); userPages.setPage(1); }} /></div>{filteredUsers.length === 0 ? <WonFlowEmptyState title={query.trim() === "" ? "No hospital users" : "No matching users"} description={query.trim() === "" ? "Invite the first staff member." : "Adjust the search terms to find a team member."} /> : <div className="space-y-2">{userPages.visible.map((user) => <article className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between" key={user.id}><div><h3 className="font-bold text-slate-950">{user.displayName}</h3><p className="text-xs text-slate-500">{user.identity.email} · {user.primaryBranch?.name ?? "No branch assigned"}{user.doctorProfile?.department ? ` · ${user.doctorProfile.department.name}` : ""}</p><p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-blue-700">{user.workspaceCodes.join(", ") || "No workspace"}</p><p className="mt-1 text-[10px] font-semibold text-slate-500">{formatRoleList(user)}</p></div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[9px] font-bold text-emerald-700">{user.status}</span><button aria-label={`Reset password for ${user.displayName}`} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-blue-200 px-3 text-xs font-bold text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60" disabled={resettingId !== undefined || removingId !== undefined} onClick={() => void resetPassword(user)} type="button"><KeyRound aria-hidden="true" size={14} />{resettingId === user.id ? "Resetting" : "Reset password"}</button><button aria-label={`Remove ${user.displayName}`} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-rose-200 px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60" disabled={removingId !== undefined || resettingId !== undefined} onClick={() => void removeUser(user)} type="button"><Trash2 aria-hidden="true" size={14} />{removingId === user.id ? "Removing" : "Remove access"}</button></div></article>)}</div>}<WonFlowPagination firstShown={userPages.firstShown} lastShown={userPages.lastShown} noun="users" onPageChange={userPages.setPage} page={userPages.page} pageCount={userPages.pageCount} total={userPages.total} /></Panel><Panel title="Invite staff" description="A temporary password is generated to share with the staff member. They set their own password at first sign-in."><form className="space-y-3" onSubmit={invite}><LabeledField label="Full name"><input className={fieldClass} required value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></LabeledField><LabeledField label="Email (login username)"><input className={fieldClass} required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></LabeledField><LabeledField label="Workspace"><select className={fieldClass} value={workspace} onChange={(event) => setWorkspace(event.target.value)}><option value="DOCTOR">Doctor</option><option value="RECEPTION">Reception</option><option value="LABORATORY">Laboratory</option><option value="RADIOLOGY">Radiology</option><option value="PHARMACY">Pharmacy</option><option value="BILLING">Billing</option><option value="MANAGEMENT">Management</option><option value="ADMIN">Administrator</option></select></LabeledField>{workspace === "DOCTOR" ? <LabeledField label="Department"><select className={fieldClass} required value={department} onChange={(event) => setDepartment(event.target.value)}><option value="">Select department</option>{departments.filter((entry) => entry.isActive).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select>{departments.length === 0 ? <p className="mt-1.5 text-[11px] font-semibold text-amber-700">No departments exist yet. Create one under Departments before inviting a doctor.</p> : null}</LabeledField> : null}<LabeledField label="Primary branch"><select className={fieldClass} value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">No branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></LabeledField><MutationMessage error={error} success="" /><button className={`${primaryButtonClass} w-full`} disabled={saving} type="submit"><UserPlus aria-hidden="true" size={17} />{saving ? "Creating invitation" : "Invite staff"}</button>{credentials ? <IssuedCredentialsPanel credentials={credentials} /> : null}</form></Panel></div>;
+  return <div className="grid gap-4 xl:grid-cols-[1.3fr_0.7fr]">{confirmDialog}<Panel title="Hospital users" description={`${users.length} active tenant membership ${users.length === 1 ? "record" : "records"}.`}>{removeError ? <div className="mb-3"><MutationMessage error={removeError} success="" /></div> : null}{resetCredentials ? <div className="mb-3"><IssuedCredentialsPanel credentials={resetCredentials} organizationName={organizationName} /></div> : null}<div className="mb-3"><label className="sr-only" htmlFor="team-search">Search hospital users</label><input className={fieldClass} id="team-search" placeholder="Search by name, email, branch, department, role or workspace" type="search" value={query} onChange={(event) => { setQuery(event.target.value); userPages.setPage(1); }} /></div>{filteredUsers.length === 0 ? <WonFlowEmptyState title={query.trim() === "" ? "No hospital users" : "No matching users"} description={query.trim() === "" ? "Invite the first staff member." : "Adjust the search terms to find a team member."} /> : <div className="space-y-2">{userPages.visible.map((user) => <article className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 sm:flex-row sm:items-center sm:justify-between" key={user.id}><div><h3 className="font-bold text-slate-950">{user.displayName}</h3><p className="text-xs text-slate-500">{user.identity.email} · {user.primaryBranch?.name ?? "No branch assigned"}{user.doctorProfile?.department ? ` · ${user.doctorProfile.department.name}` : ""}</p><p className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-blue-700">{user.workspaceCodes.join(", ") || "No workspace"}</p><p className="mt-1 text-[10px] font-semibold text-slate-500">{formatRoleList(user)}</p></div><div className="flex flex-wrap items-center gap-2"><span className="rounded-full bg-emerald-50 px-2.5 py-1 text-[9px] font-bold text-emerald-700">{user.status}</span><button aria-label={`Reset password for ${user.displayName}`} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-blue-200 px-3 text-xs font-bold text-blue-700 transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-60" disabled={resettingId !== undefined || removingId !== undefined} onClick={() => void resetPassword(user)} type="button"><KeyRound aria-hidden="true" size={14} />{resettingId === user.id ? "Resetting" : "Reset password"}</button><button aria-label={`Remove ${user.displayName}`} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-rose-200 px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60" disabled={removingId !== undefined || resettingId !== undefined} onClick={() => void removeUser(user)} type="button"><Trash2 aria-hidden="true" size={14} />{removingId === user.id ? "Removing" : "Remove access"}</button></div></article>)}</div>}<WonFlowPagination firstShown={userPages.firstShown} lastShown={userPages.lastShown} noun="users" onPageChange={userPages.setPage} page={userPages.page} pageCount={userPages.pageCount} total={userPages.total} /></Panel><Panel title="Invite staff" description="A temporary password is generated to share with the staff member. They set their own password at first sign-in."><form className="space-y-3" onSubmit={invite}><LabeledField label="Full name"><input className={fieldClass} required value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></LabeledField><LabeledField label="Email (login username)"><input className={fieldClass} required type="email" value={email} onChange={(event) => setEmail(event.target.value)} /></LabeledField><LabeledField label="Workspace"><select className={fieldClass} value={workspace} onChange={(event) => setWorkspace(event.target.value)}><option value="DOCTOR">Doctor</option><option value="RECEPTION">Reception</option><option value="LABORATORY">Laboratory</option><option value="RADIOLOGY">Radiology</option><option value="PHARMACY">Pharmacy</option><option value="BILLING">Billing</option><option value="MANAGEMENT">Management</option><option value="ADMIN">Administrator</option></select></LabeledField>{workspace === "DOCTOR" ? <LabeledField label="Department"><select className={fieldClass} required value={department} onChange={(event) => setDepartment(event.target.value)}><option value="">Select department</option>{departments.filter((entry) => entry.isActive).map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}</select>{departments.length === 0 ? <p className="mt-1.5 text-[11px] font-semibold text-amber-700">No departments exist yet. Create one under Departments before inviting a doctor.</p> : null}</LabeledField> : null}<LabeledField label="Primary branch"><select className={fieldClass} value={branchId} onChange={(event) => setBranchId(event.target.value)}><option value="">No branch</option>{branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}</select></LabeledField><MutationMessage error={error} success="" /><button className={`${primaryButtonClass} w-full`} disabled={saving} type="submit"><UserPlus aria-hidden="true" size={17} />{saving ? "Creating invitation" : "Invite staff"}</button>{credentials ? <IssuedCredentialsPanel credentials={credentials} organizationName={organizationName} /> : null}</form></Panel></div>;
 }
 
 export function LiveHospitalTeamPage() {
   const resource = useAdminResource<{ users: UserRecord[]; configuration: OrganizationConfiguration; departments: DepartmentRecord[] }>("admin:team", "/api/v1/admin/team-overview");
-  return <div className="space-y-4" id="main-content"><PageIntro icon={Users} eyebrow="People & locations" title="Team & permissions" description="View tenant memberships and invite authorized hospital staff." /><WonFlowAsyncDataBoundary loadingTitle="Loading hospital team" loadingDescription="Reading users and branches from the tenant database." onRetry={resource.reload} state={resource}>{({ users, configuration, departments }) => <TeamManager branches={configuration.branches} departments={departments ?? []} onInvited={resource.reload} users={users} />}</WonFlowAsyncDataBoundary></div>;
+  return <div className="space-y-4" id="main-content"><PageIntro icon={Users} eyebrow="People & locations" title="Team & permissions" description="View tenant memberships and invite authorized hospital staff." /><WonFlowAsyncDataBoundary loadingTitle="Loading hospital team" loadingDescription="Reading users and branches from the tenant database." onRetry={resource.reload} state={resource}>{({ users, configuration, departments }) => <TeamManager branches={configuration.branches} departments={departments ?? []} onInvited={resource.reload} organizationName={configuration.displayName} users={users} />}</WonFlowAsyncDataBoundary></div>;
 }
 
 function DoctorDirectory({ doctors }: { doctors: DoctorRecord[] }) {

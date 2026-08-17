@@ -315,7 +315,7 @@ export async function submitPublicBooking(tenantSlug: string, input: PublicBooki
       await transaction.auditEvent.create({ data: { tenantId: tenant.id, branchId: rule.branchId, requestId: input.idempotencyKey, action: "public.appointment.booked", entityType: "appointment", entityId: appointment.id, severity: "INFORMATION", sourceApplication: "public-booking-page" } });
 
       return { appointment, identityId: identity.id };
-    }, { isolationLevel: "Serializable" });
+    });
   } catch (caught) {
     if (isUniqueConstraintError(caught)) throw new WonFlowApiError(409, "account-already-exists", "An account already exists with this email. Sign in to book instead.");
     throw caught;
