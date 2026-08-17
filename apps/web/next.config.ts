@@ -73,6 +73,7 @@ const nextConfig: NextConfig = {
   outputFileTracingRoot: workspaceRoot,
   poweredByHeader: false,
   allowedDevOrigins: [
+    "https://hpbsp.wonflow.tech",
     "http://192.168.100.10:3000",
     "192.168.100.10:3000",
     "192.168.100.10",
