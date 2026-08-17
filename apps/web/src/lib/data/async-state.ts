@@ -1,4 +1,4 @@
-import {
+import type {
   WonFlowMockServiceError,
 } from "@wonflow/mock-data";
 
@@ -44,10 +44,12 @@ export function normalizeWonFlowAsyncError(
   error: unknown,
 ): WonFlowAsyncError {
   if (
-    error instanceof
-    WonFlowMockServiceError
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error
   ) {
-    switch (error.code) {
+    const mockError = error as WonFlowMockServiceError;
+    switch (mockError.code) {
       case "aborted":
         return {
           code: "aborted",
@@ -57,7 +59,7 @@ export function normalizeWonFlowAsyncError(
             "The data request was cancelled.",
           retryable: false,
           operationName:
-            error.operationName,
+            mockError.operationName,
         };
 
       case "not-found":
@@ -66,10 +68,10 @@ export function normalizeWonFlowAsyncError(
           title:
             "Record not found",
           message:
-            error.message,
+            mockError.message,
           retryable: false,
           operationName:
-            error.operationName,
+            mockError.operationName,
         };
 
       case "invalid-query":
@@ -78,10 +80,10 @@ export function normalizeWonFlowAsyncError(
           title:
             "Invalid request",
           message:
-            error.message,
+            mockError.message,
           retryable: false,
           operationName:
-            error.operationName,
+            mockError.operationName,
         };
 
       case "simulated-failure":
@@ -91,10 +93,10 @@ export function normalizeWonFlowAsyncError(
           title:
             "Unable to load data",
           message:
-            error.message,
+            mockError.message,
           retryable: true,
           operationName:
-            error.operationName,
+            mockError.operationName,
         };
     }
   }
@@ -138,9 +140,10 @@ export function isWonFlowRequestCancellation(
   error: unknown,
 ): boolean {
   if (
-    error instanceof
-      WonFlowMockServiceError &&
-    error.code === "aborted"
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code: string }).code === "aborted"
   ) {
     return true;
   }

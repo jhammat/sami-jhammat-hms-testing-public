@@ -5,17 +5,14 @@ import type {
 } from "@wonflow/contracts";
 
 import {
-  isPracticeClinicSessionEffectiveOn,
-} from "@wonflow/contracts";
-
-import {
   addPracticeCalendarDays,
   getPracticeCalendarWeekday,
   getPracticeLocalDate,
+  isPracticeClinicSessionEffectiveOn,
   practiceLocalDateTimeToDate,
-} from "@wonflow/mock-data";
+} from "@wonflow/contracts";
 
-export { practiceLocalDateTimeToDate } from "@wonflow/mock-data";
+export { practiceLocalDateTimeToDate } from "@wonflow/contracts";
 
 import type {
   PracticeLocationNextClinic,

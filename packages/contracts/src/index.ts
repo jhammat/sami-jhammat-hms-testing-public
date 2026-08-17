@@ -35,6 +35,7 @@ export * from "./practice/practice-payment";
 export * from "./practice/practice-message";
 export * from "./practice/patient-sharing";
 export * from "./practice/tenant-settings";
+export * from "./practice/practice-booking-time";
 
 // Scheduling and hospital operations
 export * from "./scheduling/doctor-availability";

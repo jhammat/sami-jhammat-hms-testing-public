@@ -6,7 +6,7 @@ import type {
 import {
   addPracticeCalendarDays,
   getPracticeLocalDate,
-} from "@wonflow/mock-data";
+} from "@wonflow/contracts";
 
 export function formatPracticeBookingMoney(
   money: PracticeMoney,

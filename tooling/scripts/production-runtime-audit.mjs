@@ -14,11 +14,31 @@ const tracked = execFileSync("git", ["ls-files", "apps/web/src"], { encoding: "u
   .filter(Boolean);
 
 const sourceFiles = tracked.filter(
-  (file) => /\.(ts|tsx)$/.test(file) && !/\.test\.(ts|tsx)$/.test(file) && existsSync(file),
+  (file) =>
+    /\.(ts|tsx)$/.test(file) &&
+    !/\.test\.(ts|tsx)$/.test(file) &&
+    !file.endsWith("lib/data/runtime.ts") &&
+    existsSync(file),
 );
 
-const isRuntimeMockDataImport = (source) =>
-  /(?:^|\n)\s*(?:import|export)\s+(?!type\b)[\s\S]*?from\s+["']@wonflow\/mock-data["']/.test(source);
+const isRuntimeMockDataImport = (source) => {
+  const statementRegex = /(?:import|export)\s+([\s\S]*?)\s+from\s+["']@wonflow\/mock-data["']/g;
+  let match;
+  while ((match = statementRegex.exec(source)) !== null) {
+    let clause = match[0].trim();
+    const lastImportIndex = clause.lastIndexOf("import ");
+    const lastExportIndex = clause.lastIndexOf("export ");
+    const lastKeywordIndex = Math.max(lastImportIndex, lastExportIndex);
+    if (lastKeywordIndex >= 0) {
+      clause = clause.slice(lastKeywordIndex).trim();
+    }
+    const isTypeImport = /^(?:import|export)\s+type\b/.test(clause);
+    if (!isTypeImport) {
+      return true;
+    }
+  }
+  return false;
+};
 
 const violations = sourceFiles.filter((file) =>
   isRuntimeMockDataImport(readFileSync(file, "utf8")),

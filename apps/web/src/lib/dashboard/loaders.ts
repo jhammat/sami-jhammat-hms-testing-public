@@ -1,7 +1,3 @@
-import {
-  WonFlowMockServiceError,
-} from "@wonflow/mock-data";
-
 import type {
   MockAdmission,
   MockAppointment,
@@ -728,11 +724,7 @@ export async function loadWonFlowDoctorDashboard(
     );
 
   if (practitioner === undefined) {
-    throw new WonFlowMockServiceError(
-      "not-found",
-      `Practitioner was not found: ${practitionerId}`,
-      "loadWonFlowDoctorDashboard",
-    );
+    throw new Error(`Practitioner was not found: ${practitionerId}`);
   }
 
   const anchorDate =
