@@ -37,6 +37,7 @@
     "db:provision-roles": "pnpm exec tsx tooling/scripts/provision-database-roles.ts",
     "worker:dev": "pnpm --filter @wonflow/worker dev",
     "runtime:audit": "node tooling/scripts/production-runtime-audit.mjs",
+    "db:seed:prod": "pnpm exec tsx tooling/scripts/seed-production.ts",
     "db:seed:dev": "pnpm exec tsx tooling/scripts/seed-development-logins.ts",
     "db:repair-access": "pnpm exec tsx tooling/scripts/repair-workspace-access.ts",
     "db:seed:demo": "pnpm exec tsx tooling/scripts/seed-demo-data.ts"

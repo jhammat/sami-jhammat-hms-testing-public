@@ -17,7 +17,13 @@ if (fs.existsSync(rootEnvPath)) {
     const eqIdx = trimmed.indexOf("=");
     if (eqIdx < 0) continue;
     const key = trimmed.slice(0, eqIdx).trim();
-    const value = trimmed.slice(eqIdx + 1).trim();
+    const raw = trimmed.slice(eqIdx + 1);
+    // Quoted values: strip the surrounding quotes.
+    // Unquoted values: strip inline comments (space(s) + # + anything after).
+    const value =
+      raw.startsWith('"') || raw.startsWith("'")
+        ? raw.slice(1, raw.lastIndexOf(raw[0]!))
+        : raw.replace(/\s+#.*$/, "").trim();
     if (key && !(key in process.env)) {
       process.env[key] = value;
     }
