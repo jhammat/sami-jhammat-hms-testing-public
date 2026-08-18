@@ -1,9 +1,28 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import type { NextConfig } from "next";
 
 const appDirectory = path.dirname(fileURLToPath(import.meta.url));
+
+// Load the monorepo root .env.local into process.env so Turbopack sees
+// all NEXT_PUBLIC_* vars before it starts inlining them.
+const rootEnvPath = path.resolve(appDirectory, "../../.env.local");
+if (fs.existsSync(rootEnvPath)) {
+  const lines = fs.readFileSync(rootEnvPath, "utf-8").split("\n");
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eqIdx = trimmed.indexOf("=");
+    if (eqIdx < 0) continue;
+    const key = trimmed.slice(0, eqIdx).trim();
+    const value = trimmed.slice(eqIdx + 1).trim();
+    if (key && !(key in process.env)) {
+      process.env[key] = value;
+    }
+  }
+}
 
 /**
  * The monorepo root. Pinning this stops Next.js from inferring the workspace
