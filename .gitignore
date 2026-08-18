@@ -3,7 +3,7 @@ node_modules/
 .pnpm-store/
 
 samiscreenshots/
-
+future/
 
 # Next.js and builds
 .next/
