@@ -2,6 +2,9 @@
 node_modules/
 .pnpm-store/
 
+samiscreenshots/
+
+
 # Next.js and builds
 .next/
 out/
