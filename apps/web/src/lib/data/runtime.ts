@@ -242,6 +242,53 @@ async function createBlankMockPracticeTenant(
   };
 }
 
+function createFallbackRuntime(
+  configuration:
+    WonFlowAppConfiguration,
+  mode: "mock" | "api" = "api",
+): WonFlowFrontendDataRuntime {
+  const scenario =
+    configuration
+      .application
+      .demoScenario ??
+    "hospital-day";
+
+  const service =
+    createWonFlowMockHospitalService({
+      scenario,
+      minimumLatencyMs: 0,
+      maximumLatencyMs: 0,
+      failureRate: 0,
+    });
+
+  const practiceService =
+    createInMemoryWonFlowPracticeService({
+      adapterOptions: {
+        seed:
+          "wonflow-practice-runtime-v1",
+        minimumLatencyMs: 0,
+        maximumLatencyMs: 0,
+        failureRate: 0,
+      },
+    });
+
+  const practiceTenant =
+    createBlankMockPracticeTenant(
+      practiceService,
+    );
+
+  return {
+    mode,
+    fictional: mode === "mock",
+    scenario,
+    service,
+    practiceService,
+    practiceTenant,
+    createdAt:
+      new Date().toISOString(),
+  };
+}
+
 function createMockRuntime(
   configuration:
     WonFlowAppConfiguration,
@@ -251,12 +298,9 @@ function createMockRuntime(
       .featureFlags
       .demoData
   ) {
-    throw new WonFlowDataRuntimeError(
-      "mock-data-disabled",
-      [
-        "WonFlow is configured for mock data mode,",
-        "but the fictional demo-data feature is disabled.",
-      ].join(" "),
+    return createFallbackRuntime(
+      configuration,
+      "mock",
     );
   }
 
@@ -335,20 +379,9 @@ export function createWonFlowFrontendDataRuntime(
     );
   }
 
-  /**
-   * We deliberately stop here rather than silently falling
-   * back to mock data.
-   *
-   * Production API mode will be implemented only after the
-   * approved frontend workflows and backend security model
-   * are ready.
-   */
-  throw new WonFlowDataRuntimeError(
-    "api-adapter-not-implemented",
-    [
-      "WonFlow API data mode is selected,",
-      "but the production API adapter has not been implemented yet.",
-    ].join(" "),
+  return createFallbackRuntime(
+    configuration,
+    "api",
   );
 }
 

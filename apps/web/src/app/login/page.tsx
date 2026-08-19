@@ -28,6 +28,7 @@ const inputClassName = [
   "text-sm text-slate-950 outline-none transition",
   "placeholder:text-slate-400 shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
   "focus:border-blue-500 focus:ring-4 focus:ring-blue-100",
+  "dark:border-slate-800 dark:bg-slate-950/60 dark:text-white dark:placeholder:text-slate-500 dark:focus:ring-blue-950/50",
 ].join(" ");
 
 function LoginForm() {
@@ -109,7 +110,7 @@ function LoginForm() {
       >
         <div>
           <label
-            className="text-sm font-semibold text-slate-700"
+            className="text-sm font-semibold text-slate-700 dark:text-slate-300"
             htmlFor="login-email"
           >
             Email address
@@ -118,7 +119,7 @@ function LoginForm() {
           <div className="relative mt-1.5">
             <Mail
               aria-hidden="true"
-              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
               size={17}
             />
 
@@ -138,14 +139,14 @@ function LoginForm() {
         <div>
           <div className="flex items-center justify-between gap-3">
             <label
-              className="text-sm font-semibold text-slate-700"
+              className="text-sm font-semibold text-slate-700 dark:text-slate-300"
               htmlFor="login-password"
             >
               Password
             </label>
 
             <Link
-              className="text-xs font-semibold text-blue-700 transition hover:text-blue-900"
+              className="text-xs font-semibold text-blue-700 transition hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
               href="/auth/forgot-password"
             >
               Forgot password?
@@ -155,7 +156,7 @@ function LoginForm() {
           <div className="relative mt-1.5">
             <KeyRound
               aria-hidden="true"
-              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500"
               size={17}
             />
 
@@ -171,7 +172,7 @@ function LoginForm() {
 
             <button
               aria-label={showPassword ? "Hide password" : "Show password"}
-              className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+              className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
               onClick={() => setShowPassword((current) => !current)}
               type="button"
             >
@@ -184,10 +185,10 @@ function LoginForm() {
           </div>
         </div>
 
-        <label className="flex cursor-pointer items-center gap-2.5 text-sm text-slate-600">
+        <label className="flex cursor-pointer items-center gap-2.5 text-sm text-slate-600 dark:text-slate-400">
           <input
             checked={remember}
-            className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-500"
+            className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900"
             onChange={(event) => setRemember(event.target.checked)}
             type="checkbox"
           />
@@ -196,7 +197,7 @@ function LoginForm() {
 
         {error ? (
           <p
-            className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-sm font-medium text-rose-700"
+            className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-sm font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300"
             id="login-error"
             role="alert"
           >
@@ -206,7 +207,7 @@ function LoginForm() {
 
         {status ? (
           <p
-            className="rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-3 text-sm font-medium text-blue-800"
+            className="rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-3 text-sm font-medium text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300"
             role="status"
           >
             {status}
@@ -228,7 +229,7 @@ function LoginForm() {
           )}
         </button>
 
-        <p className="pt-1 text-center text-xs leading-5 text-slate-400">
+        <p className="pt-1 text-center text-xs leading-5 text-slate-400 dark:text-slate-500">
           Use credentials issued by your organization.
         </p>
       </form>

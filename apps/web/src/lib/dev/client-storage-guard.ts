@@ -15,6 +15,13 @@ const ALLOW_LISTED_STORAGE_FILES = [
   "theme-toggle",
 ];
 
+const ALLOW_LISTED_STORAGE_KEYS = [
+  "wonflow-color-theme",
+  "wonflow-sidebar-collapsed",
+  "wonflow-sidebar-state",
+  "wonflow-data-cleanup-v1",
+];
+
 function extractCallerFile(
   stack: string | undefined,
 ): string {
@@ -63,14 +70,14 @@ export function installClientStorageGuard(): void {
     key: string,
     value: string,
   ): void {
-    const callerFile = extractCallerFile(
-      new Error().stack,
-    );
+    const rawStack = new Error().stack ?? "";
+    const callerFile = extractCallerFile(rawStack);
 
     const isAllowListed =
+      ALLOW_LISTED_STORAGE_KEYS.includes(key) ||
       ALLOW_LISTED_STORAGE_FILES.some(
         (name) =>
-          callerFile.includes(name),
+          callerFile.includes(name) || rawStack.includes(name),
       );
 
     if (!isAllowListed) {

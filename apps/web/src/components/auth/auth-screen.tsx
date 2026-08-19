@@ -87,6 +87,7 @@ const inputClassName = [
   "text-sm text-slate-950 outline-none transition",
   "placeholder:text-slate-400",
   "focus:border-blue-500 focus:ring-4 focus:ring-blue-100",
+  "dark:border-slate-800 dark:bg-slate-950/60 dark:text-white dark:placeholder:text-slate-500 dark:focus:ring-blue-950/50",
 ].join(" ");
 
 interface FieldProps {
@@ -113,7 +114,7 @@ function Field({
   return (
     <div>
       <label
-        className="text-sm font-semibold text-slate-700"
+        className="text-sm font-semibold text-slate-700 dark:text-slate-300"
         htmlFor={id}
       >
         {label}
@@ -125,14 +126,14 @@ function Field({
 
       {error ? (
         <p
-          className="mt-1.5 text-xs font-medium text-rose-600"
+          className="mt-1.5 text-xs font-medium text-rose-600 dark:text-rose-400"
           id={`${id}-error`}
         >
           {error}
         </p>
       ) : hint ? (
         <p
-          className="mt-1.5 text-xs leading-5 text-slate-500"
+          className="mt-1.5 text-xs leading-5 text-slate-500 dark:text-slate-400"
           id={`${id}-hint`}
         >
           {hint}
@@ -421,7 +422,7 @@ export function AuthScreen({
 
               <button
                 aria-label={showPasswords ? "Hide password" : "Show password"}
-                className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900"
+                className="absolute right-2 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                 onClick={() => setShowPasswords((current) => !current)}
                 type="button"
               >
@@ -460,7 +461,7 @@ export function AuthScreen({
 
         {status ? (
           <div
-            className="rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-3 text-sm font-medium text-blue-800"
+            className="rounded-xl border border-blue-200 bg-blue-50 px-3.5 py-3 text-sm font-medium text-blue-800 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-300"
             role="status"
           >
             {status}
@@ -477,14 +478,14 @@ export function AuthScreen({
 
         <div className="flex flex-wrap items-center justify-between gap-3 pt-1 text-xs font-medium">
           <Link
-            className="text-slate-500 transition hover:text-slate-900"
+            className="text-slate-500 transition hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200"
             href="/login"
           >
             Back to sign in
           </Link>
 
           {kind === "forgot" ? (
-            <span className="text-slate-400">
+            <span className="text-slate-400 dark:text-slate-500">
               Recovery links expire for security.
             </span>
           ) : null}

@@ -46,7 +46,7 @@ function serializeProfile(profile: Awaited<ReturnType<typeof resolveProfile>>["p
     specialtyName: profile.specialty || "Clinical practitioner",
     roleCodes: ["doctor", "practitioner"],
     operationalStatus: "off-duty" as const,
-    fictional: true as const,
+    fictional: false as const,
     createdAt: profile.createdAt.toISOString(),
     email: profile.staffProfile.membership.identity.email,
     title: profile.staffProfile.title ?? "Doctor",

@@ -77,6 +77,7 @@ const inputClassName = [
   "disabled:cursor-not-allowed",
   "disabled:bg-slate-100",
   "disabled:text-slate-500",
+  "dark:border-slate-800 dark:bg-slate-950/60 dark:text-white dark:focus:ring-blue-950/50 dark:disabled:bg-slate-900/60 dark:disabled:text-slate-600",
 ].join(" ");
 
 export function WorkspaceSelector({

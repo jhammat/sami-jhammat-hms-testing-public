@@ -2,31 +2,68 @@
 
 import Link from "next/link";
 import {
+  Activity,
+  ArrowRight,
   CalendarDays,
   CalendarPlus,
-  ClipboardList,
+  CheckCircle2,
+  ChevronRight,
+  Clock,
+  Download,
+  FileCheck2,
   FileText,
   FlaskConical,
   HeartPulse,
+  MapPin,
   Pill,
   ReceiptText,
   RefreshCw,
   ShieldAlert,
+  ShieldCheck,
+  Sparkles,
   Stethoscope,
   Upload,
+  User,
+  Video,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WONFLOW_AVATAR_CHANGED_EVENT } from "@/components/shell";
-import { WonFlowPageHeader } from "@/components/workspace";
 
 type Section = "home" | "care" | "reports" | "billing";
 
 interface PatientHome {
-  patient: { id: string; patientNumber: string; givenName: string; middleName: string | null; familyName: string; dateOfBirth: string | null; sex: string | null; phone: string | null; email: string | null };
-  appointments: Array<{ id: string; startsAt: string; status: string; service: { name: string }; branch: { name: string } }>;
-  prescriptions: Array<{ id: string; status: string; instructions: string | null; items: Array<{ id: string; dosage: string | null; frequency: string | null; duration: string | null; medication: { genericName: string; brandName: string | null; strength: string | null } }> }>;
+  patient: {
+    id: string;
+    patientNumber: string;
+    givenName: string;
+    middleName: string | null;
+    familyName: string;
+    dateOfBirth: string | null;
+    sex: string | null;
+    phone: string | null;
+    email: string | null;
+  };
+  appointments: Array<{
+    id: string;
+    startsAt: string;
+    status: string;
+    service: { name: string };
+    branch: { name: string };
+  }>;
+  prescriptions: Array<{
+    id: string;
+    status: string;
+    instructions: string | null;
+    items: Array<{
+      id: string;
+      dosage: string | null;
+      frequency: string | null;
+      duration: string | null;
+      medication: { genericName: string; brandName: string | null; strength: string | null };
+    }>;
+  }>;
   diagnosticOrders: Array<{
     id: string;
     type: string;
@@ -63,13 +100,12 @@ const formatTime = (value: string) => new Intl.DateTimeFormat("en-PK", { timeSty
 
 const humanize = (value: string) => value.replaceAll("_", " ").toLowerCase();
 
-/** Tone classes are limited to the palette that globals.css remaps for dark mode. */
 const toneClasses = {
-  blue: "border-blue-100 bg-blue-50 text-blue-700",
-  violet: "border-blue-100 bg-violet-50 text-violet-700",
-  emerald: "border-blue-100 bg-emerald-50 text-emerald-700",
-  amber: "border-blue-100 bg-amber-50 text-amber-700",
-  slate: "border-slate-200 bg-slate-50 text-slate-600",
+  blue: "border-blue-200/80 bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300",
+  violet: "border-purple-200/80 bg-purple-50 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300",
+  emerald: "border-emerald-200/80 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300",
+  amber: "border-amber-200/80 bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300",
+  slate: "border-slate-200/80 bg-slate-50 text-slate-600 dark:bg-slate-900/40 dark:text-slate-400",
 } as const;
 
 type Tone = keyof typeof toneClasses;
@@ -83,37 +119,58 @@ function statusTone(status: string): Tone {
 }
 
 function StatusPill({ status }: { status: string }) {
+  const tone = statusTone(status);
   return (
-    <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-black uppercase tracking-wide ${toneClasses[statusTone(status)]}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-black uppercase tracking-wider shadow-2xs ${toneClasses[tone]}`}>
+      <span className={`size-1.5 rounded-full ${tone === "emerald" ? "bg-emerald-500" : tone === "blue" ? "bg-blue-500" : tone === "amber" ? "bg-amber-500" : "bg-slate-400"}`} />
       {humanize(status)}
     </span>
   );
 }
 
-function SectionCard({ title, description, action, children }: { title: string; description?: string; action?: React.ReactNode; children: React.ReactNode }) {
+function SectionCard({
+  title,
+  description,
+  action,
+  icon: Icon,
+  children,
+}: {
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+  icon?: LucideIcon;
+  children: React.ReactNode;
+}) {
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-black text-slate-900">{title}</h2>
-          {description ? <p className="mt-1 text-sm text-slate-500">{description}</p> : null}
+    <section className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white/95 p-5 shadow-xs backdrop-blur-xs transition hover:shadow-md sm:p-6 dark:border-slate-800 dark:bg-slate-900/90">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
+        <div className="flex items-center gap-3">
+          {Icon ? (
+            <div className="grid size-10 place-items-center rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-100 text-blue-600 shadow-2xs dark:from-blue-950/50 dark:to-indigo-900/50 dark:text-blue-400">
+              <Icon aria-hidden className="size-5" />
+            </div>
+          ) : null}
+          <div>
+            <h2 className="text-lg font-black tracking-tight text-slate-900 dark:text-slate-100">{title}</h2>
+            {description ? <p className="mt-0.5 text-xs font-medium text-slate-500 dark:text-slate-400">{description}</p> : null}
+          </div>
         </div>
         {action}
       </div>
-      {children}
+      <div className="pt-4">{children}</div>
     </section>
   );
 }
 
 function EmptyState({ icon: Icon, title, hint, action }: { icon: LucideIcon; title: string; hint?: string; action?: React.ReactNode }) {
   return (
-    <div className="mt-4 flex flex-col items-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center">
-      <span className="grid size-11 place-items-center rounded-2xl bg-blue-50 text-blue-600">
-        <Icon aria-hidden className="size-5" />
+    <div className="flex flex-col items-center rounded-2xl border border-dashed border-slate-200 bg-gradient-to-b from-slate-50/50 to-slate-100/50 px-6 py-10 text-center dark:border-slate-800 dark:from-slate-900/30 dark:to-slate-900/60">
+      <span className="grid size-12 place-items-center rounded-2xl bg-white text-blue-600 shadow-xs ring-1 ring-slate-200/60 dark:bg-slate-800 dark:text-blue-400 dark:ring-slate-700">
+        <Icon aria-hidden className="size-6" />
       </span>
-      <p className="mt-3 text-sm font-black text-slate-700">{title}</p>
-      {hint ? <p className="mt-1 max-w-sm text-sm text-slate-500">{hint}</p> : null}
-      {action ? <div className="mt-4">{action}</div> : null}
+      <p className="mt-3.5 text-sm font-black text-slate-800 dark:text-slate-200">{title}</p>
+      {hint ? <p className="mt-1 max-w-sm text-xs text-slate-500 dark:text-slate-400">{hint}</p> : null}
+      {action ? <div className="mt-5">{action}</div> : null}
     </div>
   );
 }
@@ -125,13 +182,6 @@ function formatBytes(sizeBytes: string): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/**
- * Attach a scan image, a photo of a printed report, or a PDF to this test --
- * uploads land immediately and are visible to your care team right away.
- * Doctors and lab/radiology staff can attach files too; only lab/radiology
- * staff can remove one, so a wrong upload here is fixed by adding the right
- * file rather than deleting anything yourself.
- */
 function DiagnosticAttachments({
   orderId,
   attachments,
@@ -144,57 +194,72 @@ function DiagnosticAttachments({
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
 
-  const handleFile = useCallback(async (file: File) => {
-    setUploading(true);
-    setUploadError("");
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const response = await fetch(`/api/v1/patient/diagnostics/orders/${orderId}/attachments`, { method: "POST", credentials: "same-origin", body: form });
-      const body = await response.json() as { error?: string; scanResult?: string };
-      if (!response.ok) throw new Error(body.error ?? "The file could not be attached.");
-      if (body.scanResult === "INFECTED") throw new Error("This file failed a security scan and was not attached.");
-      onUploaded();
-    } catch (cause) {
-      setUploadError(cause instanceof Error ? cause.message : "The file could not be attached.");
-    } finally {
-      setUploading(false);
-    }
-  }, [orderId, onUploaded]);
+  const handleFile = useCallback(
+    async (file: File) => {
+      setUploading(true);
+      setUploadError("");
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const response = await fetch(`/api/v1/patient/diagnostics/orders/${orderId}/attachments`, {
+          method: "POST",
+          credentials: "same-origin",
+          body: form,
+        });
+        const body = (await response.json()) as { error?: string; scanResult?: string };
+        if (!response.ok) throw new Error(body.error ?? "The file could not be attached.");
+        if (body.scanResult === "INFECTED") throw new Error("This file failed a security scan and was not attached.");
+        onUploaded();
+      } catch (cause) {
+        setUploadError(cause instanceof Error ? cause.message : "The file could not be attached.");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [orderId, onUploaded],
+  );
 
   return (
-    <div className="mt-3 rounded-xl border border-dashed border-blue-200 bg-blue-50/60 p-3">
-      <p className="text-xs font-black uppercase tracking-wide text-blue-700">Images and files for this test</p>
+    <div className="mt-3 rounded-2xl border border-dashed border-blue-200 bg-blue-50/50 p-4 dark:border-blue-900/50 dark:bg-blue-950/20">
+      <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-blue-700 dark:text-blue-300">
+        <FileCheck2 className="size-4" />
+        Images & reports for this test
+      </div>
       {attachments.length ? (
-        <ul className="mt-2 space-y-1.5">
+        <ul className="mt-2.5 space-y-2">
           {attachments.map((attachment) => (
-            <li className="flex items-center justify-between gap-2 text-sm" key={attachment.id}>
+            <li className="flex items-center justify-between gap-3 rounded-xl border border-blue-100 bg-white px-3.5 py-2.5 text-sm shadow-2xs dark:border-slate-800 dark:bg-slate-900" key={attachment.id}>
               <a
-                className="truncate font-bold text-blue-700 underline-offset-2 hover:underline"
+                className="flex items-center gap-2 truncate font-bold text-blue-700 hover:text-blue-800 dark:text-blue-400"
                 href={`/api/v1/patient/diagnostics/orders/${orderId}/attachments/${attachment.id}/file`}
                 rel="noreferrer"
                 target="_blank"
               >
-                {attachment.title}
+                <Download className="size-3.5 shrink-0 text-blue-500" />
+                <span className="truncate">{attachment.title}</span>
               </a>
-              <span className="shrink-0 text-xs text-slate-400">
-                {formatBytes(attachment.sizeBytes)} · {attachment.uploadedByPatient ? "you" : "your care team"}
+              <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                {formatBytes(attachment.sizeBytes)} · {attachment.uploadedByPatient ? "you" : "care team"}
               </span>
             </li>
           ))}
         </ul>
       ) : (
-        <p className="mt-1 text-xs text-slate-500">No images or files attached yet.</p>
+        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">No external files attached to this order yet.</p>
       )}
-      <label className="mt-3 flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-blue-300 bg-white px-3 text-sm font-bold text-blue-700 transition hover:bg-blue-50">
+      <label className="mt-3 flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-blue-200 bg-white px-4 text-xs font-black text-blue-700 shadow-2xs transition hover:border-blue-300 hover:bg-blue-50/80 dark:border-blue-900 dark:bg-slate-900 dark:text-blue-300">
         <Upload aria-hidden className="size-4" />
-        {uploading ? "Uploading…" : "Add a photo or PDF"}
+        {uploading ? "Uploading file…" : "Add report or photo (PDF, JPEG, PNG)"}
         <input
           accept="application/pdf,image/jpeg,image/png,image/webp"
           capture="environment"
           className="sr-only"
           disabled={uploading}
-          onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void handleFile(file); }}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void handleFile(file);
+          }}
           type="file"
         />
       </label>
@@ -203,91 +268,86 @@ function DiagnosticAttachments({
   );
 }
 
-/**
- * A tappable circular portrait shown in the patient portal's page header on
- * every section — the one personalization touch that follows the patient
- * everywhere, matching the same photo the app shell's identity chip shows.
- * Camera-capable on a phone; a plain file picker on a laptop.
- */
 function PatientAvatarUpload({ givenName, version, onChanged }: { givenName: string; version: number; onChanged: () => void }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [hasPhoto, setHasPhoto] = useState(true);
 
-  const handleFile = useCallback(async (file: File) => {
-    setUploading(true);
-    setUploadError("");
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const response = await fetch("/api/v1/patient/profile/avatar", { method: "POST", credentials: "same-origin", body: form });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null) as { error?: string } | null;
-        throw new Error(body?.error ?? "The photo could not be saved.");
+  const handleFile = useCallback(
+    async (file: File) => {
+      setUploading(true);
+      setUploadError("");
+      try {
+        const form = new FormData();
+        form.append("file", file);
+        const response = await fetch("/api/v1/patient/profile/avatar", { method: "POST", credentials: "same-origin", body: form });
+        if (!response.ok) {
+          const body = ((await response.json().catch(() => null)) as { error?: string } | null);
+          throw new Error(body?.error ?? "The photo could not be saved.");
+        }
+        setHasPhoto(true);
+        onChanged();
+        window.dispatchEvent(new Event(WONFLOW_AVATAR_CHANGED_EVENT));
+      } catch (cause) {
+        setUploadError(cause instanceof Error ? cause.message : "The photo could not be saved.");
+      } finally {
+        setUploading(false);
       }
-      setHasPhoto(true);
-      onChanged();
-      window.dispatchEvent(new Event(WONFLOW_AVATAR_CHANGED_EVENT));
-    } catch (cause) {
-      setUploadError(cause instanceof Error ? cause.message : "The photo could not be saved.");
-    } finally {
-      setUploading(false);
-    }
-  }, [onChanged]);
+    },
+    [onChanged],
+  );
 
   return (
     <div className="relative">
       <label
-        className="group relative flex size-12 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-blue-50 to-violet-100 text-indigo-700 ring-1 ring-indigo-100"
-        title={uploading ? "Uploading…" : "Change your photo"}
+        className="group relative flex size-14 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md ring-2 ring-white/30 transition hover:scale-105"
+        title={uploading ? "Uploading…" : "Change profile photo"}
       >
         {hasPhoto ? (
-          // eslint-disable-next-line @next/next/no-img-element -- served from our own API, not an optimizable static asset
+          // eslint-disable-next-line @next/next/no-img-element
           <img alt="" className="size-full object-cover" key={version} onError={() => setHasPhoto(false)} src={`/api/v1/patient/profile/avatar/file?v=${version}`} />
         ) : (
-          <span aria-hidden className="text-lg font-black">{givenName.charAt(0).toUpperCase()}</span>
+          <span aria-hidden className="text-xl font-black">{givenName.charAt(0).toUpperCase()}</span>
         )}
-        <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-950/0 text-[10px] font-black text-transparent transition group-hover:bg-slate-950/40 group-hover:text-white">
-          {uploading ? "…" : "Edit"}
+        <span className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-950/40 text-[10px] font-black text-white opacity-0 backdrop-blur-2xs transition group-hover:opacity-100">
+          {uploading ? "…" : "Change"}
         </span>
         <input
           accept="image/jpeg,image/png,image/webp"
           capture="user"
           className="sr-only"
           disabled={uploading}
-          onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void handleFile(file); }}
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            event.target.value = "";
+            if (file) void handleFile(file);
+          }}
           type="file"
         />
       </label>
-      {uploadError ? <p className="absolute top-full left-0 mt-1 w-40 text-[11px] font-bold text-red-600">{uploadError}</p> : null}
+      {uploadError ? <p className="absolute top-full left-0 mt-1 w-44 rounded-lg bg-red-50 p-1.5 text-[11px] font-bold text-red-600 shadow-sm">{uploadError}</p> : null}
     </div>
   );
 }
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-5" aria-busy="true" aria-live="polite">
+    <div className="space-y-6" aria-busy="true" aria-live="polite">
       <span className="sr-only">Loading your secure care record</span>
-      <div className="h-36 animate-pulse rounded-3xl bg-slate-100" />
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {[0, 1, 2, 3].map((key) => (
-          <div key={key} className="h-24 animate-pulse rounded-2xl bg-slate-100" />
+      <div className="h-40 animate-pulse rounded-3xl bg-gradient-to-r from-slate-200 to-slate-100 dark:from-slate-800 dark:to-slate-900" />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {[0, 1, 2, 3, 4].map((key) => (
+          <div key={key} className="h-28 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800/60" />
         ))}
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="h-56 animate-pulse rounded-3xl bg-slate-100" />
-        <div className="h-56 animate-pulse rounded-3xl bg-slate-100" />
+        <div className="h-64 animate-pulse rounded-3xl bg-slate-100 dark:bg-slate-800/60" />
+        <div className="h-64 animate-pulse rounded-3xl bg-slate-100 dark:bg-slate-800/60" />
       </div>
     </div>
   );
 }
 
-/**
- * The patient's home/care/reports views — wired to /api/v1/patient/home,
- * which resolves the caller's own linked patient record server-side from
- * their session identity. No endpoint here accepts a patient id from the
- * client, so there is nothing for this component to pass or leak.
- */
 export function PatientAccessDashboard({ section }: { section: Section }) {
   const [home, setHome] = useState<PatientHome | null>(null);
   const [loading, setLoading] = useState(true);
@@ -296,11 +356,12 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
   const [avatarVersion, setAvatarVersion] = useState(0);
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
-    if (mode === "refresh") setRefreshing(true); else setLoading(true);
+    if (mode === "refresh") setRefreshing(true);
+    else setLoading(true);
     setError("");
     try {
       const response = await fetch("/api/v1/patient/home", { credentials: "same-origin", cache: "no-store" });
-      const body = await response.json() as { home?: PatientHome; error?: string };
+      const body = (await response.json()) as { home?: PatientHome; error?: string };
       if (!response.ok || !body.home) throw new Error(body.error ?? "Your care record could not be loaded.");
       setHome(body.home);
     } catch (cause) {
@@ -311,11 +372,14 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
     }
   }, []);
 
-  useEffect(() => { queueMicrotask(() => { void load(); }); }, [load]);
+  useEffect(() => {
+    queueMicrotask(() => {
+      void load();
+    });
+  }, [load]);
 
   const upcoming = useMemo(() => {
     if (!home) return [];
-    // eslint-disable-next-line react-hooks/purity -- splitting past from upcoming visits needs the current instant.
     const now = Date.now();
     return home.appointments
       .filter((item) => new Date(item.startsAt).getTime() >= now && item.status.toUpperCase() !== "CANCELLED")
@@ -323,7 +387,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
   }, [home]);
 
   const criticalResults = useMemo(
-    () => home ? home.diagnosticOrders.filter((order) => order.results.some((result) => result.critical)) : [],
+    () => (home ? home.diagnosticOrders.filter((order) => order.results.some((result) => result.critical)) : []),
     [home],
   );
 
@@ -331,50 +395,132 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
 
   if (error || !home) {
     return (
-      <div className="mx-auto mt-10 max-w-2xl rounded-3xl border border-slate-200 bg-red-50 p-8 text-center">
-        <span className="mx-auto grid size-12 place-items-center rounded-2xl bg-white text-red-600">
-          <ShieldAlert aria-hidden className="size-6" />
+      <div className="mx-auto mt-10 max-w-2xl rounded-3xl border border-red-200 bg-gradient-to-b from-red-50 to-white p-8 text-center shadow-lg dark:border-red-900/50 dark:from-red-950/30 dark:to-slate-900">
+        <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-red-100 text-red-600 shadow-xs dark:bg-red-900/50 dark:text-red-400">
+          <ShieldAlert aria-hidden className="size-7" />
         </span>
-        <h1 className="mt-4 text-xl font-black text-slate-900">Patient record unavailable</h1>
-        <p className="mt-2 text-sm text-slate-600">{error}</p>
+        <h1 className="mt-4 text-xl font-black text-slate-900 dark:text-white">Patient Record Unavailable</h1>
+        <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{error}</p>
         <button
-          className="mt-5 rounded-xl bg-blue-600 px-5 py-2.5 font-bold text-white transition hover:bg-blue-700"
+          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-black text-white shadow-md transition hover:from-blue-700 hover:to-indigo-700"
           onClick={() => void load()}
           type="button"
         >
-          Try again
+          <RefreshCw className="size-4" />
+          Retry Connection
         </button>
       </div>
     );
   }
 
-  const title = section === "home" ? `Welcome, ${home.patient.givenName}` : section === "care" ? "My care" : section === "billing" ? "My billing" : "My reports";
   const nextAppointment = upcoming[0];
   const outstandingInvoices = home.invoices.filter((invoice) => invoice.totalMinor > invoice.paidMinor);
 
-  const tiles: Array<{ label: string; value: number; href: string; icon: LucideIcon }> = [
-    { label: "Upcoming appointments", value: upcoming.length, href: "/patient/appointments", icon: CalendarDays },
-    { label: "Active prescriptions", value: home.prescriptions.length, href: "/patient/care", icon: Pill },
-    { label: "Released reports", value: home.diagnosticOrders.length, href: "/patient/reports", icon: FlaskConical },
-    { label: "Documents", value: home.documents.length, href: "/patient/documents", icon: FileText },
-    { label: "Outstanding invoices", value: outstandingInvoices.length, href: "/patient/billing", icon: ReceiptText },
+  const tiles = [
+    {
+      label: "Appointments",
+      value: upcoming.length,
+      unit: "upcoming",
+      href: "/patient/appointments",
+      icon: CalendarDays,
+      gradient: "from-blue-600 to-indigo-600",
+      accent: "text-blue-600 dark:text-blue-400",
+      bg: "bg-blue-50 dark:bg-blue-950/40",
+    },
+    {
+      label: "Prescriptions",
+      value: home.prescriptions.length,
+      unit: "active",
+      href: "/patient/care",
+      icon: Pill,
+      gradient: "from-emerald-600 to-teal-600",
+      accent: "text-emerald-600 dark:text-emerald-400",
+      bg: "bg-emerald-50 dark:bg-emerald-950/40",
+    },
+    {
+      label: "Test Reports",
+      value: home.diagnosticOrders.length,
+      unit: "released",
+      href: "/patient/reports",
+      icon: FlaskConical,
+      gradient: "from-cyan-600 to-blue-600",
+      accent: "text-cyan-600 dark:text-cyan-400",
+      bg: "bg-cyan-50 dark:bg-cyan-950/40",
+    },
+    {
+      label: "Documents",
+      value: home.documents.length,
+      unit: "saved",
+      href: "/patient/documents",
+      icon: FileText,
+      gradient: "from-purple-600 to-indigo-600",
+      accent: "text-purple-600 dark:text-purple-400",
+      bg: "bg-purple-50 dark:bg-purple-950/40",
+    },
+    {
+      label: "Outstanding",
+      value: outstandingInvoices.length,
+      unit: "invoices",
+      href: "/patient/billing",
+      icon: ReceiptText,
+      gradient: "from-amber-500 to-orange-600",
+      accent: "text-amber-600 dark:text-amber-400",
+      bg: "bg-amber-50 dark:bg-amber-950/40",
+    },
   ];
 
   return (
-    <div className="space-y-5">
-      <WonFlowPageHeader
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
+    <div className="space-y-6">
+      {/* ── Hero Welcome Banner ────────────────────────────────────────── */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-700 via-indigo-700 to-violet-800 p-6 text-white shadow-xl sm:p-8">
+        <div className="absolute -top-24 -right-24 size-96 rounded-full bg-white/10 blur-3xl" />
+        <div className="absolute -bottom-24 -left-24 size-96 rounded-full bg-cyan-500/15 blur-3xl" />
+
+        <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-center gap-5">
+            <PatientAvatarUpload
+              givenName={home.patient.givenName}
+              onChanged={() => setAvatarVersion((current) => current + 1)}
+              version={avatarVersion}
+            />
+
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-white/15 px-3 py-0.5 text-xs font-black tracking-wider text-cyan-200 uppercase backdrop-blur-md">
+                  <ShieldCheck className="size-3.5" />
+                  Verified Patient
+                </span>
+                <span className="text-xs font-mono font-bold text-indigo-200">MRN: {home.patient.patientNumber}</span>
+              </div>
+
+              <h1 className="mt-1.5 text-2xl font-black tracking-tight sm:text-3xl">
+                {section === "home"
+                  ? `Welcome, ${home.patient.givenName} ${home.patient.familyName}`
+                  : section === "care"
+                    ? "My Prescriptions & Care Plan"
+                    : section === "reports"
+                      ? "Diagnostic Reports & Tests"
+                      : "Billing & Hospital Invoices"}
+              </h1>
+
+              <p className="mt-1 text-sm font-medium text-indigo-100">
+                Connected securely to your hospital clinical record and care team.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
             <Link
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 text-sm font-black text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700"
+              className="inline-flex min-h-11 items-center gap-2 rounded-2xl bg-white px-5 text-sm font-black text-indigo-700 shadow-md transition hover:bg-indigo-50 hover:shadow-lg active:scale-98"
               href="/patient/appointments/book"
             >
-              <CalendarPlus aria-hidden className="size-4" />
-              Book appointment
+              <CalendarPlus aria-hidden className="size-4 text-indigo-600" />
+              Book Appointment
             </Link>
+
             <button
               aria-label="Refresh my care record"
-              className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-indigo-200 bg-white px-4 text-sm font-bold text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-60"
+              className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-white/25 bg-white/10 px-4 text-sm font-bold text-white backdrop-blur-md transition hover:bg-white/20 disabled:opacity-50"
               disabled={refreshing}
               onClick={() => void load("refresh")}
               type="button"
@@ -383,86 +529,104 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
               {refreshing ? "Refreshing…" : "Refresh"}
             </button>
           </div>
-        }
-        description={`Medical record ${home.patient.patientNumber} · securely connected with your hospital care team.`}
-        eyebrow="My WonFlow care"
-        leading={<PatientAvatarUpload givenName={home.patient.givenName} onChanged={() => setAvatarVersion((current) => current + 1)} version={avatarVersion} />}
-        title={title}
-      />
+        </div>
+      </div>
 
+      {/* ── Critical Alerts ────────────────────────────────────────────── */}
       {criticalResults.length ? (
-        <div className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-red-50 p-4">
-          <ShieldAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-red-600" />
-          <div>
-            <p className="text-sm font-black text-slate-900">
-              {criticalResults.length === 1 ? "A result needs your attention" : `${criticalResults.length} results need your attention`}
+        <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50/90 p-4.5 shadow-sm dark:border-red-900/50 dark:bg-red-950/40">
+          <ShieldAlert aria-hidden className="mt-0.5 size-5 shrink-0 text-red-600 dark:text-red-400" />
+          <div className="flex-1">
+            <p className="text-sm font-black text-red-950 dark:text-red-200">
+              {criticalResults.length === 1 ? "Important Medical Result Needs Attention" : `${criticalResults.length} Medical Results Need Attention`}
             </p>
-            <p className="mt-1 text-sm text-slate-600">
-              Please contact your care team about {criticalResults.map((order) => order.name).join(", ")}.
+            <p className="mt-0.5 text-xs text-red-800 dark:text-red-300">
+              Please contact your physician or care team regarding {criticalResults.map((order) => order.name).join(", ")}.
             </p>
-            <Link className="mt-2 inline-block text-sm font-black text-red-700 underline underline-offset-4" href="/patient/reports">
-              View reports
+            <Link className="mt-2 inline-flex items-center gap-1 text-xs font-black text-red-700 underline underline-offset-4 hover:text-red-800 dark:text-red-300" href="/patient/reports">
+              View Detailed Reports <ArrowRight className="size-3" />
             </Link>
           </div>
         </div>
       ) : null}
 
+      {/* ── Section Views ──────────────────────────────────────────────── */}
       {section === "home" ? (
         <>
-          <div className="grid grid-cols-2 gap-3 xl:grid-cols-5">
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-2 gap-3.5 xl:grid-cols-5">
             {tiles.map((tile) => (
               <Link
-                className="group rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:border-blue-100 hover:shadow-md sm:p-5"
+                className="group relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xs transition-all duration-200 hover:-translate-y-1 hover:border-blue-200 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900"
                 href={tile.href}
                 key={tile.label}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <span className="text-xs font-black uppercase tracking-wide text-slate-500">{tile.label}</span>
-                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-blue-50 text-blue-600">
-                    <tile.icon aria-hidden className="size-4" />
+                <div className="flex items-start justify-between">
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">{tile.label}</span>
+                  <span className={`grid size-10 place-items-center rounded-2xl ${tile.bg} ${tile.accent} shadow-2xs transition group-hover:scale-110`}>
+                    <tile.icon aria-hidden className="size-5" />
                   </span>
                 </div>
-                <div className="mt-3 text-3xl font-black text-slate-900">{tile.value}</div>
+                <div className="mt-3 flex items-baseline gap-2">
+                  <span className="text-3xl font-black tracking-tight text-slate-900 dark:text-white">{tile.value}</span>
+                  <span className="text-xs font-bold text-slate-400">{tile.unit}</span>
+                </div>
               </Link>
             ))}
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-2">
+          {/* Core Content Grid */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Next Appointment Card */}
             <SectionCard
-              title="Next appointments"
-              description="Your confirmed visits, soonest first."
               action={
-                <Link className="text-sm font-black text-blue-700 underline underline-offset-4" href="/patient/appointments">
-                  See all
+                <Link className="inline-flex items-center gap-1 text-xs font-black text-blue-700 hover:underline dark:text-blue-400" href="/patient/appointments">
+                  View all <ChevronRight className="size-3.5" />
                 </Link>
               }
+              description="Your scheduled hospital consultations"
+              icon={CalendarDays}
+              title="Next Appointments"
             >
               {nextAppointment ? (
-                <div className="mt-4 space-y-3">
-                  <article className="flex items-center gap-4 rounded-2xl border border-blue-100 bg-blue-50 p-4">
-                    <div className="grid shrink-0 place-items-center rounded-xl bg-white px-3 py-2 text-center shadow-sm">
-                      <span className="text-[11px] font-black uppercase text-slate-500">
-                        {new Intl.DateTimeFormat("en-PK", { month: "short" }).format(new Date(nextAppointment.startsAt))}
-                      </span>
-                      <span className="text-2xl font-black leading-none text-slate-900">
-                        {new Intl.DateTimeFormat("en-PK", { day: "2-digit" }).format(new Date(nextAppointment.startsAt))}
-                      </span>
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate font-black text-slate-900">{nextAppointment.service.name}</span>
-                        <StatusPill status={nextAppointment.status} />
+                <div className="space-y-3.5">
+                  <article className="relative overflow-hidden rounded-2xl border border-blue-200/80 bg-gradient-to-r from-blue-50/80 to-indigo-50/50 p-4.5 shadow-xs dark:border-blue-900/50 dark:from-blue-950/30 dark:to-indigo-950/20">
+                    <div className="flex items-center gap-4">
+                      <div className="grid shrink-0 place-items-center rounded-2xl bg-gradient-to-b from-blue-600 to-indigo-600 px-3.5 py-2.5 text-center text-white shadow-md">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-blue-100">
+                          {new Intl.DateTimeFormat("en-PK", { month: "short" }).format(new Date(nextAppointment.startsAt))}
+                        </span>
+                        <span className="text-2xl font-black leading-none tracking-tight">
+                          {new Intl.DateTimeFormat("en-PK", { day: "2-digit" }).format(new Date(nextAppointment.startsAt))}
+                        </span>
                       </div>
-                      <p className="mt-1 text-sm text-slate-600">
-                        {formatTime(nextAppointment.startsAt)} · {nextAppointment.branch.name}
-                      </p>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="truncate font-black text-slate-900 dark:text-white">{nextAppointment.service.name}</span>
+                          <StatusPill status={nextAppointment.status} />
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-3 text-xs text-slate-600 dark:text-slate-400">
+                          <span className="inline-flex items-center gap-1 font-semibold">
+                            <Clock className="size-3.5 text-blue-600" />
+                            {formatTime(nextAppointment.startsAt)}
+                          </span>
+                          <span className="inline-flex items-center gap-1 font-semibold">
+                            <MapPin className="size-3.5 text-indigo-600" />
+                            {nextAppointment.branch.name}
+                          </span>
+                        </div>
+                      </div>
                     </div>
                   </article>
+
                   {upcoming.slice(1, 4).map((item) => (
-                    <article className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3" key={item.id}>
+                    <article className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 shadow-2xs transition hover:bg-slate-100/70 dark:border-slate-800 dark:bg-slate-900/50" key={item.id}>
                       <div className="min-w-0">
-                        <div className="truncate font-bold text-slate-900">{item.service.name}</div>
-                        <div className="text-xs text-slate-500">{formatDate(item.startsAt)} · {item.branch.name}</div>
+                        <div className="truncate font-bold text-slate-900 dark:text-white">{item.service.name}</div>
+                        <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                          {formatDate(item.startsAt)} · {item.branch.name}
+                        </div>
                       </div>
                       <StatusPill status={item.status} />
                     </article>
@@ -470,65 +634,79 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
                 </div>
               ) : (
                 <EmptyState
-                  icon={CalendarDays}
-                  title="No upcoming appointments"
-                  hint="Book a consultation and it will appear here straight away."
                   action={
-                    <Link className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-blue-700" href="/patient/appointments/book">
-                      <CalendarPlus aria-hidden className="size-4" />
-                      Book appointment
+                    <Link className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700" href="/patient/appointments/book">
+                      <CalendarPlus className="size-4" />
+                      Book an Appointment
                     </Link>
                   }
+                  hint="No upcoming hospital appointments scheduled."
+                  icon={CalendarDays}
+                  title="No Upcoming Visits"
                 />
               )}
             </SectionCard>
 
+            {/* Diagnostic Reports Card */}
             <SectionCard
-              title="Recent reports"
-              description="Laboratory and imaging results released to you."
               action={
-                <Link className="text-sm font-black text-blue-700 underline underline-offset-4" href="/patient/reports">
-                  See all
+                <Link className="inline-flex items-center gap-1 text-xs font-black text-blue-700 hover:underline dark:text-blue-400" href="/patient/reports">
+                  View all <ChevronRight className="size-3.5" />
                 </Link>
               }
+              description="Laboratory tests and radiology results"
+              icon={FlaskConical}
+              title="Recent Diagnostic Reports"
             >
               {home.diagnosticOrders.length ? (
-                <div className="mt-4 space-y-3">
+                <div className="space-y-3.5">
                   {home.diagnosticOrders.slice(0, 4).map((item) => (
-                    <article className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-emerald-50 px-4 py-3" key={item.id}>
-                      <div className="min-w-0">
-                        <div className="truncate font-bold text-slate-900">{item.name}</div>
-                        <div className="text-xs text-slate-500">{item.type} · {item.code}</div>
+                    <article className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs transition hover:border-blue-200 hover:shadow-xs dark:border-slate-800 dark:bg-slate-900" key={item.id}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-cyan-50 text-cyan-600 dark:bg-cyan-950/40 dark:text-cyan-400">
+                          <FlaskConical className="size-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate font-black text-slate-900 dark:text-white">{item.name}</div>
+                          <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                            {item.type} · Code: {item.code}
+                          </div>
+                        </div>
                       </div>
                       <StatusPill status={item.status} />
                     </article>
                   ))}
                 </div>
               ) : (
-                <EmptyState icon={FlaskConical} title="No released reports" hint="Results appear here once your care team releases them." />
+                <EmptyState
+                  hint="When your physician or laboratory releases reports, they will appear here."
+                  icon={FlaskConical}
+                  title="No Released Reports"
+                />
               )}
             </SectionCard>
           </div>
 
-          <SectionCard title="Quick actions" description="Common things patients do here.">
-            <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          {/* Quick Actions Bar */}
+          <SectionCard description="Fast shortcuts to common patient operations" icon={Sparkles} title="Quick Actions">
+            <div className="grid gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
               {[
-                { label: "Book appointment", hint: "Choose a doctor and time", href: "/patient/appointments/book", icon: CalendarPlus },
-                { label: "Upload a document", hint: "Share reports with your team", href: "/patient/documents", icon: Upload },
-                { label: "My medicines", hint: "Dosage and instructions", href: "/patient/care", icon: Pill },
-                { label: "My profile", hint: "Contact and identity details", href: "/patient/profile", icon: ClipboardList },
+                { label: "Book Appointment", hint: "Choose doctor and time", href: "/patient/appointments/book", icon: CalendarPlus, color: "text-blue-600 bg-blue-50 dark:bg-blue-950/40 dark:text-blue-400" },
+                { label: "Upload Document", hint: "Share outside reports", href: "/patient/documents", icon: Upload, color: "text-indigo-600 bg-indigo-50 dark:bg-indigo-950/40 dark:text-indigo-400" },
+                { label: "My Prescriptions", hint: "Dosage & medicine guide", href: "/patient/care", icon: Pill, color: "text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 dark:text-emerald-400" },
+                { label: "Profile & Identity", hint: "Personal & emergency info", href: "/patient/profile", icon: User, color: "text-purple-600 bg-purple-50 dark:bg-purple-950/40 dark:text-purple-400" },
               ].map((action) => (
                 <Link
-                  className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 transition hover:-translate-y-0.5 hover:border-blue-100 hover:bg-blue-50"
+                  className="group flex items-center gap-3.5 rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md dark:border-slate-800 dark:bg-slate-900"
                   href={action.href}
                   key={action.label}
                 >
-                  <span className="grid size-9 shrink-0 place-items-center rounded-xl bg-white text-blue-600 shadow-sm">
-                    <action.icon aria-hidden className="size-4" />
+                  <span className={`grid size-11 shrink-0 place-items-center rounded-2xl ${action.color} shadow-2xs transition group-hover:scale-105`}>
+                    <action.icon aria-hidden className="size-5" />
                   </span>
                   <span className="min-w-0">
-                    <span className="block font-black text-slate-900">{action.label}</span>
-                    <span className="block text-xs text-slate-500">{action.hint}</span>
+                    <span className="block font-black text-slate-900 group-hover:text-blue-700 dark:text-white dark:group-hover:text-blue-400">{action.label}</span>
+                    <span className="block text-xs text-slate-500 dark:text-slate-400">{action.hint}</span>
                   </span>
                 </Link>
               ))}
@@ -537,112 +715,123 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
         </>
       ) : null}
 
+      {/* ── Prescriptions & Care Tab ────────────────────────────────────── */}
       {section === "care" ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <SectionCard title="Medicines and instructions" description="Prescriptions your doctor has issued.">
+        <div className="grid gap-6 lg:grid-cols-2">
+          <SectionCard description="Medications prescribed by hospital practitioners" icon={Pill} title="Medicines & Daily Dosages">
             {home.prescriptions.length ? (
-              <div className="mt-4 space-y-3">
+              <div className="space-y-4">
                 {home.prescriptions.map((prescription) => (
-                  <article className="rounded-2xl border border-blue-100 bg-violet-50 p-4" key={prescription.id}>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wide text-slate-500">
-                        <Pill aria-hidden className="size-4" />
-                        Prescription
+                  <article className="rounded-3xl border border-purple-100 bg-gradient-to-b from-purple-50/50 to-white p-5 shadow-xs dark:border-purple-900/40 dark:from-purple-950/20 dark:to-slate-900" key={prescription.id}>
+                    <div className="flex items-center justify-between gap-2 border-b border-purple-100 pb-3 dark:border-purple-900/30">
+                      <span className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wider text-purple-700 dark:text-purple-300">
+                        <Pill className="size-4" />
+                        Prescription Order
                       </span>
                       <StatusPill status={prescription.status} />
                     </div>
-                    <ul className="mt-3 space-y-3">
+
+                    <ul className="mt-3.5 space-y-3.5">
                       {prescription.items.map((item) => (
-                        <li key={item.id}>
-                          <div className="font-black text-slate-900">
+                        <li className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs dark:border-slate-800 dark:bg-slate-900" key={item.id}>
+                          <div className="font-black text-slate-900 dark:text-white">
                             {item.medication.brandName ?? item.medication.genericName} {item.medication.strength}
                           </div>
                           {item.medication.brandName ? (
-                            <div className="text-xs text-slate-500">{item.medication.genericName}</div>
+                            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{item.medication.genericName}</div>
                           ) : null}
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {[item.dosage, item.frequency, item.duration].filter(Boolean).length ? (
-                              [item.dosage, item.frequency, item.duration].filter(Boolean).map((detail) => (
-                                <span className="rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs font-bold text-slate-600" key={detail}>
-                                  {detail}
-                                </span>
-                              ))
-                            ) : (
-                              <span className="text-sm text-slate-500">Follow the prescribed instructions.</span>
-                            )}
+                          <div className="mt-2.5 flex flex-wrap gap-2">
+                            {[item.dosage, item.frequency, item.duration].filter(Boolean).map((detail) => (
+                              <span className="rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1 text-xs font-bold text-purple-800 dark:border-purple-900 dark:bg-purple-950/60 dark:text-purple-200" key={detail}>
+                                {detail}
+                              </span>
+                            ))}
                           </div>
                         </li>
                       ))}
                     </ul>
+
                     {prescription.instructions ? (
-                      <p className="mt-3 rounded-xl bg-white p-3 text-sm font-semibold text-slate-700">{prescription.instructions}</p>
+                      <div className="mt-3.5 rounded-2xl bg-white p-3.5 text-xs font-semibold leading-relaxed text-slate-700 shadow-2xs dark:bg-slate-900 dark:text-slate-300">
+                        <span className="font-black text-purple-700 dark:text-purple-400">Doctor Instructions: </span>
+                        {prescription.instructions}
+                      </div>
                     ) : null}
                   </article>
                 ))}
               </div>
             ) : (
-              <EmptyState icon={Pill} title="No active prescriptions" hint="Medicines prescribed during a consultation will be listed here." />
+              <EmptyState hint="Prescriptions issued during consultations will appear here with instructions." icon={Pill} title="No Active Prescriptions" />
             )}
           </SectionCard>
 
-          <SectionCard title="Tests and follow-up" description="Orders raised by your care team.">
+          <SectionCard description="Clinical tests ordered for you" icon={HeartPulse} title="Lab Orders & Follow-ups">
             {home.diagnosticOrders.length ? (
-              <div className="mt-4 space-y-3">
+              <div className="space-y-3.5">
                 {home.diagnosticOrders.map((order) => (
-                  <article className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3" key={order.id}>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2">
-                        <Stethoscope aria-hidden className="size-4 shrink-0 text-blue-600" />
-                        <span className="truncate font-black text-slate-900">{order.name}</span>
+                  <article className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50/50 to-white p-4 shadow-2xs dark:border-blue-900/30 dark:from-blue-950/20 dark:to-slate-900" key={order.id}>
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
+                        <Stethoscope className="size-5" />
                       </div>
-                      <div className="mt-1 text-xs text-slate-500">{order.type} · {order.code}</div>
+                      <div className="min-w-0">
+                        <div className="truncate font-black text-slate-900 dark:text-white">{order.name}</div>
+                        <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                          {order.type} · Code: {order.code}
+                        </div>
+                      </div>
                     </div>
                     <StatusPill status={order.status} />
                   </article>
                 ))}
               </div>
             ) : (
-              <EmptyState icon={HeartPulse} title="No tests or follow-up" hint="Tests ordered for you will appear here with their progress." />
+              <EmptyState hint="Tests or investigations ordered by clinicians will appear here." icon={HeartPulse} title="No Pending Tests" />
             )}
           </SectionCard>
         </div>
       ) : null}
 
+      {/* ── Reports Tab ────────────────────────────────────────────────── */}
       {section === "reports" ? (
         <SectionCard
-          title="Released laboratory and radiology reports"
-          description="Only results your care team has released are shown."
           action={
-            <Link className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-blue-700" href="/patient/documents">
-              <FileText aria-hidden className="size-4" />
-              My documents
+            <Link className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700" href="/patient/documents">
+              <FileText className="size-3.5" />
+              Manage All Documents
             </Link>
           }
+          description="Detailed lab tests, radiology results, and official attachments released by your hospital"
+          icon={FlaskConical}
+          title="Official Diagnostic Reports"
         >
           {home.diagnosticOrders.length ? (
-            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            <div className="grid gap-6 xl:grid-cols-2">
               {home.diagnosticOrders.map((order) => (
-                <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" key={order.id}>
-                  <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-emerald-50 px-4 py-3">
+                <article className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900" key={order.id}>
+                  <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-5 py-3.5 dark:border-slate-800 dark:bg-slate-800/40">
                     <div className="min-w-0">
-                      <div className="truncate font-black text-slate-900">{order.name}</div>
-                      <div className="text-xs font-bold text-slate-500">{order.type} · {order.code}</div>
+                      <div className="truncate font-black text-slate-900 dark:text-white">{order.name}</div>
+                      <div className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                        {order.type} · Code: {order.code}
+                      </div>
                     </div>
                     <StatusPill status={order.status} />
                   </header>
-                  <div className="space-y-3 p-4">
+
+                  <div className="space-y-4 p-5">
                     {order.results.map((result) => (
                       <div key={result.id}>
                         {result.critical ? (
-                          <p className="mb-2 flex items-center gap-2 rounded-xl bg-red-50 px-3 py-2 text-sm font-black text-red-700">
-                            <ShieldAlert aria-hidden className="size-4" />
-                            Critical result — contact your care team.
-                          </p>
+                          <div className="mb-3 flex items-center gap-2.5 rounded-2xl bg-red-50 p-3.5 text-xs font-black text-red-700 shadow-2xs dark:bg-red-950/40 dark:text-red-300">
+                            <ShieldAlert className="size-4 shrink-0" />
+                            Critical Observation — Immediate physician consultation recommended.
+                          </div>
                         ) : null}
-                        <pre className="overflow-x-auto whitespace-pre-wrap rounded-xl bg-slate-50 p-3 font-sans text-sm text-slate-700">
-                          {result.reportText ?? (result.resultData ? JSON.stringify(result.resultData, null, 2) : "Result released without narrative notes.")}
+                        <pre className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 font-sans text-xs leading-relaxed text-slate-800 shadow-2xs dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+                          {result.reportText ?? (result.resultData ? JSON.stringify(result.resultData, null, 2) : "Report issued without narrative notes.")}
                         </pre>
-                        <p className="mt-2 text-xs text-slate-400">Released {formatDate(result.releasedAt)}</p>
+                        <p className="mt-2 text-right text-[11px] font-bold text-slate-400">Released {formatDate(result.releasedAt)}</p>
                       </div>
                     ))}
                     <DiagnosticAttachments attachments={order.attachments} onUploaded={() => void load("refresh")} orderId={order.id} />
@@ -651,48 +840,69 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
               ))}
             </div>
           ) : (
-            <EmptyState icon={FlaskConical} title="No reports released yet" hint="When a laboratory or imaging report is released to you it will appear here in full." />
+            <EmptyState hint="Laboratory or imaging reports will be available here once approved by clinical staff." icon={FlaskConical} title="No Released Reports Yet" />
           )}
         </SectionCard>
       ) : null}
 
+      {/* ── Billing & Invoices Tab ──────────────────────────────────────── */}
       {section === "billing" ? (
-        <SectionCard title="Invoices and payments" description="Bills issued by the hospital and payments recorded against them.">
+        <SectionCard description="Hospital invoices, fee breakdowns, and payment receipts" icon={ReceiptText} title="Invoices & Account Balance">
           {home.invoices.length ? (
-            <div className="mt-4 space-y-4">
+            <div className="space-y-5">
               {home.invoices.map((invoice) => {
                 const outstandingMinor = invoice.totalMinor - invoice.paidMinor;
                 return (
-                  <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" key={invoice.id}>
-                    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-blue-50 px-4 py-3">
+                  <article className="overflow-hidden rounded-3xl border border-slate-200/80 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900" key={invoice.id}>
+                    <header className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-5 py-4 dark:border-slate-800 dark:bg-slate-800/40">
                       <div className="min-w-0">
-                        <div className="truncate font-black text-slate-900">Invoice {invoice.invoiceNumber}</div>
-                        <div className="text-xs font-bold text-slate-500">{formatDate(invoice.issuedAt ?? invoice.createdAt)}</div>
+                        <div className="text-base font-black text-slate-900 dark:text-white">Invoice #{invoice.invoiceNumber}</div>
+                        <div className="text-xs font-medium text-slate-500 dark:text-slate-400">Issued {formatDate(invoice.issuedAt ?? invoice.createdAt)}</div>
                       </div>
                       <StatusPill status={invoice.status} />
                     </header>
-                    <div className="space-y-3 p-4">
-                      <ul className="space-y-1 text-sm text-slate-700">
+
+                    <div className="space-y-4 p-5">
+                      <ul className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
                         {invoice.lines.map((line) => (
-                          <li className="flex items-center justify-between gap-2" key={line.id}>
-                            <span className="min-w-0 truncate">{line.description} {line.quantity > 1 ? `× ${line.quantity}` : ""}</span>
-                            <span className="shrink-0 font-bold">{formatMoney(line.totalMinor, invoice.currencyCode)}</span>
+                          <li className="flex items-center justify-between gap-3 py-2.5" key={line.id}>
+                            <span className="font-medium text-slate-800 dark:text-slate-200">
+                              {line.description} {line.quantity > 1 ? `× ${line.quantity}` : ""}
+                            </span>
+                            <span className="font-black text-slate-900 dark:text-white">{formatMoney(line.totalMinor, invoice.currencyCode)}</span>
                           </li>
                         ))}
                       </ul>
-                      <div className="grid grid-cols-3 gap-2 rounded-xl bg-slate-50 p-3 text-center text-xs">
-                        <div><p className="font-black uppercase text-slate-400">Total</p><p className="mt-1 text-sm font-black text-slate-900">{formatMoney(invoice.totalMinor, invoice.currencyCode)}</p></div>
-                        <div><p className="font-black uppercase text-slate-400">Paid</p><p className="mt-1 text-sm font-black text-emerald-700">{formatMoney(invoice.paidMinor, invoice.currencyCode)}</p></div>
-                        <div><p className="font-black uppercase text-slate-400">Outstanding</p><p className={`mt-1 text-sm font-black ${outstandingMinor > 0 ? "text-red-700" : "text-emerald-700"}`}>{formatMoney(outstandingMinor, invoice.currencyCode)}</p></div>
-                      </div>
-                      {invoice.payments.length ? (
+
+                      {/* Summary Banner */}
+                      <div className="grid grid-cols-3 gap-3 rounded-2xl bg-slate-50 p-4 text-center dark:bg-slate-800/60">
                         <div>
-                          <p className="text-xs font-black uppercase tracking-wide text-slate-500">Payments</p>
-                          <ul className="mt-2 space-y-1.5">
+                          <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Total Billed</p>
+                          <p className="mt-1 text-base font-black text-slate-900 dark:text-white">{formatMoney(invoice.totalMinor, invoice.currencyCode)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Amount Paid</p>
+                          <p className="mt-1 text-base font-black text-emerald-600 dark:text-emerald-400">{formatMoney(invoice.paidMinor, invoice.currencyCode)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-black uppercase tracking-wider text-slate-400">Balance Due</p>
+                          <p className={`mt-1 text-base font-black ${outstandingMinor > 0 ? "text-red-600 dark:text-red-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+                            {formatMoney(outstandingMinor, invoice.currencyCode)}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Payment History */}
+                      {invoice.payments.length ? (
+                        <div className="pt-2">
+                          <p className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">Recorded Payment Transactions</p>
+                          <ul className="mt-2.5 space-y-2">
                             {invoice.payments.map((payment) => (
-                              <li className="flex items-center justify-between gap-2 text-sm" key={payment.id}>
-                                <span className="text-slate-600">{formatDate(payment.completedAt ?? payment.createdAt)} · {payment.method}</span>
-                                <span className="flex items-center gap-2 font-bold">
+                              <li className="flex items-center justify-between gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-3.5 py-2.5 text-xs dark:border-slate-800 dark:bg-slate-800/40" key={payment.id}>
+                                <span className="font-semibold text-slate-600 dark:text-slate-400">
+                                  {formatDate(payment.completedAt ?? payment.createdAt)} · {payment.method}
+                                </span>
+                                <span className="flex items-center gap-2 font-black text-slate-900 dark:text-white">
                                   {formatMoney(payment.amountMinor, invoice.currencyCode)}
                                   <StatusPill status={payment.status} />
                                 </span>
@@ -701,7 +911,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
                           </ul>
                         </div>
                       ) : (
-                        <p className="text-xs text-slate-500">No payment has been recorded against this invoice yet. Payments are collected and recorded at the hospital billing counter.</p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400">Payments can be completed at hospital reception or billing counters.</p>
                       )}
                     </div>
                   </article>
@@ -709,7 +919,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
               })}
             </div>
           ) : (
-            <EmptyState icon={ReceiptText} title="No invoices yet" hint="Bills issued by the hospital's billing counter will appear here." />
+            <EmptyState hint="Hospital billing invoices and receipt statements will be listed here." icon={ReceiptText} title="No Invoices Issued Yet" />
           )}
         </SectionCard>
       ) : null}

@@ -238,12 +238,173 @@ async function main(): Promise<void> {
   }
 
   console.log(`✓ Hospital administrator created: ${adminEmail}`);
+
+  // ── 2f. Optional Doctor Account ──────────────────────────────────────────
+  const doctorEmail = process.env.WONFLOW_INITIAL_DOCTOR_EMAIL?.trim().toLowerCase();
+  const doctorPassword = process.env.WONFLOW_INITIAL_DOCTOR_PASSWORD?.trim();
+  const doctorName = process.env.WONFLOW_INITIAL_DOCTOR_NAME?.trim() || "Dr. Medical Practitioner";
+  const doctorSpecialty = process.env.WONFLOW_INITIAL_DOCTOR_SPECIALTY?.trim() || "General Medicine";
+
+  let doctorCreated = false;
+  if (doctorEmail && doctorPassword) {
+    const doctorPasswordHash = await hashPassword(doctorPassword);
+
+    const doctorIdentity = await database.identity.upsert({
+      where: { normalizedEmail: doctorEmail },
+      create: {
+        email: doctorEmail,
+        normalizedEmail: doctorEmail,
+        passwordHash: doctorPasswordHash,
+        mustChangePassword: true,
+        status: "ACTIVE",
+        emailVerifiedAt: new Date(),
+        passwordChangedAt: new Date(),
+      },
+      update: {
+        passwordHash: doctorPasswordHash,
+        mustChangePassword: true,
+        status: "ACTIVE",
+        failedLoginCount: 0,
+        lockedUntil: null,
+        archivedAt: null,
+      },
+    });
+
+    const doctorMembership = await database.tenantMembership.upsert({
+      where: { tenantId_identityId: { tenantId: tenant.id, identityId: doctorIdentity.id } },
+      create: {
+        tenantId: tenant.id,
+        identityId: doctorIdentity.id,
+        organizationId: organization.id,
+        primaryBranchId: branch.id,
+        displayName: doctorName,
+        status: "ACTIVE",
+        workspaceCodes: ["DOCTOR"],
+        primaryWorkspace: "DOCTOR",
+      },
+      update: {
+        organizationId: organization.id,
+        primaryBranchId: branch.id,
+        displayName: doctorName,
+        status: "ACTIVE",
+        workspaceCodes: ["DOCTOR"],
+        primaryWorkspace: "DOCTOR",
+        archivedAt: null,
+      },
+    });
+
+    const doctorRole = await database.role.upsert({
+      where: { tenantId_code: { tenantId: tenant.id, code: "DOCTOR" } },
+      create: {
+        tenantId: tenant.id,
+        code: "DOCTOR",
+        name: "Doctor",
+        isSystem: true,
+      },
+      update: { name: "Doctor", isActive: true, archivedAt: null },
+    });
+
+    await database.membershipRole.deleteMany({
+      where: { tenantId: tenant.id, membershipId: doctorMembership.id },
+    });
+    await database.membershipRole.create({
+      data: {
+        tenantId: tenant.id,
+        membershipId: doctorMembership.id,
+        roleId: doctorRole.id,
+        branchId: branch.id,
+      },
+    });
+
+    const doctorPermissionSet = new Set<string>(workspacePermissions["DOCTOR"] ?? []);
+    await database.rolePermission.deleteMany({
+      where: { tenantId: tenant.id, roleId: doctorRole.id },
+    });
+
+    for (const permission of permissionRows.filter((p) => doctorPermissionSet.has(p.code))) {
+      await database.rolePermission.upsert({
+        where: {
+          tenantId_roleId_permissionId: {
+            tenantId: tenant.id,
+            roleId: doctorRole.id,
+            permissionId: permission.id,
+          },
+        },
+        create: { tenantId: tenant.id, roleId: doctorRole.id, permissionId: permission.id },
+        update: { effect: "ALLOW" },
+      });
+    }
+
+    const staffProfile = await database.staffProfile.upsert({
+      where: { membershipId: doctorMembership.id },
+      create: {
+        tenantId: tenant.id,
+        membershipId: doctorMembership.id,
+        branchId: branch.id,
+        employeeNumber: "DOC-001",
+        staffType: "DOCTOR",
+        title: doctorName,
+      },
+      update: {
+        branchId: branch.id,
+        staffType: "DOCTOR",
+        status: "ACTIVE",
+        title: doctorName,
+      },
+    });
+
+    const doctorProfile = await database.doctorProfile.upsert({
+      where: { staffProfileId: staffProfile.id },
+      create: {
+        tenantId: tenant.id,
+        staffProfileId: staffProfile.id,
+        specialty: doctorSpecialty,
+        publiclyBookable: true,
+      },
+      update: {
+        specialty: doctorSpecialty,
+        publiclyBookable: true,
+      },
+    });
+
+    await database.serviceDefinition.upsert({
+      where: { tenantId_code: { tenantId: tenant.id, code: "PROD-OPD-CONSULT" } },
+      create: {
+        tenantId: tenant.id,
+        branchId: branch.id,
+        doctorId: doctorProfile.id,
+        code: "PROD-OPD-CONSULT",
+        name: `${doctorSpecialty} Consultation`,
+        category: "Consultation",
+        description: "Standard outpatient doctor consultation.",
+        durationMinutes: 20,
+        priceMinorUnits: 150_000,
+        consultationModes: ["IN_PERSON", "ONLINE"],
+        publiclyBookable: true,
+        isActive: true,
+      },
+      update: {
+        branchId: branch.id,
+        doctorId: doctorProfile.id,
+        name: `${doctorSpecialty} Consultation`,
+        isActive: true,
+      },
+    });
+
+    console.log(`✓ Doctor created: ${doctorEmail} (${doctorName})`);
+    doctorCreated = true;
+  }
+
   console.log("\nProduction seed complete.");
-  console.log("\nIMPORTANT: Both accounts are set to require a password change on first login.");
-  console.table([
+  console.log("\nIMPORTANT: Seeded accounts are set to require a password change on first login.");
+  const summaryAccounts = [
     { role: "Platform Admin", email: platformEmail, mustChangePassword: true },
     { role: "Hospital Admin", email: adminEmail, mustChangePassword: true },
-  ]);
+  ];
+  if (doctorCreated && doctorEmail) {
+    summaryAccounts.push({ role: "Doctor", email: doctorEmail, mustChangePassword: true });
+  }
+  console.table(summaryAccounts);
 
   await database.$disconnect();
 }

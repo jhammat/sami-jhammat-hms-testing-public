@@ -239,7 +239,7 @@ function PrintablePharmacyReceiptContent({
 
             <div>
               <h1 className="text-xl font-black tracking-[-0.04em]">
-                WonFlow Central Demo Hospital
+                WonFlow Hospital Pharmacy
               </h1>
 
               <p className="mt-1 text-xs text-slate-500">
@@ -485,7 +485,7 @@ function PrintablePharmacyReceiptContent({
         ) : null}
 
         <footer className="mt-10 border-t border-slate-300 pt-5 text-center text-[10px] leading-5 text-slate-500">
-          Demonstration pharmacy receipt only. Medicines must be checked and supplied by authorized pharmacy personnel.
+          Official pharmacy dispensing receipt. Medicines must be checked and supplied by authorized pharmacy personnel.
         </footer>
       </article>
     </div>

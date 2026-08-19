@@ -54,58 +54,78 @@ export async function createSessionCookie(account: AuthenticatedAccount, context
 export async function clearSessionCookie(reason = "user-logout"): Promise<void> {
   const store = await cookies();
   const rawToken = store.get(WONFLOW_SESSION_COOKIE)?.value;
-  if (rawToken) await database.authSession.updateMany({ where: { tokenHash: tokenHash(rawToken), status: "ACTIVE" },
-    data: { status: "REVOKED", revokedAt: new Date(), revocationReason: reason } });
+  if (rawToken) {
+    try {
+      await database.authSession.updateMany({
+        where: { tokenHash: tokenHash(rawToken), status: "ACTIVE" },
+        data: { status: "REVOKED", revokedAt: new Date(), revocationReason: reason },
+      });
+    } catch (err) {
+      console.error("[auth] Failed to revoke session in database:", err);
+    }
+  }
   store.delete(WONFLOW_SESSION_COOKIE);
   store.delete(WONFLOW_PASSWORD_CHANGE_COOKIE);
 }
 
 export async function readSession(): Promise<WonFlowSessionPayload | null> {
-  const store = await cookies();
-  const rawToken = store.get(WONFLOW_SESSION_COOKIE)?.value;
-  if (!rawToken) return null;
-  const session = await database.authSession.findUnique({ where: { tokenHash: tokenHash(rawToken) },
-    include: { identity: true, membership: { include: { organization: true, primaryBranch: true } } } });
-  /*
-   * A tenant suspended mid-session must not keep working on the strength of
-   * an already-issued cookie — the very next request revokes the session,
-   * so the user is bounced to login and sees the real reason there, not
-   * left able to keep using a suspended organization until they next sign
-   * in on their own.
-   */
-  let tenantSuspended = false;
-  if (session?.tenantId && session.status === "ACTIVE") {
-    const tenant = await database.tenant.findUnique({ where: { id: session.tenantId }, select: { status: true } });
-    if (tenant && tenant.status !== "ACTIVE") {
-      tenantSuspended = true;
-      await database.authSession.update({ where: { id: session.id }, data: { status: "REVOKED", revokedAt: new Date(), revocationReason: `tenant-${tenant.status.toLowerCase()}` } });
-    }
-  }
-  if (!session || session.status !== "ACTIVE" || session.expiresAt <= new Date() || tenantSuspended) {
+  try {
+    const store = await cookies();
+    const rawToken = store.get(WONFLOW_SESSION_COOKIE)?.value;
+    if (!rawToken) return null;
+    const session = await database.authSession.findUnique({
+      where: { tokenHash: tokenHash(rawToken) },
+      include: { identity: true, membership: { include: { organization: true, primaryBranch: true } } },
+    });
     /*
-     * A stale cookie is dropped opportunistically. readSession is also called
-     * while rendering (the root layout reads it), and cookies may only be
-     * modified in a Server Action or Route Handler — attempting it during
-     * render throws and takes the whole page down. Returning null is the
-     * meaningful result; the cookie is replaced on the next sign-in and
-     * clearSessionCookie removes it for good on sign-out.
+     * A tenant suspended mid-session must not keep working on the strength of
+     * an already-issued cookie — the very next request revokes the session,
+     * so the user is bounced to login and sees the real reason there, not
+     * left able to keep using a suspended organization until they next sign
+     * in on their own.
      */
-    try {
-      store.delete(WONFLOW_SESSION_COOKIE);
-    } catch {
-      // Read-only cookie store: nothing to clean up here.
+    let tenantSuspended = false;
+    if (session?.tenantId && session.status === "ACTIVE") {
+      const tenant = await database.tenant.findUnique({ where: { id: session.tenantId }, select: { status: true } });
+      if (tenant && tenant.status !== "ACTIVE") {
+        tenantSuspended = true;
+        await database.authSession.update({
+          where: { id: session.id },
+          data: { status: "REVOKED", revokedAt: new Date(), revocationReason: `tenant-${tenant.status.toLowerCase()}` },
+        });
+      }
     }
+    if (!session || session.status !== "ACTIVE" || session.expiresAt <= new Date() || tenantSuspended) {
+      /*
+       * A stale cookie is dropped opportunistically. readSession is also called
+       * while rendering (the root layout reads it), and cookies may only be
+       * modified in a Server Action or Route Handler — attempting it during
+       * render throws and takes the whole page down. Returning null is the
+       * meaningful result; the cookie is replaced on the next sign-in and
+       * clearSessionCookie removes it for good on sign-out.
+       */
+      try {
+        store.delete(WONFLOW_SESSION_COOKIE);
+      } catch {
+        // Read-only cookie store: nothing to clean up here.
+      }
+      return null;
+    }
+    await database.authSession.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
+    const role: WonFlowSessionPayload["role"] = session.identity.isPlatformAdministrator && !session.membershipId
+      ? "platform" : session.workspace ? session.workspace.toLowerCase() as WonFlowSessionPayload["role"] : "admin";
+    return {
+      sessionId: session.id, identityId: session.identityId, membershipId: session.membershipId,
+      tenantId: session.tenantId, organizationId: session.organizationId, branchId: session.branchId, workspace: session.workspace,
+      role, email: session.identity.email, name: session.membership?.displayName ?? session.identity.email,
+      orgLabel: session.membership?.organization.displayName ?? "WonFlow Platform",
+      branchLabel: session.membership?.primaryBranch?.name ?? null, portalLabel: labels[role],
+      permissionCodes: session.identity.isPlatformAdministrator ? session.identity.platformPermissionCodes : [],
+      passwordChangeRequired: session.identity.mustChangePassword,
+      mfaVerified: session.mfaVerifiedAt !== null, expiresAt: session.expiresAt.toISOString(),
+    };
+  } catch (error) {
+    console.error("[auth] Failed to read session:", error);
     return null;
   }
-  await database.authSession.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
-  const role: WonFlowSessionPayload["role"] = session.identity.isPlatformAdministrator && !session.membershipId
-    ? "platform" : session.workspace ? session.workspace.toLowerCase() as WonFlowSessionPayload["role"] : "admin";
-  return { sessionId: session.id, identityId: session.identityId, membershipId: session.membershipId,
-    tenantId: session.tenantId, organizationId: session.organizationId, branchId: session.branchId, workspace: session.workspace,
-    role, email: session.identity.email, name: session.membership?.displayName ?? session.identity.email,
-    orgLabel: session.membership?.organization.displayName ?? "WonFlow Platform",
-    branchLabel: session.membership?.primaryBranch?.name ?? null, portalLabel: labels[role],
-    permissionCodes: session.identity.isPlatformAdministrator ? session.identity.platformPermissionCodes : [],
-    passwordChangeRequired: session.identity.mustChangePassword,
-    mfaVerified: session.mfaVerifiedAt !== null, expiresAt: session.expiresAt.toISOString() };
 }

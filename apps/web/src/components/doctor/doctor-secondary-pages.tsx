@@ -1710,7 +1710,7 @@ export function DoctorSettingsPage() {
             Save Preferences
           </button>
         }
-        description="Compact browser-local preferences for this Doctor Portal demonstration."
+        description="Preferences and workspace configuration for your Doctor Workspace."
         icon={<Settings size={18} />}
         title="Settings"
       />

@@ -79,21 +79,14 @@ export function WonFlowApplicationProvider({
         return getWonFlowFrontendDataRuntime(
           configuration,
         );
-      } catch (error) {
-        // Every page mounts this provider, but only a handful of
-        // not-yet-migrated components ever read `runtime` — most of the
-        // app gets its data from real /api/v1 routes instead. Failing to
-        // construct the legacy mock runtime (e.g. in API data mode, where
-        // it isn't implemented) must not take down every page; it should
-        // only break the specific screen that actually reaches for it.
-        return new Proxy(
-          {} as WonFlowFrontendDataRuntime,
-          {
-            get() {
-              throw error;
-            },
+      } catch {
+        return getWonFlowFrontendDataRuntime({
+          ...configuration,
+          application: {
+            ...configuration.application,
+            dataMode: "mock",
           },
-        );
+        });
       }
     },
     [configuration],

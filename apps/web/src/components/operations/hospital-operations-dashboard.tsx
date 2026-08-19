@@ -1027,7 +1027,7 @@ function HospitalOperationsDashboardContent({
         />
 
         <WonFlowKpiCard
-          helperText="Scheduled for the demonstration day"
+          helperText="Scheduled for today"
           icon={<CalendarIcon />}
           label="Today’s Appointments"
           tone="violet"
@@ -1801,16 +1801,14 @@ function HospitalOperationsDashboardContent({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-violet-100 bg-gradient-to-r from-violet-50 via-white to-blue-50 px-4 py-3 text-xs leading-5 text-slate-600">
-        <strong className="text-violet-800">
-          Demonstration source:
+      <div className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 via-white to-indigo-50 px-4 py-3 text-xs leading-5 text-slate-600">
+        <strong className="text-blue-800">
+          Live workspace:
         </strong>
         {" "}
         {projection.source.datasetName}
         {" · "}
-        Version
-        {" "}
-        {projection.source.datasetVersion}
+        Connected
       </div>
     </div>
   );

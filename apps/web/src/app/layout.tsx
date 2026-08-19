@@ -49,6 +49,11 @@ export const metadata: Metadata = {
   },
   description:
     "WonFlow hospital operations and clinical care platform.",
+  icons: {
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/apple-icon.png",
+  },
 };
 
 export default async function RootLayout({
