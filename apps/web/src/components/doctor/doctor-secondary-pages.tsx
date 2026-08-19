@@ -11,6 +11,7 @@ import {
   FlaskConical,
   History,
   Image as ImageIcon,
+  Plus,
   Save,
   Search,
   Settings,
@@ -74,6 +75,7 @@ import {
   useDoctorPortalContext,
 } from "./doctor-portal-shell";
 import { DoctorProfileAvatar } from "./doctor-profile-avatar";
+import { AddHospitalBranchModal } from "./doctor-portal-workflow";
 
 const SECONDARY_DATA_EVENTS = [
   "wonflow:demo-patients-changed",
@@ -1373,6 +1375,7 @@ function DoctorProfileEditor({
     profileImageData: doctor.profileImageUrl ?? "",
   });
   const [saving, setSaving] = useState(false);
+  const [showAddBranchModal, setShowAddBranchModal] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
 
@@ -1421,6 +1424,15 @@ function DoctorProfileEditor({
 
   return (
     <form className="p-5" onSubmit={save}>
+      <AddHospitalBranchModal
+        isOpen={showAddBranchModal}
+        onClose={() => setShowAddBranchModal(false)}
+        onCreated={(newBranch) => {
+          update("primaryBranchId", newBranch.id);
+          setMessage(`Branch "${newBranch.name}" created and set as primary location.`);
+          onSaved();
+        }}
+      />
       <div className="grid items-start gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
         <aside className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-5 text-center">
           <DoctorProfileAvatar
@@ -1464,12 +1476,22 @@ function DoctorProfileEditor({
           </div>
           <label className={label}>Login email<input className={`${field} bg-slate-50 text-slate-500`} disabled value={doctor.email ?? ""} /></label>
           <label className={label}>Employee number<input className={`${field} bg-slate-50 text-slate-500`} disabled value={doctor.employeeNumber} /></label>
-          <label className={label}>Primary location
+          <div>
+            <div className="flex items-center justify-between">
+              <label className={label}>Primary location</label>
+              <button
+                className="flex items-center gap-1 text-[9px] font-bold text-indigo-600 hover:text-indigo-800"
+                onClick={() => setShowAddBranchModal(true)}
+                type="button"
+              >
+                <Plus size={10} /> Add branch
+              </button>
+            </div>
             <select className={field} onChange={(event) => update("primaryBranchId", event.target.value)} value={form.primaryBranchId}>
               <option value="">Select location</option>
               {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
             </select>
-          </label>
+          </div>
           <label className={label}>Default consultation minutes<input className={field} max={480} min={5} onChange={(event) => update("durationMinutes", Number(event.target.value))} type="number" value={form.durationMinutes} /></label>
           <div className="mt-3 border-b border-slate-200 pb-3 sm:col-span-2">
             <h3 className="text-sm font-black text-slate-950">Patient-facing profile</h3>

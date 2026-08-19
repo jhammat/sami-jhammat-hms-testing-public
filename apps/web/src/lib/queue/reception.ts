@@ -135,9 +135,36 @@ export const QUEUE_ROOMS_CHANGED_EVENT = "wonflow:queue-rooms-changed";
 // In-memory, session-lived state: the doctor's live queue call/skip/finish
 // panel still runs on this demo model (no queue-status-transition endpoints
 // exist yet — see FIX-19 report), so it keeps working, but nothing here
-// survives a reload or is shared across users, unlike real persisted data.
 let demoQueueEntries: DemoQueueEntry[] = [];
+const CUSTOM_ROOMS_STORAGE_KEY = "wonflow:custom-rooms";
 let customQueueRooms: QueueRoomOption[] = [];
+
+function loadCustomRoomsFromStorage(): QueueRoomOption[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_ROOMS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter(
+        (item): item is QueueRoomOption =>
+          typeof item === "object" && item !== null && typeof item.id === "string" && typeof item.label === "string",
+      );
+    }
+  } catch {
+    // Ignore parse errors
+  }
+  return [];
+}
+
+function saveCustomRoomsToStorage(rooms: QueueRoomOption[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(CUSTOM_ROOMS_STORAGE_KEY, JSON.stringify(rooms));
+  } catch {
+    // Ignore storage errors
+  }
+}
 
 export const QUEUE_ROOM_OPTIONS:
   readonly QueueRoomOption[] = [
@@ -184,22 +211,36 @@ export const QUEUE_ROOM_OPTIONS:
   ];
 
 export function readQueueRoomOptions(): QueueRoomOption[] {
+  const stored = loadCustomRoomsFromStorage();
+  const mergedCustom = [...customQueueRooms];
+  for (const item of stored) {
+    if (!mergedCustom.some((r) => r.id === item.id || r.label.toLowerCase() === item.label.toLowerCase())) {
+      mergedCustom.push(item);
+    }
+  }
+  customQueueRooms = mergedCustom;
   return [...QUEUE_ROOM_OPTIONS, ...customQueueRooms];
 }
 
-export function addCustomConsultationRoom(labelInput: string): QueueRoomOption {
+export function addCustomConsultationRoom(
+  labelInput: string,
+  category: QueueRoomOption["category"] = "consultation",
+): QueueRoomOption {
   const label = labelInput.trim();
   if (label.length < 2) throw new Error("Enter a room name with at least 2 characters.");
   const rooms = readQueueRoomOptions();
   const existing = rooms.find((room) => room.label.toLowerCase() === label.toLowerCase());
   if (existing) return existing;
   const room: QueueRoomOption = {
-    id: `custom-room-${crypto.randomUUID()}`,
+    id: `custom-room-${typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)}`,
     label,
-    category: "consultation",
+    category: category || "consultation",
   };
   customQueueRooms = [...customQueueRooms, room];
-  if (typeof window !== "undefined") window.dispatchEvent(new Event(QUEUE_ROOMS_CHANGED_EVENT));
+  saveCustomRoomsToStorage(customQueueRooms);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(QUEUE_ROOMS_CHANGED_EVENT));
+  }
   return room;
 }
 

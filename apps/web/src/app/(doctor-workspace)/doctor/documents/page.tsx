@@ -176,6 +176,19 @@ export default function DoctorDocumentsPage() {
 
   const handleGenerateCredentials = async (auto = true) => {
     if (!selectedPatientId) return;
+    const typedPassword = customLoginPassword.trim();
+    // Mirrors validateNewPassword on the server, so a password the server
+    // would reject is caught before the round-trip.
+    if (!auto && typedPassword) {
+      if (typedPassword.length < 12) {
+        setError("The temporary password must contain at least 12 characters.");
+        return;
+      }
+      if (!/[A-Z]/.test(typedPassword) || !/[a-z]/.test(typedPassword) || !/[0-9]/.test(typedPassword)) {
+        setError("The temporary password must contain uppercase, lowercase and numeric characters.");
+        return;
+      }
+    }
     setProvisioningBusy(true);
     setError("");
     try {

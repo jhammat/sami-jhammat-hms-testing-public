@@ -1,5 +1,9 @@
 import path from "node:path";
+import dotenv from "dotenv";
 import { defineConfig } from "vitest/config";
+
+dotenv.config({ path: path.resolve(__dirname, "../../.env.local") });
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 export default defineConfig({
   resolve: {
@@ -10,9 +14,9 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts", "tests/integration/**/*.test.ts"],
+    include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
     env: {
-      DATABASE_URL: process.env.DATABASE_URL || "postgresql://wonflow:wonflow_local_only@localhost:5432/wonflow_phase1_dev?schema=public",
+      DATABASE_URL: process.env.DATABASE_URL || "postgresql://wonflow:wonflow_dev_password@localhost:5432/wonflow_phase1_dev?schema=public",
       REDIS_URL: process.env.REDIS_URL || "redis://localhost:6379",
     },
     coverage: {

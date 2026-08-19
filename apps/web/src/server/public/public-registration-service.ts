@@ -207,7 +207,7 @@ function isUniqueConstraintError(caught: unknown): boolean {
  * login credential, not a fuzzy match) rather than merged.
  */
 export async function submitPublicBooking(tenantSlug: string, input: PublicBookingInput) {
-  const { tenant } = await resolveTenantBySlug(tenantSlug);
+  const { tenant, organization } = await resolveTenantBySlug(tenantSlug);
 
   const givenName = input.givenName.trim();
   const familyName = input.familyName.trim();
@@ -287,6 +287,19 @@ export async function submitPublicBooking(tenantSlug: string, input: PublicBooki
           // so the doctor sees one consistent set of source labels everywhere,
           // not a second parallel vocabulary invented for this one channel.
           consentData: { consentToContact: true, referralSource: "online-booking" },
+        },
+      });
+
+      await transaction.tenantMembership.create({
+        data: {
+          tenantId: tenant.id,
+          identityId: identity.id,
+          organizationId: organization.id,
+          primaryBranchId: rule.branchId,
+          displayName: [givenName, familyName].filter(Boolean).join(" "),
+          status: "ACTIVE",
+          workspaceCodes: ["PATIENT"],
+          primaryWorkspace: "PATIENT",
         },
       });
 

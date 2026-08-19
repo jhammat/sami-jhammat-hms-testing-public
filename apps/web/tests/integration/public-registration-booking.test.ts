@@ -101,6 +101,12 @@ describe("public website registration + booking", () => {
     expect(identity!.passwordHash).not.toBeNull();
     expect(identity!.emailVerifiedAt).toBeNull();
 
+    const membership = await database.tenantMembership.findFirst({ where: { tenantId, identityId: identity!.id } });
+    expect(membership).not.toBeNull();
+    expect(membership!.status).toBe("ACTIVE");
+    expect(membership!.workspaceCodes).toEqual(["PATIENT"]);
+    expect(membership!.primaryWorkspace).toBe("PATIENT");
+
     const patientAccess = await database.patientAccess.findFirst({ where: { identityId: identity!.id }, include: { patient: true } });
     expect(patientAccess).not.toBeNull();
     expect(patientAccess!.isPrimary).toBe(true);

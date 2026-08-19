@@ -103,6 +103,28 @@ export const saveDoctorSitting = (input: {
 export const setDoctorSittingStatus = (sittingId: string, status: "PLANNED" | "AVAILABLE" | "ON_BREAK" | "FINISHED") =>
   phaseOneApi<{ sitting: DoctorSittingRecord }>(`/api/v1/doctor/sittings/${sittingId}/status`, { method: "POST", body: JSON.stringify({ status }) });
 
+export interface DoctorBranchRecord {
+  id: string;
+  name: string;
+  code: string;
+  timezone: string;
+  isMainBranch: boolean;
+}
+
+export const createDoctorBranch = (input: {
+  name: string;
+  code?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  timezone?: string;
+  currencyCode?: string;
+}) =>
+  phaseOneApi<{ branch: DoctorBranchRecord }>("/api/v1/doctor/branches", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+
 export const patchDoctorQueue = (appointmentId: string, action: DoctorQueueAction) =>
   phaseOneApi<{ appointment: DoctorDashboardAppointment }>(`/api/v1/doctor/queue/${appointmentId}`, { method: "PATCH", body: JSON.stringify({ action }) });
 

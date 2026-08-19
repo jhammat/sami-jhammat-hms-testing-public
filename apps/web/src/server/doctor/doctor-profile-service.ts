@@ -147,6 +147,91 @@ export class DoctorProfileService {
     });
     return (await this.getProfile(requestContext)).profile;
   }
+
+  async createBranch(
+    requestContext: WonFlowRequestContext,
+    input: {
+      name: string;
+      code?: string;
+      phone?: string;
+      email?: string;
+      address?: string | object;
+      timezone?: string;
+      currencyCode?: string;
+      isMainBranch?: boolean;
+    },
+  ) {
+    const { context, profile } = await resolveProfile(requestContext);
+    const name = input.name?.trim();
+    if (!name || name.length < 2) {
+      throw new WonFlowApiError(400, "invalid-branch-name", "Enter a hospital branch name with at least 2 characters.");
+    }
+
+    let code = input.code?.trim().toUpperCase();
+    if (!code) {
+      const slug = name.replace(/[^a-zA-Z0-9]+/g, "-").toUpperCase().replace(/^-+|-+$/g, "").slice(0, 40);
+      code = slug || `BRANCH-${Date.now().toString(36).toUpperCase()}`;
+    }
+
+    // Ensure unique code for tenant
+    const existing = await database.branch.findFirst({
+      where: { tenantId: context.tenantId, code },
+    });
+    if (existing) {
+      code = `${code.slice(0, 60)}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+    }
+
+    const branch = await database.$transaction(async (tx) => {
+      if (input.isMainBranch) {
+        await tx.branch.updateMany({
+          where: { tenantId: context.tenantId, organizationId: context.organizationId, isMainBranch: true },
+          data: { isMainBranch: false },
+        });
+      }
+
+      const entity = await tx.branch.create({
+        data: {
+          tenantId: context.tenantId,
+          organizationId: context.organizationId,
+          code,
+          name,
+          status: "ACTIVE",
+          isMainBranch: input.isMainBranch ?? false,
+          timezone: input.timezone || "Asia/Karachi",
+          currencyCode: input.currencyCode || "PKR",
+          email: input.email?.trim() || null,
+          phone: input.phone?.trim() || null,
+          address: typeof input.address === "object" ? input.address : input.address ? { formatted: input.address } : undefined,
+        },
+      });
+
+      await tx.auditEvent.create({
+        data: {
+          tenantId: context.tenantId,
+          branchId: entity.id,
+          actorMembershipId: context.membershipId,
+          sessionId: context.sessionId,
+          requestId: context.requestId,
+          action: "doctor.branch.created",
+          entityType: "branch",
+          entityId: entity.id,
+          severity: "INFORMATION",
+          sourceApplication: context.sourceApplication,
+        },
+      });
+
+      return entity;
+    });
+
+    return {
+      id: branch.id,
+      name: branch.name,
+      code: branch.code,
+      timezone: branch.timezone,
+      isMainBranch: branch.isMainBranch,
+    };
+  }
 }
 
 export const doctorProfileService = new DoctorProfileService();
+

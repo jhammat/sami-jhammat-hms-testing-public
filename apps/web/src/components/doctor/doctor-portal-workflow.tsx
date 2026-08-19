@@ -6,18 +6,22 @@ import type {
 import {
   AlertTriangle,
   Bell,
+  Building2,
   CalendarClock,
   CalendarDays,
   CheckCircle2,
   Clock,
   Clock3,
   DoorClosed,
+  DoorOpen,
   FileClock,
   HeartPulse,
   ListFilter,
+  Loader2,
   MapPin,
   Pause,
   Play,
+  Plus,
   RefreshCw,
   Search,
   Square,
@@ -40,12 +44,14 @@ import {
 } from "@/lib/doctor-sittings";
 import type { DemoDoctorSitting } from "@/lib/doctor-sittings";
 import {
+  addCustomConsultationRoom,
   calculateDemoQueueWaitMinutes,
   QUEUE_ROOMS_CHANGED_EVENT,
   QUEUE_ROOM_OPTIONS,
   readQueueRoomOptions,
 } from "@/lib/queue";
 import type { DemoQueueEntry, DemoQueuePriority, DemoQueueStatus } from "@/lib/queue";
+import { createDoctorBranch } from "@/lib/api/doctor-api";
 
 import { DoctorConsultationFeeCard } from "./doctor-consultation-fee-card";
 import { DoctorPageHeader } from "./doctor-page-header";
@@ -387,16 +393,291 @@ function describeSittingStatus(sitting: DemoDoctorSitting | undefined, waiting: 
   };
 }
 
+export function AddCustomRoomModal({
+  isOpen,
+  onClose,
+  onCreated,
+}: {
+  isOpen: boolean;
+  onClose(): void;
+  onCreated(roomLabel: string): void;
+}) {
+  const [label, setLabel] = useState("");
+  const [category, setCategory] = useState<"consultation" | "procedure" | "triage">("consultation");
+  const [error, setError] = useState<string>();
+
+  if (!isOpen) return null;
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmed = label.trim();
+    if (trimmed.length < 2) {
+      setError("Please enter a room name with at least 2 characters.");
+      return;
+    }
+    try {
+      const room = addCustomConsultationRoom(trimmed, category);
+      onCreated(room.label);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to add custom room.");
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+      <div
+        aria-modal="true"
+        className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+        role="dialog"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
+              <DoorOpen size={18} />
+            </span>
+            <div>
+              <h3 className="text-sm font-black text-slate-950">Add Custom Room</h3>
+              <p className="text-[11px] text-slate-500">Add a consultation room to your workspace</p>
+            </div>
+          </div>
+          <button
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
+          {error ? (
+            <p className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-xs font-bold text-rose-700">{error}</p>
+          ) : null}
+
+          <div>
+            <label className="block text-[10px] font-black uppercase text-slate-500">
+              Room Name / Number *
+              <input
+                autoFocus
+                className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                onChange={(e) => {
+                  setLabel(e.target.value);
+                  setError(undefined);
+                }}
+                placeholder="e.g. Room 402, Consultation Suite B"
+                required
+                value={label}
+              />
+            </label>
+          </div>
+
+          <div>
+            <label className="block text-[10px] font-black uppercase text-slate-500">
+              Room Type
+              <select
+                className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                onChange={(e) => setCategory(e.target.value as "consultation" | "procedure" | "triage")}
+                value={category}
+              >
+                <option value="consultation">Consultation Room</option>
+                <option value="procedure">Procedure Room</option>
+                <option value="triage">Triage / Pre-OPD</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+            <button
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+              onClick={onClose}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700"
+              type="submit"
+            >
+              <Plus size={14} /> Add Room
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+export function AddHospitalBranchModal({
+  isOpen,
+  onClose,
+  onCreated,
+}: {
+  isOpen: boolean;
+  onClose(): void;
+  onCreated(branch: { id: string; name: string; timezone: string; isMainBranch: boolean }): void;
+}) {
+  const [name, setName] = useState("");
+  const [code, setCode] = useState("");
+  const [phone, setPhone] = useState("");
+  const [address, setAddress] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string>();
+
+  if (!isOpen) return null;
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const trimmedName = name.trim();
+    if (trimmedName.length < 2) {
+      setError("Please enter a hospital branch name with at least 2 characters.");
+      return;
+    }
+    setSaving(true);
+    setError(undefined);
+    try {
+      const response = await createDoctorBranch({
+        name: trimmedName,
+        code: code.trim() || undefined,
+        phone: phone.trim() || undefined,
+        address: address.trim() || undefined,
+      });
+      onCreated(response.branch);
+      onClose();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create hospital branch.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+      <div
+        aria-modal="true"
+        className="w-full max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl"
+        role="dialog"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-50 text-indigo-600">
+              <Building2 size={18} />
+            </span>
+            <div>
+              <h3 className="text-sm font-black text-slate-950">Add Hospital Branch</h3>
+              <p className="text-[11px] text-slate-500">Register a new branch for your hospital organization</p>
+            </div>
+          </div>
+          <button
+            aria-label="Close"
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+            onClick={onClose}
+            type="button"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <form className="mt-4 space-y-3" onSubmit={handleSubmit}>
+          {error ? (
+            <p className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-xs font-bold text-rose-700">{error}</p>
+          ) : null}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="block text-[10px] font-black uppercase text-slate-500">
+                Branch / Location Name *
+                <input
+                  autoFocus
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  onChange={(e) => {
+                    setName(e.target.value);
+                    setError(undefined);
+                  }}
+                  placeholder="e.g. North Wing Hospital, City Clinic"
+                  required
+                  value={name}
+                />
+              </label>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-black uppercase text-slate-500">
+                Branch Code (optional)
+                <input
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  onChange={(e) => setCode(e.target.value.toUpperCase())}
+                  placeholder="e.g. NWH, CITY"
+                  value={code}
+                />
+              </label>
+            </div>
+
+            <div>
+              <label className="block text-[10px] font-black uppercase text-slate-500">
+                Contact Phone (optional)
+                <input
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="+92 300 1234567"
+                  type="tel"
+                  value={phone}
+                />
+              </label>
+            </div>
+
+            <div className="sm:col-span-2">
+              <label className="block text-[10px] font-black uppercase text-slate-500">
+                Address (optional)
+                <input
+                  className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder="e.g. Plot 45, Medical Enclave, Sector G-8"
+                  value={address}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-slate-100 pt-3">
+            <button
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+              disabled={saving}
+              onClick={onClose}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+              disabled={saving}
+              type="submit"
+            >
+              {saving ? <Loader2 className="animate-spin" size={14} /> : <Plus size={14} />}
+              {saving ? "Creating..." : "Create Branch"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function SittingControls({ model }: { model: DoctorWorkflowModel }) {
   const rooms = useConsultationRooms();
-  const { resolvedBranchId: sittingBranchId } = useSittingBranch(model.legacyBranchId);
+  const { branches, resolvedBranchId: sittingBranchId, addBranch, reloadBranches } = useSittingBranch(model.legacyBranchId);
   const businessDate = model.businessDate;
 
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
   const [roomLabel, setRoomLabel] = useState(model.sitting?.roomLabel ?? "");
   const [startTime, setStartTime] = useState(model.sitting?.sittingStartTime ?? "09:00");
   const [endTime, setEndTime] = useState(model.sitting?.sittingEndTime ?? "13:00");
   const [minutes, setMinutes] = useState(String(model.sitting?.averageConsultationMinutes ?? 15));
   const [editingRoom, setEditingRoom] = useState(false);
+
+  const [showAddRoomModal, setShowAddRoomModal] = useState(false);
+  const [showAddBranchModal, setShowAddBranchModal] = useState(false);
 
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ActionResultState>({ status: "idle" });
@@ -407,19 +688,29 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
       setStartTime(model.sitting?.sittingStartTime ?? "09:00");
       setEndTime(model.sitting?.sittingEndTime ?? "13:00");
       setMinutes(String(model.sitting?.averageConsultationMinutes ?? 15));
+      if (model.sitting?.branchId) {
+        setSelectedBranchId(model.sitting.branchId);
+      }
     });
   }, [model.sitting]);
 
+  useEffect(() => {
+    if (!selectedBranchId && sittingBranchId) {
+      setSelectedBranchId(sittingBranchId);
+    }
+  }, [selectedBranchId, sittingBranchId]);
+
+  const activeBranchId = selectedBranchId || sittingBranchId;
   const isNotStarted = model.sitting === undefined || model.sitting.status === "not-started" || model.sitting.status === "finished";
 
   const { blockers: startBlockers, loading: readinessLoading } = useStartSittingReadiness(
     isNotStarted,
-    sittingBranchId,
+    activeBranchId,
     businessDate,
     roomLabel,
   );
 
-  const occupiedRooms = useRoomOccupancy(sittingBranchId, businessDate, model.doctorId);
+  const occupiedRooms = useRoomOccupancy(activeBranchId, businessDate, model.doctorId);
   const occupiedByLabel = useMemo(
     () => new Map(occupiedRooms.map((occupied) => [occupied.roomLabel, occupied.doctorName])),
     [occupiedRooms],
@@ -447,8 +738,8 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
    * this shows a result the database does not yet have.
    */
   async function save(startNow: boolean): Promise<void> {
-    if (sittingBranchId === undefined) {
-      setResult({ status: "error", message: "No hospital branch is available for your account. Ask an administrator to assign you to a branch in Admin → Team → Staff." });
+    if (!activeBranchId) {
+      setResult({ status: "error", message: "No hospital branch is available. Please add or select a branch before saving." });
       return;
     }
     if (!roomLabel.trim()) {
@@ -469,7 +760,7 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
     setResult({ status: "pending", message: startNow ? "Starting sitting…" : "Saving…" });
 
     const outcome = await persistDoctorSitting({
-      branchId: sittingBranchId,
+      branchId: activeBranchId,
       businessDate,
       sittingStartTime: startTime,
       sittingEndTime: endTime,
@@ -560,13 +851,65 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
 
         <ActionResult result={result} />
 
-        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          <label className="text-[9px] font-black uppercase text-slate-500">
-            Consultation room
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          <div className="flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <label className="text-[9px] font-black uppercase text-slate-500">
+                Hospital branch
+              </label>
+              <button
+                className="flex items-center gap-0.5 text-[9px] font-bold text-indigo-600 hover:text-indigo-800"
+                onClick={() => setShowAddBranchModal(true)}
+                type="button"
+              >
+                <Plus size={10} /> Add
+              </button>
+            </div>
             <select
               className={fieldClass}
               disabled={!isNotStarted && !editingRoom}
-              onChange={(event) => setRoomLabel(event.target.value)}
+              onChange={(event) => {
+                if (event.target.value === "__add_new_branch__") {
+                  setShowAddBranchModal(true);
+                } else {
+                  setSelectedBranchId(event.target.value);
+                }
+              }}
+              value={activeBranchId ?? ""}
+            >
+              {branches.length === 0 ? <option value="">No branch available</option> : null}
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}{b.isMainBranch ? " (Main)" : ""}
+                </option>
+              ))}
+              <option value="__add_new_branch__">+ Add hospital branch...</option>
+            </select>
+          </div>
+
+          <div className="flex flex-col justify-between">
+            <div className="flex items-center justify-between">
+              <label className="text-[9px] font-black uppercase text-slate-500">
+                Consultation room
+              </label>
+              <button
+                className="flex items-center gap-0.5 text-[9px] font-bold text-indigo-600 hover:text-indigo-800"
+                onClick={() => setShowAddRoomModal(true)}
+                type="button"
+              >
+                <Plus size={10} /> Add
+              </button>
+            </div>
+            <select
+              className={fieldClass}
+              disabled={!isNotStarted && !editingRoom}
+              onChange={(event) => {
+                if (event.target.value === "__add_new_custom_room__") {
+                  setShowAddRoomModal(true);
+                } else {
+                  setRoomLabel(event.target.value);
+                }
+              }}
               value={roomLabel}
             >
               <option value="">Select room</option>
@@ -578,8 +921,10 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
                   </option>
                 );
               })}
+              <option value="__add_new_custom_room__">+ Add custom room...</option>
             </select>
-          </label>
+          </div>
+
           <label className="text-[9px] font-black uppercase text-slate-500">
             Planned start
             <input className={fieldClass} disabled={!isNotStarted} onChange={(event) => setStartTime(event.target.value)} type="time" value={startTime} />
@@ -594,6 +939,33 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
           </label>
         </div>
         <p className="text-[10px] text-slate-500">{slotCount > 0 ? `≈ ${slotCount} appointment slot${slotCount === 1 ? "" : "s"} in these hours` : "Enter valid hours to see the slot count"}</p>
+
+        {/* Modals for Adding Custom Room and Hospital Branch */}
+        <AddCustomRoomModal
+          isOpen={showAddRoomModal}
+          onClose={() => setShowAddRoomModal(false)}
+          onCreated={(newRoomLabel) => {
+            setRoomLabel(newRoomLabel);
+            setResult({ status: "success", message: `Custom room "${newRoomLabel}" added and selected.` });
+          }}
+        />
+
+        <AddHospitalBranchModal
+          isOpen={showAddBranchModal}
+          onClose={() => setShowAddBranchModal(false)}
+          onCreated={(newBranch) => {
+            addBranch({
+              id: newBranch.id,
+              name: newBranch.name,
+              timezone: newBranch.timezone,
+              isMainBranch: newBranch.isMainBranch,
+            });
+            setSelectedBranchId(newBranch.id);
+            reloadBranches();
+            model.reload();
+            setResult({ status: "success", message: `Hospital branch "${newBranch.name}" created and selected.` });
+          }}
+        />
 
         <div className="flex flex-wrap gap-2 pt-1">
           {isNotStarted ? (
