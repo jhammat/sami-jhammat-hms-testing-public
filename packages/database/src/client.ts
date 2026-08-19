@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config } from "dotenv";
 
-config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../.env.local') });
+config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../.env.local'), quiet: true });
 
 import {
   PrismaPg,

@@ -6,6 +6,8 @@ import type { AvailableLoginContext, AuthenticatedAccount } from "./account-serv
 import type { WonFlowSessionPayload } from "./session";
 
 const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
+const isNextControlFlowError = (error: unknown): boolean =>
+  typeof (error as { digest?: unknown } | null)?.digest === "string";
 const labels: Record<WonFlowSessionPayload["role"], string> = {
   platform: "Platform Administration", admin: "Hospital Administration", reception: "Reception",
   doctor: "Doctor Workspace", patient: "Patient Portal", laboratory: "Laboratory", radiology: "Radiology",
@@ -125,6 +127,13 @@ export async function readSession(): Promise<WonFlowSessionPayload | null> {
       mfaVerified: session.mfaVerifiedAt !== null, expiresAt: session.expiresAt.toISOString(),
     };
   } catch (error) {
+    /*
+     * Next signals control flow (redirect, notFound, bailing out of static
+     * rendering when `cookies()` is read) by throwing a digest-carrying error.
+     * Swallowing those breaks the framework — a static bail-out must reach the
+     * renderer so the route is marked dynamic instead of logging on every page.
+     */
+    if (isNextControlFlowError(error)) throw error;
     console.error("[auth] Failed to read session:", error);
     return null;
   }

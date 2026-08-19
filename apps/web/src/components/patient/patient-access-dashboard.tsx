@@ -2,11 +2,9 @@
 
 import Link from "next/link";
 import {
-  Activity,
   ArrowRight,
   CalendarDays,
   CalendarPlus,
-  CheckCircle2,
   ChevronRight,
   Clock,
   Download,
@@ -24,7 +22,6 @@ import {
   Stethoscope,
   Upload,
   User,
-  Video,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -354,6 +351,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [avatarVersion, setAvatarVersion] = useState(0);
+  const [loadedAt, setLoadedAt] = useState(0);
 
   const load = useCallback(async (mode: "initial" | "refresh" = "initial") => {
     if (mode === "refresh") setRefreshing(true);
@@ -364,6 +362,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
       const body = (await response.json()) as { home?: PatientHome; error?: string };
       if (!response.ok || !body.home) throw new Error(body.error ?? "Your care record could not be loaded.");
       setHome(body.home);
+      setLoadedAt(Date.now());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Your care record could not be loaded.");
     } finally {
@@ -380,11 +379,10 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
 
   const upcoming = useMemo(() => {
     if (!home) return [];
-    const now = Date.now();
     return home.appointments
-      .filter((item) => new Date(item.startsAt).getTime() >= now && item.status.toUpperCase() !== "CANCELLED")
+      .filter((item) => new Date(item.startsAt).getTime() >= loadedAt && item.status.toUpperCase() !== "CANCELLED")
       .sort((first, second) => new Date(first.startsAt).getTime() - new Date(second.startsAt).getTime());
-  }, [home]);
+  }, [home, loadedAt]);
 
   const criticalResults = useMemo(
     () => (home ? home.diagnosticOrders.filter((order) => order.results.some((result) => result.critical)) : []),

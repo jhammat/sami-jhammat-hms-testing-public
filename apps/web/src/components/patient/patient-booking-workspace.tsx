@@ -10,10 +10,8 @@ import {
   Clock,
   Info,
   MapPin,
-  Sparkles,
   Stethoscope,
   TriangleAlert,
-  User,
   Video,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";

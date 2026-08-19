@@ -225,7 +225,6 @@ function CalculatorModal({
           .replace(/÷/g, "/")
           .replace(/[^0-9+\-*/.]/g, "");
         if (!sanitized) return;
-        // eslint-disable-next-line @typescript-eslint/no-implied-eval
         const calc = new Function(`return (${sanitized})`)();
         if (typeof calc === "number" && Number.isFinite(calc)) {
           const resStr = String(Math.round(calc * 100) / 100);
@@ -447,7 +446,7 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
   const [method, setMethod] = useState<BillingPaymentMethod>("cash");
   const [paymentAccount, setPaymentAccount] = useState<string>("Main Cash Drawer");
   const [reference, setReference] = useState("");
-  const [collectNow, setCollectNow] = useState(true);
+  const [collectNow] = useState(true);
   const [error, setError] = useState("");
   const [receipt, setReceipt] = useState<{
     invoice: InvoiceRecord;
@@ -796,7 +795,7 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
   }
 
   // Filtered & Paginated Recent Invoices
-  const allInvoices = invoicesResource.data?.invoices ?? [];
+  const allInvoices = useMemo(() => invoicesResource.data?.invoices ?? [], [invoicesResource.data]);
   const filteredInvoices = useMemo(() => {
     return allInvoices.filter((inv) => {
       const q = invoiceSearchQuery.toLowerCase().trim();
