@@ -1,9 +1,5 @@
-import {
-  PatientRegistrationWorkflow,
-} from "@/components/patients";
+import { redirect } from "next/navigation";
 
 export default function PatientRegistrationPage() {
-  return (
-    <PatientRegistrationWorkflow />
-  );
+  redirect("/operations/reception");
 }

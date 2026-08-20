@@ -29,7 +29,7 @@ export function useWonFlowPagination<T>(items: readonly T[], pageSize: number) {
   };
 }
 
-const pageButtonClass = "inline-flex min-h-9 min-w-9 items-center justify-center gap-1 rounded-xl border border-slate-200 px-2.5 text-xs font-bold text-slate-700 transition hover:border-blue-300 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40";
+const pageButtonClass = "inline-flex min-h-9 min-w-9 items-center justify-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-indigo-500/40 dark:hover:bg-slate-700";
 
 /** Page numbers around the current page, with gaps collapsed to an ellipsis. */
 function pageNumbers(page: number, pageCount: number): Array<number | "gap"> {
@@ -58,14 +58,14 @@ export function WonFlowPagination({
 }) {
   if (total === 0) return null;
   return (
-    <nav aria-label={`${noun} pagination`} className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3">
-      <p className="text-xs font-semibold text-slate-500">Showing {firstShown}–{lastShown} of {total} {noun}</p>
+    <nav aria-label={`${noun} pagination`} className="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">Showing {firstShown}–{lastShown} of {total} {noun}</p>
       {pageCount > 1 ? (
         <div className="flex items-center gap-1.5">
           <button className={pageButtonClass} disabled={page <= 1} onClick={() => onPageChange(page - 1)} type="button"><ChevronLeft aria-hidden="true" size={14} />Previous</button>
           {pageNumbers(page, pageCount).map((value, index) => value === "gap"
-            ? <span className="px-1 text-xs font-bold text-slate-400" key={`gap-${index}`}>…</span>
-            : <button aria-current={value === page ? "page" : undefined} className={`${pageButtonClass} ${value === page ? "border-blue-500 bg-blue-50 text-blue-700" : ""}`} key={value} onClick={() => onPageChange(value)} type="button">{value}</button>)}
+            ? <span className="px-1 text-xs font-bold text-slate-400 dark:text-slate-500" key={`gap-${index}`}>…</span>
+            : <button aria-current={value === page ? "page" : undefined} className={`${pageButtonClass} ${value === page ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:border-indigo-500 dark:bg-indigo-950/60 dark:text-indigo-300" : ""}`} key={value} onClick={() => onPageChange(value)} type="button">{value}</button>)}
           <button className={pageButtonClass} disabled={page >= pageCount} onClick={() => onPageChange(page + 1)} type="button">Next<ChevronRight aria-hidden="true" size={14} /></button>
         </div>
       ) : null}

@@ -48,43 +48,43 @@ const tones: Record<
 > = {
   neutral: {
     frame:
-      "border-slate-200 bg-slate-50/70",
+      "border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/60",
     icon:
-      "bg-white text-slate-600 ring-slate-200",
+      "bg-white text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700",
     title:
-      "text-slate-950",
+      "text-slate-950 dark:text-white",
     description:
-      "text-slate-600",
+      "text-slate-600 dark:text-slate-400",
   },
   violet: {
     frame:
-      "border-violet-200 bg-violet-50/65",
+      "border-violet-200 bg-violet-50/65 dark:border-violet-500/20 dark:bg-violet-950/30",
     icon:
-      "bg-white text-violet-700 ring-violet-200",
+      "bg-white text-violet-700 ring-violet-200 dark:bg-violet-900/80 dark:text-violet-300 dark:ring-violet-700/50",
     title:
-      "text-violet-950",
+      "text-violet-950 dark:text-violet-100",
     description:
-      "text-violet-800",
+      "text-violet-800 dark:text-violet-300/80",
   },
   warning: {
     frame:
-      "border-amber-200 bg-amber-50",
+      "border-amber-200 bg-amber-50 dark:border-amber-500/20 dark:bg-amber-950/30",
     icon:
-      "bg-white text-amber-700 ring-amber-200",
+      "bg-white text-amber-700 ring-amber-200 dark:bg-amber-900/80 dark:text-amber-300 dark:ring-amber-700/50",
     title:
-      "text-amber-950",
+      "text-amber-950 dark:text-amber-100",
     description:
-      "text-amber-800",
+      "text-amber-800 dark:text-amber-300/80",
   },
   danger: {
     frame:
-      "border-red-200 bg-red-50",
+      "border-red-200 bg-red-50 dark:border-red-500/20 dark:bg-red-950/30",
     icon:
-      "bg-white text-red-700 ring-red-200",
+      "bg-white text-red-700 ring-red-200 dark:bg-red-900/80 dark:text-red-300 dark:ring-red-700/50",
     title:
-      "text-red-950",
+      "text-red-950 dark:text-red-100",
     description:
-      "text-red-800",
+      "text-red-800 dark:text-red-300/80",
   },
 };
 

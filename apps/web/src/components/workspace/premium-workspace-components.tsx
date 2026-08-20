@@ -124,17 +124,17 @@ export function WonFlowPageHeader({
   actions,
 }: WonFlowPageHeaderProps) {
   return (
-    <header className="wf-page-header relative isolate overflow-hidden rounded-[24px] border border-white/80 bg-gradient-to-br from-white via-indigo-50/45 to-cyan-50/70 shadow-[0_18px_50px_rgba(37,99,235,0.10)] ring-1 ring-indigo-100/70">
-      <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-violet-400/15 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-28 left-1/3 h-52 w-52 rounded-full bg-cyan-400/15 blur-3xl" />
-      <div className="pointer-events-none absolute inset-0 opacity-[0.20] [background-image:radial-gradient(circle_at_1px_1px,rgba(99,102,241,0.28)_1px,transparent_0)] [background-size:18px_18px]" />
+    <header className="wf-page-header relative isolate overflow-hidden rounded-[24px] border border-white/80 dark:border-slate-800 bg-gradient-to-br from-white via-indigo-50/45 to-cyan-50/70 dark:from-slate-900 dark:via-slate-800/90 dark:to-slate-900 shadow-[0_18px_50px_rgba(37,99,235,0.10)] dark:shadow-none ring-1 ring-indigo-100/70 dark:ring-slate-800">
+      <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-violet-400/15 dark:bg-violet-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-28 left-1/3 h-52 w-52 rounded-full bg-cyan-400/15 dark:bg-cyan-500/10 blur-3xl" />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.20] [background-image:radial-gradient(circle_at_1px_1px,rgba(99,102,241,0.28)_1px,transparent_0)] dark:[background-image:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.15)_1px,transparent_0)] [background-size:18px_18px]" />
 
       <div className="relative px-4 py-4 sm:px-5 lg:px-6">
         {breadcrumbs !==
         undefined ? (
           <nav
             aria-label="Breadcrumb"
-            className="mb-2.5 flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400"
+            className="mb-2.5 flex flex-wrap items-center gap-2 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-400 dark:text-slate-500"
           >
             {breadcrumbs.map(
               (
@@ -148,7 +148,7 @@ export function WonFlowPageHeader({
                   {breadcrumb.href !==
                   undefined ? (
                     <Link
-                      className="transition hover:text-blue-700"
+                      className="transition hover:text-blue-700 dark:hover:text-blue-400 text-slate-500 dark:text-slate-400"
                       href={
                         breadcrumb.href
                       }
@@ -158,7 +158,7 @@ export function WonFlowPageHeader({
                       }
                     </Link>
                   ) : (
-                    <span className="text-slate-600">
+                    <span className="text-slate-700 dark:text-slate-300">
                       {
                         breadcrumb.label
                       }
@@ -170,7 +170,7 @@ export function WonFlowPageHeader({
                     1 ? (
                     <span
                       aria-hidden="true"
-                      className="text-slate-300"
+                      className="text-slate-300 dark:text-slate-600"
                     >
                       /
                     </span>
@@ -185,7 +185,7 @@ export function WonFlowPageHeader({
           <div className="flex min-w-0 items-center gap-3.5">
             {leading !==
             undefined ? (
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] border border-white/80 bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 text-white shadow-[0_10px_28px_rgba(79,70,229,0.28)] ring-1 ring-indigo-200">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[15px] border border-white/80 dark:border-indigo-500/30 bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 text-white shadow-[0_10px_28px_rgba(79,70,229,0.28)] ring-1 ring-indigo-200 dark:ring-indigo-800">
                 {leading}
               </div>
             ) : null}
@@ -193,7 +193,7 @@ export function WonFlowPageHeader({
             <div className="min-w-0">
               {eyebrow !==
               undefined ? (
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-600">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-400">
                   {eyebrow}
                 </div>
               ) : null}
@@ -206,7 +206,7 @@ export function WonFlowPageHeader({
                     : "",
                   "text-2xl font-black",
                   "tracking-[-0.04em]",
-                  "text-slate-950",
+                  "text-slate-950 dark:text-white",
                   "sm:text-[27px]",
                   "sm:leading-tight",
                 ].join(" ")}
@@ -216,14 +216,14 @@ export function WonFlowPageHeader({
 
               {description !==
               undefined ? (
-                <p className="mt-1.5 max-w-4xl text-sm leading-5 text-slate-600">
+                <p className="mt-1.5 max-w-4xl text-sm leading-5 text-slate-600 dark:text-slate-300">
                   {description}
                 </p>
               ) : null}
 
               {metadata !==
               undefined ? (
-                <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[10px] font-semibold text-slate-500">
+                <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[10px] font-semibold text-slate-500 dark:text-slate-400">
                   {metadata}
                 </div>
               ) : null}
@@ -386,12 +386,12 @@ export function WonFlowOperationalPanel({
     toneStyles[tone];
 
   return (
-    <section className="wf-operational-panel min-w-0 overflow-hidden rounded-[22px] border border-slate-200/80 bg-white/95 shadow-[0_12px_36px_rgba(15,23,42,0.06)] ring-1 ring-white">
+    <section className="wf-operational-panel min-w-0 overflow-hidden rounded-[22px] border border-slate-200/80 dark:border-slate-800 bg-white/95 dark:bg-slate-900 shadow-[0_12px_36px_rgba(15,23,42,0.06)] dark:shadow-none ring-1 ring-white/60 dark:ring-slate-850">
       <header
         className={[
           "wf-operational-panel-header",
           "flex flex-col gap-4",
-          "bg-gradient-to-r from-slate-50 via-white to-indigo-50/55",
+          "bg-gradient-to-r from-slate-50 via-white to-indigo-50/55 dark:from-slate-900 dark:via-slate-850/80 dark:to-slate-900 border-b border-slate-200/80 dark:border-slate-800",
           "sm:flex-row",
           "sm:items-center",
           "sm:justify-between",
@@ -421,13 +421,13 @@ export function WonFlowOperationalPanel({
           )}
 
           <div className="min-w-0">
-            <h2 className="text-base font-black tracking-[-0.025em] text-slate-950">
+            <h2 className="text-base font-black tracking-[-0.025em] text-slate-950 dark:text-white">
               {title}
             </h2>
 
             {description !==
             undefined ? (
-              <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">
+              <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500 dark:text-slate-400">
                 {description}
               </p>
             ) : null}
@@ -457,7 +457,7 @@ export function WonFlowOperationalPanel({
 
       {footer !==
       undefined ? (
-        <footer className="border-t border-slate-200 bg-slate-50 px-5 py-3.5 text-xs leading-5 text-slate-500 sm:px-6">
+        <footer className="border-t border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/80 px-5 py-3.5 text-xs leading-5 text-slate-500 dark:text-slate-400 sm:px-6">
           {footer}
         </footer>
       ) : null}
@@ -487,18 +487,18 @@ export function WonFlowActionBar({
   secondaryActions,
 }: WonFlowActionBarProps) {
   return (
-    <section className="relative min-w-0 overflow-hidden rounded-[20px] border border-indigo-100/80 bg-gradient-to-r from-white via-slate-50/60 to-indigo-50/70 p-4 shadow-[0_10px_30px_rgba(15,23,42,0.055)]">
-      <div className="pointer-events-none absolute -right-12 -top-16 h-36 w-36 rounded-full bg-blue-400/10 blur-2xl" />
+    <section className="relative min-w-0 overflow-hidden rounded-[20px] border border-indigo-100/80 dark:border-slate-800 bg-gradient-to-r from-white via-slate-50/60 to-indigo-50/70 dark:from-slate-900 dark:via-slate-850/60 dark:to-slate-900 p-4 shadow-[0_10px_30px_rgba(15,23,42,0.055)] dark:shadow-none">
+      <div className="pointer-events-none absolute -right-12 -top-16 h-36 w-36 rounded-full bg-blue-400/10 dark:bg-blue-500/5 blur-2xl" />
       <div className="relative flex flex-col gap-3">
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h2 className="text-sm font-black tracking-[-0.02em] text-slate-950">
+            <h2 className="text-sm font-black tracking-[-0.02em] text-slate-950 dark:text-white">
               {title}
             </h2>
 
             {description !==
             undefined ? (
-              <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500">
+              <p className="mt-1 max-w-4xl text-xs leading-5 text-slate-500 dark:text-slate-400">
                 {description}
               </p>
             ) : null}
@@ -506,7 +506,7 @@ export function WonFlowActionBar({
 
           {summary !==
           undefined ? (
-            <div className="shrink-0 rounded-full border border-slate-200 bg-slate-50 px-3 py-1.5 text-[11px] font-bold text-slate-500">
+            <div className="shrink-0 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-1.5 text-[11px] font-bold text-slate-500 dark:text-slate-300">
               {summary}
             </div>
           ) : null}
@@ -568,29 +568,29 @@ const actionButtonStyles:
   ].join(" "),
 
   secondary: [
-    "border-slate-300",
-    "bg-white",
-    "text-slate-700",
-    "hover:border-blue-200",
-    "hover:bg-blue-50",
-    "hover:text-blue-700",
+    "border-slate-300 dark:border-slate-700",
+    "bg-white dark:bg-slate-800",
+    "text-slate-700 dark:text-slate-200",
+    "hover:border-blue-200 dark:hover:border-blue-500",
+    "hover:bg-blue-50 dark:hover:bg-slate-700",
+    "hover:text-blue-700 dark:hover:text-blue-300",
   ].join(" "),
 
   ghost: [
-    "border-slate-200",
-    "bg-slate-50",
-    "text-slate-600",
-    "hover:border-slate-300",
-    "hover:bg-white",
-    "hover:text-slate-950",
+    "border-slate-200 dark:border-slate-700",
+    "bg-slate-50 dark:bg-slate-800/60",
+    "text-slate-600 dark:text-slate-300",
+    "hover:border-slate-300 dark:hover:border-slate-600",
+    "hover:bg-white dark:hover:bg-slate-700",
+    "hover:text-slate-950 dark:hover:text-white",
   ].join(" "),
 
   danger: [
-    "border-rose-200",
-    "bg-rose-50",
-    "text-rose-700",
-    "hover:border-rose-300",
-    "hover:bg-rose-100",
+    "border-rose-200 dark:border-rose-900",
+    "bg-rose-50 dark:bg-rose-950/50",
+    "text-rose-700 dark:text-rose-300",
+    "hover:border-rose-300 dark:hover:border-rose-800",
+    "hover:bg-rose-100 dark:hover:bg-rose-900/60",
   ].join(" "),
 };
 

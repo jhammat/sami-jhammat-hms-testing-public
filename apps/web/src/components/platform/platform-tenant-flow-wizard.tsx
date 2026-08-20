@@ -85,14 +85,14 @@ export function PlatformTenantFlowWizard() {
   const [subscriptionForm, setSubscriptionForm] = useState({
     planCode: "starter" as "starter" | "professional" | "enterprise",
     billingStatus: "TRIAL" as "TRIAL" | "ACTIVE",
-    seatCount: 5,
+    seatCount: 1,
     monthlyAmountMinor: 0,
     currencyCode: "PKR",
     trialEndsAt: "",
     renewsAt: "",
   });
-  const [seatCountInput, setSeatCountInput] = useState("5");
-  const [monthlyAmountInput, setMonthlyAmountInput] = useState("0");
+  const [seatCountInput, setSeatCountInput] = useState("");
+  const [monthlyAmountInput, setMonthlyAmountInput] = useState("");
   
   // Step 4: Credentials
   const [credentialsForm, setCredentialsForm] = useState({
@@ -218,7 +218,7 @@ export function PlatformTenantFlowWizard() {
         planCode: subscriptionForm.planCode,
         billingStatus: subscriptionForm.billingStatus,
         seatCount: subscriptionForm.seatCount,
-        monthlyAmountMinor: subscriptionForm.monthlyAmountMinor,
+        monthlyAmountMinor: Math.max(0, Math.round((Number(monthlyAmountInput) || 0) * 100)),
         currencyCode: subscriptionForm.currencyCode,
         trialEndsAt: subscriptionForm.trialEndsAt || undefined,
         renewsAt: subscriptionForm.renewsAt || undefined,
@@ -493,20 +493,20 @@ export function PlatformTenantFlowWizard() {
                   value={subscriptionForm.currencyCode}
                 />
               </Field>
-              <Field hint="Number of licensed user seats for this tenant" label="Seats">
+              <Field hint="Number of licensed user seats for this tenant (e.g. 5)" label="Seats">
                 <input
                   className={platformInputClassName}
                   min="1"
                   onChange={(e) => {
                     setSeatCountInput(e.target.value);
-                    setSubscriptionForm((prev) => ({ ...prev, seatCount: Number(e.target.value) || 0 }));
+                    setSubscriptionForm((prev) => ({ ...prev, seatCount: Math.max(1, parseInt(e.target.value, 10) || 1) }));
                   }}
-                  placeholder="5"
+                  placeholder="e.g. 5"
                   type="number"
                   value={seatCountInput}
                 />
               </Field>
-              <Field label="Monthly amount">
+              <Field hint="Monthly subscription billing amount (e.g. 0)" label="Monthly amount">
                 <input
                   className={platformInputClassName}
                   min="0"
@@ -514,10 +514,11 @@ export function PlatformTenantFlowWizard() {
                     setMonthlyAmountInput(e.target.value);
                     setSubscriptionForm((prev) => ({
                       ...prev,
-                      monthlyAmountMinor: Number(e.target.value) || 0,
+                      monthlyAmountMinor: Math.max(0, Math.round((Number(e.target.value) || 0) * 100)),
                     }));
                   }}
-                  step="0.01"
+                  placeholder="e.g. 0"
+                  step="1"
                   type="number"
                   value={monthlyAmountInput}
                 />

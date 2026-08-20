@@ -100,6 +100,8 @@ export async function getOrganizationAdminDashboard(
     select: {
       id: true,
       displayName: true,
+      logoObjectKey: true,
+      settings: true,
       branches: {
         where: {
           archivedAt: null,
@@ -249,6 +251,9 @@ export async function getOrganizationAdminDashboard(
     organization: {
       id: organization.id,
       name: organization.displayName,
+      logoDataUrl:
+        (organization.settings as { logoDataUrl?: string } | null)?.logoDataUrl ?? null,
+      logoObjectKey: organization.logoObjectKey ?? null,
     },
     branches,
     branchSummaries,

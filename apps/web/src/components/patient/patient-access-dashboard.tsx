@@ -22,6 +22,7 @@ import {
   Stethoscope,
   Upload,
   User,
+  Video,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -616,6 +617,16 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
                         </div>
                       </div>
                     </div>
+
+                    <div className="mt-3 flex items-center justify-end gap-2 border-t border-blue-200/50 pt-2.5 dark:border-blue-900/40">
+                      <Link
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-3.5 py-1.5 text-xs font-black text-white shadow-sm hover:from-purple-700 hover:to-indigo-700"
+                        href={`/patient/appointments/${nextAppointment.id}/video`}
+                      >
+                        <Video className="size-3.5" />
+                        <span>Join Video Consultation</span>
+                      </Link>
+                    </div>
                   </article>
 
                   {upcoming.slice(1, 4).map((item) => (
@@ -626,7 +637,17 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
                           {formatDate(item.startsAt)} · {item.branch.name}
                         </div>
                       </div>
-                      <StatusPill status={item.status} />
+                      <div className="flex items-center gap-2">
+                        <StatusPill status={item.status} />
+                        <Link
+                          className="inline-flex items-center gap-1 rounded-lg bg-purple-100 px-2.5 py-1 text-[11px] font-bold text-purple-800 hover:bg-purple-200 dark:bg-purple-950 dark:text-purple-300"
+                          href={`/patient/appointments/${item.id}/video`}
+                          title="Open Video Consultation Room"
+                        >
+                          <Video className="size-3" />
+                          <span>Join Video</span>
+                        </Link>
+                      </div>
                     </article>
                   ))}
                 </div>

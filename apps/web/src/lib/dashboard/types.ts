@@ -287,6 +287,8 @@ export interface WonFlowLiveOrganizationDashboardProjection {
   organization: {
     id: string;
     name: string;
+    logoDataUrl?: string | null;
+    logoObjectKey?: string | null;
   };
   branches: WonFlowLiveOrganizationDashboardBranch[];
   branchSummaries: WonFlowLiveBranchDashboardSummary[];

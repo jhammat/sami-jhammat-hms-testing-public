@@ -129,6 +129,9 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: workspaceRoot,
   },
+  experimental: {
+    cpus: 4,
+  },
   transpilePackages: [
     "@wonflow/ui",
     "@wonflow/config",

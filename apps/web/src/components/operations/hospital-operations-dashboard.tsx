@@ -1926,7 +1926,7 @@ export function HospitalOperationsDashboard() {
                 "transition",
                 "hover:bg-emerald-100",
               ].join(" ")}
-              href="/operations/appointments/new"
+              href="/operations/reception"
             >
               Book Appointment
             </Link>
@@ -1964,7 +1964,7 @@ export function HospitalOperationsDashboard() {
                 "hover:from-blue-700",
                 "hover:to-indigo-700",
               ].join(" ")}
-              href="/operations/patients/register"
+              href="/operations/reception"
             >
               Register Patient
             </Link>

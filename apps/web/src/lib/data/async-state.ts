@@ -139,16 +139,23 @@ export function normalizeWonFlowAsyncError(
 export function isWonFlowRequestCancellation(
   error: unknown,
 ): boolean {
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { code: string }).code === "aborted"
-  ) {
+  if (!error) return false;
+
+  if (typeof error === "object") {
+    if ("code" in error && (error as { code: string }).code === "aborted") {
+      return true;
+    }
+    if ("name" in error && (error as { name: string }).name === "AbortError") {
+      return true;
+    }
+  }
+
+  if (error instanceof Error && (error.name === "AbortError" || error.message.toLowerCase().includes("abort"))) {
     return true;
   }
 
   if (
+    typeof DOMException !== "undefined" &&
     error instanceof DOMException &&
     error.name === "AbortError"
   ) {

@@ -230,172 +230,101 @@ async function main(): Promise<void> {
     }
   }
 
-  // ------------------------------------------------------------------- patients
-  const patientSeeds = [
-    ["Fatima", "Khan", "1988-04-12", "female", "+923001234501"],
-    ["Ali", "Raza", "1975-11-02", "male", "+923001234502"],
-    ["Hina", "Shaikh", "1993-07-21", "female", "+923001234503"],
-    ["Usman", "Tariq", "2016-01-30", "male", "+923001234504"],
-    ["Maryam", "Iqbal", "1962-09-15", "female", "+923001234505"],
-    ["Ahmed", "Nawaz", "1980-03-08", "male", "+923001234506"],
-    ["Zainab", "Farooq", "2001-12-25", "female", "+923001234507"],
-    ["Kamran", "Baig", "1970-06-18", "male", "+923001234508"],
-    ["Nadia", "Aslam", "1996-02-14", "female", "+923001234509"],
-    ["Hassan", "Javed", "2010-08-05", "male", "+923001234510"],
-    ["Rabia", "Chaudhry", "1985-05-27", "female", "+923001234511"],
-    ["Salman", "Mirza", "1958-10-11", "male", "+923001234512"],
+  // --------------------------------------------------- clean dummy transactional data
+  console.log("Cleaning stale dummy transactional records...");
+  await database.diagnosticResult.deleteMany({ where: { tenantId, order: { accessionNumber: { startsWith: "DEMO-" } } } });
+  await database.diagnosticOrder.deleteMany({ where: { tenantId, accessionNumber: { startsWith: "DEMO-" } } });
+  await database.prescriptionItem.deleteMany({ where: { prescription: { tenantId, instructions: { contains: "Complete the full course" } } } });
+  await database.prescription.deleteMany({ where: { tenantId, instructions: { contains: "Complete the full course" } } });
+  await database.encounter.deleteMany({ where: { tenantId, reason: "Routine consultation" } });
+  await database.appointment.deleteMany({ where: { tenantId, source: "demo-seed" } });
+  await database.queueEntry.deleteMany({ where: { tenantId, queue: { name: "Reception Queue" } } });
+  await database.payment.deleteMany({ where: { tenantId, reference: { startsWith: "DEMO-PAY-" } } });
+  await database.invoiceLine.deleteMany({ where: { invoice: { tenantId, invoiceNumber: { startsWith: "DEV-INV-" } } } });
+  await database.invoice.deleteMany({ where: { tenantId, invoiceNumber: { startsWith: "DEV-INV-" } } });
+
+  // ------------------------------------------------------- pharmacy: Pakistani stock lines
+  console.log("Seeding authentic Pakistani pharmacy catalog and inventory batches...");
+  const pakistaniMedications = [
+    // Analgesics & NSAIDs
+    ["MED-PAN-500", "Paracetamol", "Panadol", "500 mg", "Tablet", "tablet", 50],
+    ["MED-PAN-EXT", "Paracetamol / Caffeine", "Panadol Extra", "500 mg / 65 mg", "Tablet", "tablet", 65],
+    ["MED-PAN-CF", "Paracetamol / Pseudoephedrine", "Panadol CF", "500 mg / 30 mg", "Tablet", "tablet", 55],
+    ["MED-CAL-SYR", "Paracetamol Suspension", "Calpol", "120 mg/5 mL", "Syrup", "bottle", 110],
+    ["MED-BRU-400", "Ibuprofen", "Brufen", "400 mg", "Tablet", "tablet", 45],
+    ["MED-BRU-600", "Ibuprofen", "Brufen", "600 mg", "Tablet", "tablet", 60],
+    ["MED-BRU-SYR", "Ibuprofen Suspension", "Brufen DS", "200 mg/5 mL", "Syrup", "bottle", 130],
+    ["MED-DSP-300", "Aspirin (Soluble)", "Disprin", "300 mg", "Tablet", "tablet", 35],
+    ["MED-PON-500", "Mefenamic Acid", "Ponstan Forte", "500 mg", "Tablet", "tablet", 50],
+    ["MED-CAF-50", "Diclofenac Potassium", "Caflam", "50 mg", "Tablet", "tablet", 180],
+    ["MED-VOL-50", "Diclofenac Sodium", "Voltral", "50 mg", "Tablet", "tablet", 150],
+    ["MED-VOL-INJ", "Diclofenac Sodium Injection", "Voltral", "75 mg/3 mL", "Injection", "ampoule", 85],
+    ["MED-TOR-INJ", "Ketorolac Tromethamine", "Toradol", "30 mg/mL", "Injection", "ampoule", 120],
+
+    // Antibiotics & Antimicrobials
+    ["MED-AUG-625", "Amoxicillin / Clavulanic Acid", "Augmentin", "625 mg", "Tablet", "tablet", 280],
+    ["MED-AUG-1G", "Amoxicillin / Clavulanic Acid", "Augmentin", "1 g", "Tablet", "tablet", 390],
+    ["MED-AUG-SYR", "Amoxicillin / Clavulanate", "Augmentin DS", "312.5 mg/5 mL", "Syrup", "bottle", 240],
+    ["MED-AMX-500", "Amoxicillin", "Amoxil", "500 mg", "Capsule", "capsule", 120],
+    ["MED-NOV-500", "Ciprofloxacin HCl", "Novidat", "500 mg", "Tablet", "tablet", 310],
+    ["MED-LEF-500", "Levofloxacin", "Leflox", "500 mg", "Tablet", "tablet", 380],
+    ["MED-KLA-500", "Clarithromycin", "Klaricid", "500 mg", "Tablet", "tablet", 520],
+    ["MED-AZI-500", "Azithromycin", "Azomax", "500 mg", "Tablet", "tablet", 340],
+    ["MED-FLG-400", "Metronidazole", "Flagyl", "400 mg", "Tablet", "tablet", 40],
+    ["MED-FLG-SYR", "Metronidazole Suspension", "Flagyl", "200 mg/5 mL", "Syrup", "bottle", 90],
+    ["MED-ROC-1G", "Ceftriaxone Sodium", "Rocephin", "1 g", "Injection", "vial", 480],
+
+    // Gastrointestinal & Antacids
+    ["MED-RSK-20", "Omeprazole", "Risek", "20 mg", "Capsule", "capsule", 260],
+    ["MED-RSK-40", "Omeprazole", "Risek", "40 mg", "Capsule", "capsule", 420],
+    ["MED-RSK-IV", "Omeprazole IV", "Risek Insta", "40 mg", "Injection", "vial", 350],
+    ["MED-NEX-40", "Esomeprazole", "Nexum", "40 mg", "Tablet", "tablet", 360],
+    ["MED-GAV-LIQ", "Sodium Alginate / Antacid", "Gaviscon Liquid", "Double Action", "Syrup", "bottle", 295],
+    ["MED-GRV-50", "Dimenhydrinate", "Gravinate", "50 mg", "Tablet", "tablet", 45],
+    ["MED-GRV-SYR", "Dimenhydrinate Syrup", "Gravinate", "15 mg/5 mL", "Syrup", "bottle", 95],
+    ["MED-MOT-10", "Domperidone", "Motilium", "10 mg", "Tablet", "tablet", 110],
+    ["MED-ETX-P", "Diiodohydroxyquinoline / Phthalylsulfathiazole", "Entox-P", "200 mg", "Tablet", "tablet", 60],
+
+    // Respiratory, Cold & Allergy
+    ["MED-ARN-FRT", "Ibuprofen / Pseudoephedrine", "Arinac Forte", "400 mg / 60 mg", "Tablet", "tablet", 80],
+    ["MED-ZYR-10", "Cetirizine HCl", "Zyrtec", "10 mg", "Tablet", "tablet", 95],
+    ["MED-SOF-10", "Loratadine", "Softin", "10 mg", "Tablet", "tablet", 120],
+    ["MED-RIG-10", "Levocetirizine", "Rigix", "5 mg", "Tablet", "tablet", 140],
+    ["MED-HYD-SYR", "Aminophylline / Diphenhydramine", "Hydryllin", "Expectorant", "Syrup", "bottle", 115],
+    ["MED-PUL-SYR", "Ammonium Chloride / Menthol", "Pulmonol", "Expectorant", "Syrup", "bottle", 125],
+    ["MED-VEN-INH", "Salbutamol", "Ventolin Inhaler", "100 mcg/puff", "Inhaler", "inhaler", 340],
+    ["MED-MON-10", "Montelukast Sodium", "Singulair", "10 mg", "Tablet", "tablet", 450],
+
+    // Cardiovascular & Metabolic
+    ["MED-GLU-500", "Metformin HCl", "Glucophage", "500 mg", "Tablet", "tablet", 130],
+    ["MED-GLU-850", "Metformin HCl", "Glucophage", "850 mg", "Tablet", "tablet", 190],
+    ["MED-LIP-20", "Atorvastatin Calcium", "Lipiget", "20 mg", "Tablet", "tablet", 320],
+    ["MED-CNC-5", "Bisoprolol Fumarate", "Concor", "5 mg", "Tablet", "tablet", 210],
+    ["MED-TEN-50", "Atenolol", "Tenormin", "50 mg", "Tablet", "tablet", 160],
+    ["MED-NRV-5", "Amlodipine Besylate", "Norvasc", "5 mg", "Tablet", "tablet", 240],
+    ["MED-COZ-50", "Losartan Potassium", "Cozaar", "50 mg", "Tablet", "tablet", 310],
+    ["MED-LSX-40", "Furosemide", "Lasix", "40 mg", "Tablet", "tablet", 45],
+
+    // Vitamins, Topicals & Emergency
+    ["MED-SRB-Z", "Zinc + B-Complex + Vitamin C", "Surbex Z", "High Potency", "Tablet", "tablet", 280],
+    ["MED-DEL-5", "Prednisolone", "Deltacortril", "5 mg", "Tablet", "tablet", 65],
+    ["MED-PLX-EYE", "Polymyxin B / Bacitracin", "Polyfax Eye Ointment", "4 g", "Ointment", "tube", 85],
+    ["MED-PLX-SKN", "Polymyxin B / Bacitracin", "Polyfax Skin Ointment", "20 g", "Ointment", "tube", 115],
+    ["MED-BTN-CRM", "Betamethasone / Neomycin", "Betnovate-N", "15 g", "Cream", "tube", 125],
+    ["MED-ORS-SCT", "Oral Rehydration Salts", "ORS Sachet", "WHO Formula", "Sachet", "sachet", 25],
+    ["MED-XYL-INJ", "Lidocaine HCl 2%", "Xylocaine", "2% 20 mL", "Injection", "vial", 140],
   ] as const;
 
-  const patientIds: string[] = [];
-  for (const [index, [givenName, familyName, dob, sex, phone]] of patientSeeds.entries()) {
-    const patientNumber = `DEV-${String(index + 100).padStart(4, "0")}`;
-    const row = await database.patient.upsert({
-      where: { tenantId_patientNumber: { tenantId, patientNumber } },
-      create: {
-        tenantId,
-        patientNumber,
-        givenName,
-        familyName,
-        dateOfBirth: new Date(`${dob}T00:00:00.000Z`),
-        sex,
-        phone,
-        normalizedPhone: phone,
-        status: "ACTIVE",
-      },
-      update: { givenName, familyName, phone, normalizedPhone: phone, status: "ACTIVE", archivedAt: null },
-    });
-    patientIds.push(row.id);
-  }
-
-  // Keep the pre-existing development patient in the working set.
-  const devPatient = await database.patient.findFirst({ where: { tenantId, patientNumber: "DEV-0001" } });
-  if (devPatient) patientIds.unshift(devPatient.id);
-
-  // --------------------------------------------------- appointments & encounters
-  const today = businessDate(0);
-  const services = await database.serviceDefinition.findMany({
-    where: { tenantId, isActive: true, doctorId: { not: null } },
-  });
-
-  const appointmentPlan = [
-    { offset: -7, minute: 9 * 60, status: "COMPLETED" as const },
-    { offset: -6, minute: 10 * 60, status: "COMPLETED" as const },
-    { offset: -3, minute: 11 * 60, status: "COMPLETED" as const },
-    { offset: -2, minute: 14 * 60, status: "NO_SHOW" as const },
-    { offset: -1, minute: 15 * 60, status: "COMPLETED" as const },
-    { offset: 0, minute: 9 * 60 + 30, status: "CHECKED_IN" as const },
-    { offset: 0, minute: 10 * 60 + 30, status: "IN_QUEUE" as const },
-    { offset: 0, minute: 11 * 60 + 30, status: "CONFIRMED" as const },
-    { offset: 0, minute: 14 * 60 + 30, status: "CONFIRMED" as const },
-    { offset: 1, minute: 9 * 60, status: "CONFIRMED" as const },
-    { offset: 2, minute: 10 * 60, status: "PENDING" as const },
-    { offset: 3, minute: 12 * 60, status: "CONFIRMED" as const },
-  ];
-
-  const completedEncounters: { id: string; patientId: string; doctorId: string }[] = [];
-
-  for (const [index, plan] of appointmentPlan.entries()) {
-    const service = services[index % services.length]!;
-    const patientId = patientIds[index % patientIds.length]!;
-    const date = businessDate(plan.offset);
-    const startsAt = atMinute(date, plan.minute);
-    const endsAt = new Date(startsAt.getTime() + service.durationMinutes * 60_000);
-    const idempotencyKey = `demo-appointment-${index}`;
-
-    const appointment = await database.appointment.upsert({
-      where: { tenantId_idempotencyKey: { tenantId, idempotencyKey } },
-      create: {
-        tenantId,
-        patientId,
-        doctorId: service.doctorId,
-        branchId: branch.id,
-        serviceId: service.id,
-        status: plan.status,
-        consultationMode: service.consultationModes[0] ?? "IN_PERSON",
-        source: "demo-seed",
-        reason: "Routine consultation",
-        startsAt,
-        endsAt,
-        checkedInAt: ["CHECKED_IN", "IN_QUEUE", "COMPLETED"].includes(plan.status) ? startsAt : null,
-        idempotencyKey,
-      },
-      update: { status: plan.status, startsAt, endsAt, patientId, doctorId: service.doctorId, serviceId: service.id },
-    });
-
-    if (plan.status === "COMPLETED") {
-      const encounter = await database.encounter.upsert({
-        where: { appointmentId: appointment.id },
-        create: {
-          tenantId,
-          patientId,
-          appointmentId: appointment.id,
-          doctorId: service.doctorId,
-          branchId: branch.id,
-          status: "COMPLETED",
-          reason: "Routine consultation",
-          startedAt: startsAt,
-          endedAt: endsAt,
-          signedAt: endsAt,
-        },
-        update: { status: "COMPLETED", signedAt: endsAt },
-      });
-      completedEncounters.push({ id: encounter.id, patientId, doctorId: service.doctorId! });
-    }
-  }
-
-  // ----------------------------------------------------------------- live queue
-  const queue = await database.queue.upsert({
-    where: { tenantId_branchId_queueDate: { tenantId, branchId: branch.id, queueDate: today } },
-    create: { tenantId, branchId: branch.id, queueDate: today, name: "Reception Queue", status: "OPEN", nextTokenNumber: 1 },
-    update: { status: "OPEN" },
-  });
-
-  const queuePlan = ["COMPLETED", "IN_SERVICE", "WAITING", "WAITING", "WAITING", "CALLED"] as const;
-  for (const [index, status] of queuePlan.entries()) {
-    const tokenNumber = index + 1;
-    await database.queueEntry.upsert({
-      where: { queueId_tokenNumber: { queueId: queue.id, tokenNumber } },
-      create: {
-        tenantId,
-        queueId: queue.id,
-        patientId: patientIds[index % patientIds.length]!,
-        tokenNumber,
-        priority: index === 5 ? 1 : 0,
-        status,
-        calledAt: status === "WAITING" ? null : new Date(),
-        completedAt: status === "COMPLETED" ? new Date() : null,
-      },
-      update: { status },
-    });
-  }
-  await database.queue.update({ where: { id: queue.id }, data: { nextTokenNumber: queuePlan.length + 1 } });
-
-  // ------------------------------------------------------- pharmacy: stock lines
-  const medicationSeeds = [
-    ["MED-PARA-500", "Paracetamol", "Panadol", "500 mg", "Tablet", "tablet"],
-    ["MED-AMOX-500", "Amoxicillin", "Amoxil", "500 mg", "Capsule", "capsule"],
-    ["MED-METF-850", "Metformin", "Glucophage", "850 mg", "Tablet", "tablet"],
-    ["MED-ATOR-20", "Atorvastatin", "Lipitor", "20 mg", "Tablet", "tablet"],
-    ["MED-OMEP-20", "Omeprazole", "Risek", "20 mg", "Capsule", "capsule"],
-    ["MED-CETI-10", "Cetirizine", "Zyrtec", "10 mg", "Tablet", "tablet"],
-    ["MED-IBUP-400", "Ibuprofen", "Brufen", "400 mg", "Tablet", "tablet"],
-    ["MED-AZIT-250", "Azithromycin", "Zithromax", "250 mg", "Tablet", "tablet"],
-    ["MED-SALB-INH", "Salbutamol", "Ventolin", "100 mcg", "Inhaler", "inhaler"],
-    ["MED-INSU-100", "Insulin Glargine", "Lantus", "100 IU/mL", "Injection", "vial"],
-  ] as const;
-
-  const medicationIds: string[] = [];
-  for (const [code, genericName, brandName, strength, dosageForm, unit] of medicationSeeds) {
+  for (const [code, genericName, brandName, strength, dosageForm, unit, reorderLevel] of pakistaniMedications) {
     const medication = await database.medication.upsert({
       where: { tenantId_code: { tenantId, code } },
-      create: { tenantId, code, genericName, brandName, strength, dosageForm, unit, isActive: true },
-      update: { genericName, brandName, strength, dosageForm, unit, isActive: true },
+      create: { tenantId, code, genericName, brandName, strength, dosageForm, unit, reorderLevel: Number(reorderLevel), isActive: true },
+      update: { genericName, brandName, strength, dosageForm, unit, reorderLevel: Number(reorderLevel), isActive: true },
     });
-    medicationIds.push(medication.id);
 
-    // One healthy batch, plus a near-expiry batch to exercise expiry warnings.
-    for (const [suffix, days, quantity] of [["A", 400, 500], ["B", 25, 40]] as const) {
-      const batchNumber = `BATCH-${code}-${suffix}`;
+    // Seed realistic inventory batches (Fresh batch + active buffer batch)
+    for (const [suffix, days, quantity] of [["PK-A", 540, 350], ["PK-B", 270, 120]] as const) {
+      const batchNumber = `BATCH-${code.replace("MED-", "")}-${suffix}`;
       await database.inventoryBatch.upsert({
         where: {
           tenantId_branchId_medicationId_batchNumber: {
@@ -419,189 +348,6 @@ async function main(): Promise<void> {
     }
   }
 
-  // ------------------------------------------------------------- prescriptions
-  for (const [index, encounter] of completedEncounters.entries()) {
-    const existing = await database.prescription.findFirst({
-      where: { tenantId, encounterId: encounter.id },
-    });
-    const prescription =
-      existing ??
-      (await database.prescription.create({
-        data: {
-          tenantId,
-          patientId: encounter.patientId,
-          encounterId: encounter.id,
-          doctorId: encounter.doctorId,
-          status: index === 0 ? "DISPENSED" : "ACTIVE",
-          instructions: "Complete the full course. Return if symptoms persist.",
-          prescribedAt: new Date(),
-          signedAt: new Date(),
-        },
-      }));
-
-    const itemCount = await database.prescriptionItem.count({ where: { prescriptionId: prescription.id } });
-    if (itemCount === 0) {
-      for (const offset of [0, 1]) {
-        await database.prescriptionItem.create({
-          data: {
-            prescriptionId: prescription.id,
-            medicationId: medicationIds[(index + offset) % medicationIds.length]!,
-            dose: "1 tablet",
-            route: "Oral",
-            frequency: offset === 0 ? "Twice daily" : "Once daily",
-            duration: "5 days",
-            quantity: offset === 0 ? 10 : 5,
-            instructions: "After food",
-          },
-        });
-      }
-    }
-  }
-
-  // ------------------------------------------------- diagnostics with results
-  // The development seed's own orders are deliberately left untouched: the e2e
-  // specs claim them as open worklist items. These are separate, already
-  // reported orders so the results screens have released history to show.
-  const labMembership = await database.tenantMembership.findFirst({
-    where: { tenantId, workspaceCodes: { has: "LABORATORY" } },
-  });
-  const orderingMembership = await database.tenantMembership.findFirst({
-    where: { tenantId, workspaceCodes: { has: "DOCTOR" } },
-  });
-
-  if (orderingMembership) {
-    const panels = [
-      { type: "LABORATORY" as const, code: "CBC", name: "Complete Blood Count", site: "Blood" },
-      { type: "RADIOLOGY" as const, code: "CXR", name: "Chest X-Ray", site: "Chest" },
-    ];
-
-    for (const [index, encounter] of completedEncounters.entries()) {
-      for (const panel of panels) {
-        const accessionNumber = `DEMO-${panel.type.slice(0, 3)}-${String(index + 1).padStart(4, "0")}`;
-        const existing = await database.diagnosticOrder.findFirst({ where: { tenantId, accessionNumber } });
-        const order =
-          existing ??
-          (await database.diagnosticOrder.create({
-            data: {
-              tenantId,
-              branchId: branch.id,
-              accessionNumber,
-              patientId: encounter.patientId,
-              encounterId: encounter.id,
-              orderedByMembershipId: orderingMembership.id,
-              type: panel.type,
-              status: "COMPLETED",
-              priority: "routine",
-              code: panel.code,
-              name: panel.name,
-              specimenOrBodySite: panel.site,
-              clinicalReason: "Routine screening",
-              orderedAt: new Date(),
-              completedAt: new Date(),
-            },
-          }));
-
-        const hasResult = await database.diagnosticResult.findFirst({ where: { orderId: order.id } });
-        if (hasResult) continue;
-
-        await database.diagnosticResult.create({
-          data: {
-            orderId: order.id,
-            tenantId,
-            status: "FINAL",
-            reportText:
-              panel.type === "LABORATORY"
-                ? "Haemoglobin 13.4 g/dL, WBC 7.2 x10^9/L, Platelets 250 x10^9/L. Within normal limits."
-                : "No acute cardiopulmonary abnormality. Heart size normal. Lung fields clear.",
-            resultData: { summary: "Reported by demo seed", panel: panel.name },
-            critical: false,
-            performedByMembershipId: labMembership?.id ?? null,
-            verifiedByMembershipId: labMembership?.id ?? null,
-            releasedByMembershipId: labMembership?.id ?? null,
-            verifiedAt: new Date(),
-            releasedAt: new Date(),
-          },
-        });
-      }
-    }
-  }
-
-  // ------------------------------------------------------- billing: invoices
-  const billingMembership = await database.tenantMembership.findFirst({
-    where: { tenantId, workspaceCodes: { has: "BILLING" } },
-  });
-
-  const invoicePlan = [
-    { status: "PAID" as const, paidRatio: 1 },
-    { status: "PAID" as const, paidRatio: 1 },
-    { status: "PARTIALLY_PAID" as const, paidRatio: 0.4 },
-    { status: "ISSUED" as const, paidRatio: 0 },
-    { status: "ISSUED" as const, paidRatio: 0 },
-    { status: "DRAFT" as const, paidRatio: 0 },
-  ];
-
-  for (const [index, plan] of invoicePlan.entries()) {
-    const invoiceNumber = `DEV-INV-${String(index + 1).padStart(5, "0")}`;
-    const service = services[index % services.length]!;
-    const unitPrice = service.priceMinorUnits ?? 150000;
-    const subtotal = unitPrice;
-    const discount = index === 2 ? 5000 : 0;
-    const total = subtotal - discount;
-    const paid = Math.round(total * plan.paidRatio);
-
-    const invoice = await database.invoice.upsert({
-      where: { tenantId_invoiceNumber: { tenantId, invoiceNumber } },
-      create: {
-        tenantId,
-        patientId: patientIds[index % patientIds.length]!,
-        branchId: branch.id,
-        invoiceNumber,
-        status: plan.status,
-        currencyCode: "PKR",
-        subtotalMinor: subtotal,
-        discountMinor: discount,
-        totalMinor: total,
-        paidMinor: paid,
-        issuedAt: plan.status === "DRAFT" ? null : new Date(),
-        dueAt: businessDate(14),
-      },
-      update: { status: plan.status, subtotalMinor: subtotal, discountMinor: discount, totalMinor: total, paidMinor: paid },
-    });
-
-    const lineCount = await database.invoiceLine.count({ where: { invoiceId: invoice.id } });
-    if (lineCount === 0) {
-      await database.invoiceLine.create({
-        data: {
-          invoiceId: invoice.id,
-          serviceId: service.id,
-          description: service.name,
-          quantity: 1,
-          unitPriceMinor: unitPrice,
-          totalMinor: unitPrice,
-        },
-      });
-    }
-
-    if (paid > 0 && billingMembership) {
-      const paymentCount = await database.payment.count({ where: { tenantId, invoiceId: invoice.id } });
-      if (paymentCount === 0) {
-        await database.payment.create({
-          data: {
-            tenantId,
-            invoiceId: invoice.id,
-            receivedByMembershipId: billingMembership.id,
-            status: "COMPLETED",
-            method: index % 2 === 0 ? "cash" : "card",
-            amountMinor: paid,
-            currencyCode: "PKR",
-            reference: `DEMO-PAY-${index + 1}`,
-            completedAt: new Date(),
-          },
-        });
-      }
-    }
-  }
-
   // ------------------------------------------------------------------- summary
   const counts = {
     departments: await database.department.count({ where: { tenantId } }),
@@ -620,7 +366,7 @@ async function main(): Promise<void> {
   };
 
   console.table(Object.entries(counts).map(([entity, rows]) => ({ entity, rows })));
-  console.log(`\nExtra doctor logins (password: ${password}):`);
+  console.log(`\nDoctor logins (password: ${password}):`);
   console.table(doctorSeeds.map((seed) => ({ email: `${seed.key}@wonflow.local`, name: seed.name, specialty: seed.specialty })));
 }
 

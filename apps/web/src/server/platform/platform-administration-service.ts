@@ -85,21 +85,69 @@ export class PlatformAdministrationService {
       // from the live directory so no one mistakes them for working tenants.
       where: scope === "deleted" ? { archivedAt: { not: null } } : { archivedAt: null },
       orderBy: { createdAt: "desc" },
-      include: { organizations: { include: { branches: true } }, subscription: true, entitlements: true },
+      include: {
+        organizations: { include: { branches: true } },
+        subscription: true,
+        entitlements: true,
+        memberships: {
+          where: { archivedAt: null },
+          include: {
+            identity: { select: { id: true, email: true, status: true } },
+            roles: { include: { role: { select: { name: true } } } },
+          },
+        },
+      },
       take: 500,
     });
   }
 
   async createTenant(context: WonFlowPlatformRequestContext, input: { displayName: string; legalName?: string; slug: string; domain?: string; organizationCode: string }) {
     requirePermission(context, "platform.tenants.manage");
+    const normalizedSlug = input.slug.trim().toLowerCase();
+    const normalizedDisplayName = input.displayName.trim();
+    const normalizedLegalName = input.legalName?.trim() || null;
+    const normalizedDomain = input.domain?.trim().toLowerCase() || null;
+    const normalizedOrgCode = input.organizationCode.trim().toUpperCase();
+
     return database.$transaction(async (transaction) => {
+      const existingTenant = await transaction.tenant.findUnique({
+        where: { slug: normalizedSlug },
+        include: { organizations: true, subscription: true },
+      });
+
+      if (existingTenant) {
+        if (existingTenant.status === "DRAFT") {
+          const updatedTenant = await transaction.tenant.update({
+            where: { id: existingTenant.id },
+            data: {
+              displayName: normalizedDisplayName,
+              legalName: normalizedLegalName,
+              domain: normalizedDomain,
+            },
+            include: { organizations: true, subscription: true },
+          });
+          const existingOrg = existingTenant.organizations[0];
+          if (existingOrg) {
+            await transaction.organization.update({
+              where: { id: existingOrg.id },
+              data: {
+                displayName: normalizedDisplayName,
+                legalName: normalizedLegalName,
+              },
+            });
+          }
+          return updatedTenant;
+        }
+        throw new WonFlowApiError(409, "tenant-slug-conflict", `A tenant with slug "${normalizedSlug}" already exists. Please choose a different slug.`);
+      }
+
       const tenant = await transaction.tenant.create({
         data: {
-          displayName: input.displayName.trim(),
-          legalName: input.legalName?.trim() || null,
-          slug: input.slug.trim().toLowerCase(),
-          domain: input.domain?.trim().toLowerCase() || null,
-          organizations: { create: { code: input.organizationCode.trim().toUpperCase(), displayName: input.displayName.trim(), legalName: input.legalName?.trim() || null } },
+          displayName: normalizedDisplayName,
+          legalName: normalizedLegalName,
+          slug: normalizedSlug,
+          domain: normalizedDomain,
+          organizations: { create: { code: normalizedOrgCode, displayName: normalizedDisplayName, legalName: normalizedLegalName } },
           subscription: { create: {} },
         },
         include: { organizations: true, subscription: true },

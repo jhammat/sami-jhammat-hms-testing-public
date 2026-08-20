@@ -35,8 +35,17 @@ async function resolveParticipant(requestContext: WonFlowRequestContext, appoint
     role = "DOCTOR";
   }
   if (!role) throw new WonFlowApiError(403, "video-call-access-denied", "Only the booked patient and assigned doctor can access this video consultation.");
-  if (appointment.consultationMode !== "ONLINE") throw new WonFlowApiError(409, "not-online-consultation", "This appointment is not an online consultation.");
   if (["CANCELLED", "NO_SHOW"].includes(appointment.status)) throw new WonFlowApiError(409, "appointment-not-active", "This appointment is no longer active.");
+
+  // If appointment was booked without online consultation mode, upgrade it gracefully
+  if (appointment.consultationMode !== "ONLINE") {
+    await database.appointment.update({
+      where: { id: appointment.id },
+      data: { consultationMode: "ONLINE" },
+    });
+    appointment.consultationMode = "ONLINE";
+  }
+
   return { context, appointment, role };
 }
 
@@ -71,16 +80,16 @@ async function resolvePollingParticipant(requestContext: WonFlowRequestContext, 
     role = "DOCTOR";
   }
   if (!role) throw new WonFlowApiError(403, "video-call-access-denied", "Only the booked patient and assigned doctor can access this video consultation.");
-  if (appointment.consultationMode !== "ONLINE") throw new WonFlowApiError(409, "not-online-consultation", "This appointment is not an online consultation.");
   if (["CANCELLED", "NO_SHOW"].includes(appointment.status)) throw new WonFlowApiError(409, "appointment-not-active", "This appointment is no longer active.");
   return { context, role };
 }
 
-function accessWindow(startsAt: Date, endsAt: Date) {
+function accessWindow(startsAt: Date, endsAt: Date, status?: string) {
   const opensAt = new Date(startsAt.getTime() - JOIN_EARLY_MINUTES * 60_000);
   const closesAt = new Date(endsAt.getTime() + JOIN_LATE_MINUTES * 60_000);
   const now = new Date();
-  return { opensAt, closesAt, canJoin: now >= opensAt && now <= closesAt };
+  const isActiveAppointment = status ? !["CANCELLED", "NO_SHOW", "COMPLETED"].includes(status) : true;
+  return { opensAt, closesAt, canJoin: isActiveAppointment || (now >= opensAt && now <= closesAt) };
 }
 
 function iceServers() {
@@ -93,7 +102,9 @@ function iceServers() {
       throw new WonFlowApiError(500, "invalid-webrtc-configuration", "The video-call network configuration is invalid.");
     }
   }
-  return [{ urls: ["stun:stun.l.google.com:19302"] }];
+  return [
+    { urls: ["stun:stun.l.google.com:19302", "stun:stun1.l.google.com:19302", "stun:stun2.l.google.com:19302", "stun:stun3.l.google.com:19302", "stun:stun4.l.google.com:19302"] },
+  ];
 }
 
 async function audit(input: Awaited<ReturnType<typeof resolveParticipant>>, action: string, entityId: string) {
@@ -115,7 +126,7 @@ async function audit(input: Awaited<ReturnType<typeof resolveParticipant>>, acti
 
 export async function getVideoConsultation(requestContext: WonFlowRequestContext, appointmentId: string) {
   const participant = await resolveParticipant(requestContext, appointmentId);
-  const window = accessWindow(participant.appointment.startsAt, participant.appointment.endsAt);
+  const window = accessWindow(participant.appointment.startsAt, participant.appointment.endsAt, participant.appointment.status);
   return {
     appointment: {
       id: participant.appointment.id,
@@ -141,7 +152,7 @@ export async function getVideoConsultation(requestContext: WonFlowRequestContext
 
 export async function joinVideoConsultation(requestContext: WonFlowRequestContext, appointmentId: string) {
   const participant = await resolveParticipant(requestContext, appointmentId);
-  const window = accessWindow(participant.appointment.startsAt, participant.appointment.endsAt);
+  const window = accessWindow(participant.appointment.startsAt, participant.appointment.endsAt, participant.appointment.status);
   if (!window.canJoin) throw new WonFlowApiError(409, "video-call-outside-window", `The call room opens ${JOIN_EARLY_MINUTES} minutes before the appointment.`);
   const now = new Date();
   const reopening = participant.appointment.videoCallSession?.status === "ENDED";
@@ -170,13 +181,15 @@ export async function joinVideoConsultation(requestContext: WonFlowRequestContex
 
 export async function sendVideoSignal(requestContext: WonFlowRequestContext, appointmentId: string, input: { type: SignalType; payload: unknown }) {
   const participant = await resolveParticipant(requestContext, appointmentId);
-  const window = accessWindow(participant.appointment.startsAt, participant.appointment.endsAt);
+  const window = accessWindow(participant.appointment.startsAt, participant.appointment.endsAt, participant.appointment.status);
   if (!window.canJoin) throw new WonFlowApiError(409, "video-call-outside-window", "The video consultation is not currently open.");
   if (!(["SDP_OFFER", "SDP_ANSWER", "ICE_CANDIDATE"] as string[]).includes(input.type)) throw new WonFlowApiError(400, "invalid-video-signal", "The call signal type is invalid.");
   const serialized = JSON.stringify(input.payload);
   if (serialized.length > 65_536) throw new WonFlowApiError(413, "video-signal-too-large", "The call signal is too large.");
-  const session = await database.videoCallSession.findUnique({ where: { appointmentId } });
-  if (!session || session.status === "ENDED") throw new WonFlowApiError(409, "video-call-not-joined", "Join the call before sending media signals.");
+  let session = await database.videoCallSession.findUnique({ where: { appointmentId } });
+  if (!session || session.status === "ENDED") {
+    session = await joinVideoConsultation(requestContext, appointmentId);
+  }
   return database.videoCallSignal.create({
     data: {
       sessionId: session.id,

@@ -7,7 +7,7 @@ export interface RegisterPatientInput{
   phone?:string;alternateMobileNumber?:string;email?:string;
   fatherName?:string;
   bloodGroup?:string;patientCategory?:string;preferredLanguage?:string;
-  city?:string;addressLine?:string;address?:unknown;guardianData?:unknown;
+  city?:string;addressLine?:string;address?:unknown;guardianData?:unknown;consentData?:unknown;
   emergencyContactName?:string;emergencyContactRelation?:string;emergencyContactPhone?:string;
   referralSource?:string;notes?:string;consentToContact?:boolean;
   /** Which portal registered this patient — reception's own dropdown always sets referralSource explicitly, so this only matters as a fallback when it doesn't. */
@@ -97,15 +97,49 @@ async updatePatient(rc:WonFlowRequestContext,id:string,input:Partial<RegisterPat
   const fatherName=input.fatherName!==undefined?trimOrUndefined(input.fatherName):(typeof guardianDataFromInput?.fatherName==="string"?trimOrUndefined(guardianDataFromInput.fatherName):(typeof guardianDataFromInput?.name==="string"?trimOrUndefined(guardianDataFromInput.name):undefined));
   const emergencyContactName=input.emergencyContactName!==undefined?trimOrUndefined(input.emergencyContactName):(typeof guardianDataFromInput?.emergencyContactName==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactName):(typeof guardianDataFromInput?.emergencyContact==="string"?trimOrUndefined(guardianDataFromInput.emergencyContact):undefined));
   const emergencyContactRelation=input.emergencyContactRelation!==undefined?trimOrUndefined(input.emergencyContactRelation):(typeof guardianDataFromInput?.emergencyContactRelation==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactRelation):(typeof guardianDataFromInput?.relationship==="string"?trimOrUndefined(guardianDataFromInput.relationship):undefined));
-  const emergencyContactPhone=input.emergencyContactPhone!==undefined?trimOrUndefined(input.emergencyContactPhone):(typeof guardianDataFromInput?.emergencyContactPhone==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactPhone):(typeof guardianDataFromInput?.phone==="string"?trimOrUndefined(guardianDataFromInput.phone):undefined));
+  const emergencyContactPhone=input.emergencyContactPhone!==undefined?trimOrUndefined(input.emergencyContactPhone):(typeof guardianDataFromInput?.emergencyContactPhone==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactPhone):(typeof guardianDataFromInput?.phone==="string"?trimOrUndefined(guardianDataFromInput.phone):(typeof guardianDataFromInput?.emergencyContact==="string"?trimOrUndefined(guardianDataFromInput.emergencyContact):undefined)));
   const mergedGuardianData={
     ...existingGuardianData,
     ...(fatherName!==undefined?{fatherName}:{}),
     ...(emergencyContactName!==undefined?{emergencyContactName}:{}),
     ...(emergencyContactRelation!==undefined?{emergencyContactRelation}:{}),
-    ...(emergencyContactPhone!==undefined?{emergencyContactPhone}:{}),
+    ...(emergencyContactPhone!==undefined?{emergencyContactPhone,emergencyContact:emergencyContactPhone}:{}),
   };
-  const address=input.address!==undefined?(input.address as Prisma.InputJsonValue):(input.addressLine||input.city?{text:trimOrUndefined(input.addressLine),city:trimOrUndefined(input.city)}:undefined);
+  const existingConsentData=typeof existing.consentData==="object"&&existing.consentData!==null?existing.consentData as Record<string,unknown>:{};
+  const inputConsentData=typeof input.consentData==="object"&&input.consentData!==null?input.consentData as Record<string,unknown>:undefined;
+  const bloodGroup=input.bloodGroup!==undefined?trimOrUndefined(input.bloodGroup):(typeof inputConsentData?.bloodGroup==="string"?trimOrUndefined(inputConsentData.bloodGroup):undefined);
+  const mergedConsentData={
+    ...existingConsentData,
+    ...(inputConsentData??{}),
+    ...(bloodGroup!==undefined?{bloodGroup}:{}),
+  };
+  const cnicVal = (input as unknown as { cnicNumber?: string }).cnicNumber || input.identifiers?.[0]?.value;
+  if (cnicVal !== undefined && cnicVal.trim() !== "") {
+    const primaryId = existing.identifiers.find((i) => i.isPrimary) ?? existing.identifiers[0];
+    const normalizedCnic = cnicVal.trim().replace(/\D+/g, "");
+    if (primaryId) {
+      await database.patientIdentifier.update({
+        where: { id: primaryId.id },
+        data: {
+          value: cnicVal.trim(),
+          normalizedValue: normalizedCnic,
+        },
+      });
+    } else {
+      await database.patientIdentifier.create({
+        data: {
+          tenantId: c.tenantId,
+          patientId: existing.id,
+          type: "NATIONAL_ID",
+          system: "pk.nadra.cnic",
+          value: cnicVal.trim(),
+          normalizedValue: normalizedCnic,
+          isPrimary: true,
+        },
+      });
+    }
+  }
+  const addressPayload = input.address !== undefined ? (input.address as Prisma.InputJsonValue) : undefined;
   return database.patient.update({
     where:{id:existing.id},
     data:{
@@ -118,8 +152,9 @@ async updatePatient(rc:WonFlowRequestContext,id:string,input:Partial<RegisterPat
       normalizedPhone,
       email:input.email!==undefined?(input.email.trim()||null):undefined,
       normalizedEmail,
-      address:address!==undefined?address:undefined,
+      address:addressPayload!==undefined?addressPayload:undefined,
       guardianData:mergedGuardianData as Prisma.InputJsonValue,
+      consentData:mergedConsentData as Prisma.InputJsonValue,
     },
     include:{identifiers:{select:{type:true,value:true,isPrimary:true}}},
   });
@@ -187,13 +222,13 @@ async registerPatient(rc:WonFlowRequestContext,input:RegisterPatientInput){const
     // Administrative fields collected by the registration form (father/guardian
     // identity, emergency contact, blood group, category, referral, notes) have
     // no dedicated columns; they ride along in the record's flexible JSON slots.
-    const address=input.addressLine||input.city?{text:trimOrUndefined(input.addressLine),city:trimOrUndefined(input.city)}:undefined;
+    const address=input.address!==undefined?(typeof input.address==="string"?{text:input.address.trim()}:(input.address as object)):(input.addressLine||input.city?{text:trimOrUndefined(input.addressLine),city:trimOrUndefined(input.city)}:undefined);
     const guardianDataFromInput=typeof input.guardianData==="object"&&input.guardianData!==null?input.guardianData as Record<string,unknown>:undefined;
     const fatherName=trimOrUndefined(input.fatherName)||(typeof guardianDataFromInput?.fatherName==="string"?trimOrUndefined(guardianDataFromInput.fatherName):(typeof guardianDataFromInput?.name==="string"?trimOrUndefined(guardianDataFromInput.name):undefined));
     const emergencyContactName=trimOrUndefined(input.emergencyContactName)||(typeof guardianDataFromInput?.emergencyContactName==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactName):(typeof guardianDataFromInput?.emergencyContact==="string"?trimOrUndefined(guardianDataFromInput.emergencyContact):undefined));
     const emergencyContactRelation=trimOrUndefined(input.emergencyContactRelation)||(typeof guardianDataFromInput?.emergencyContactRelation==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactRelation):(typeof guardianDataFromInput?.relationship==="string"?trimOrUndefined(guardianDataFromInput.relationship):undefined));
-    const emergencyContactPhone=trimOrUndefined(input.emergencyContactPhone)||(typeof guardianDataFromInput?.emergencyContactPhone==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactPhone):(typeof guardianDataFromInput?.phone==="string"?trimOrUndefined(guardianDataFromInput.phone):undefined));
-    const guardianData=fatherName||emergencyContactName||emergencyContactRelation||emergencyContactPhone?{fatherName,emergencyContactName,emergencyContactRelation,emergencyContactPhone}:guardianDataFromInput;
+    const emergencyContactPhone=trimOrUndefined(input.emergencyContactPhone)||(typeof guardianDataFromInput?.emergencyContactPhone==="string"?trimOrUndefined(guardianDataFromInput.emergencyContactPhone):(typeof guardianDataFromInput?.phone==="string"?trimOrUndefined(guardianDataFromInput.phone):(typeof guardianDataFromInput?.emergencyContact==="string"?trimOrUndefined(guardianDataFromInput.emergencyContact):undefined)));
+    const guardianData=fatherName||emergencyContactName||emergencyContactRelation||emergencyContactPhone?{fatherName,emergencyContactName,emergencyContactRelation,emergencyContactPhone,emergencyContact:emergencyContactPhone}:guardianDataFromInput;
     // referralSource is what the doctor sees as "where this patient came from".
     // Reception's own form always sends one via its dropdown; the doctor's
     // "register a patient" page has no such field, so a doctor-registered

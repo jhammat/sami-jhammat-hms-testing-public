@@ -112,18 +112,31 @@ function useStartConsultationReadiness(
             code: blocker.code,
             reason: blocker.reason,
             resolverLabel: RESOLVER_LABELS[blocker.resolverRole] ?? blocker.resolverRole,
-            resolutionHref: blocker.resolutionHref,
-            resolutionLabel: "Fix this",
+            resolutionHref: blocker.resolutionHref || undefined,
+            resolutionLabel: blocker.resolutionHref ? "Fix this" : undefined,
           })),
         );
-      } catch (caught) {
-        if (caught instanceof DOMException && caught.name === "AbortError") return;
+      } catch (caught: unknown) {
+        if (
+          controller.signal.aborted ||
+          (typeof caught === "object" && caught !== null && "name" in caught && (caught as { name: string }).name === "AbortError") ||
+          (caught instanceof Error && (caught.name === "AbortError" || caught.message.toLowerCase().includes("abort"))) ||
+          (typeof DOMException !== "undefined" && caught instanceof DOMException && caught.name === "AbortError")
+        ) {
+          return;
+        }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
     };
-    void load();
-    return () => controller.abort();
+    void load().catch(() => {});
+    return () => {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    };
   }, [appointmentId]);
 
   return { blockers, loading };

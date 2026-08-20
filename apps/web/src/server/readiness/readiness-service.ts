@@ -27,8 +27,8 @@ export interface ReadinessBlocker {
   reason: string;
   /** Who can act on this: the signed-in user themselves, or a role that must act. */
   resolverRole: "self" | "administrator" | "reception" | "billing" | "doctor";
-  /** The screen that fixes it. */
-  resolutionHref: string;
+  /** The screen that fixes it, when navigation to another page is required. */
+  resolutionHref?: string;
 }
 
 export interface ReadinessResult {
@@ -124,9 +124,8 @@ export async function checkStartSittingReadiness(
   if (!branch) {
     blockers.push({
       code: "branch-not-found",
-      reason: "The selected branch does not exist in this hospital. Choose a real branch before starting your sitting.",
+      reason: "No hospital branch is selected. Choose a branch from the 'Hospital branch' dropdown below before starting your sitting.",
       resolverRole: "self",
-      resolutionHref: "/doctor",
     });
   } else {
     if (branch.archivedAt) {
@@ -150,9 +149,8 @@ export async function checkStartSittingReadiness(
   if (Number.isNaN(businessDate.getTime())) {
     blockers.push({
       code: "invalid-business-date",
-      reason: "The selected date is not valid. Pick today's date from the sitting panel.",
+      reason: "The selected sitting date is invalid. Please pick today's date from the sitting panel.",
       resolverRole: "self",
-      resolutionHref: "/doctor",
     });
   } else {
     // A doctor cannot be actively sitting in two branches on the same date —
@@ -173,9 +171,8 @@ export async function checkStartSittingReadiness(
     if (otherActiveSitting) {
       blockers.push({
         code: "sitting-already-active-elsewhere",
-        reason: `You already have an active sitting today at ${otherActiveSitting.branch.name}. End that sitting before starting one at a different branch.`,
+        reason: `You already have an active sitting today at ${otherActiveSitting.branch.name}. End that sitting before starting one at this branch.`,
         resolverRole: "self",
-        resolutionHref: "/doctor",
       });
     }
 
@@ -195,17 +192,15 @@ export async function checkStartSittingReadiness(
       if (roomTaken) {
         blockers.push({
           code: "room-occupied",
-          reason: `${input.roomLabel.trim()} is already in use today by ${roomTaken.doctor.staffProfile.membership.displayName}. Choose a different room.`,
+          reason: `${input.roomLabel.trim()} is already in use today by ${roomTaken.doctor.staffProfile.membership.displayName}. Please choose a different room from the 'Consultation room' dropdown below.`,
           resolverRole: "self",
-          resolutionHref: "/doctor/schedule",
         });
       }
     } else if (!input.roomLabel?.trim()) {
       blockers.push({
         code: "room-required",
-        reason: "No consultation room was selected. Choose a room before starting your sitting.",
+        reason: "No consultation room is selected. Please choose a room from the 'Consultation room' dropdown below (or click '+ Add' to create one) to start your sitting.",
         resolverRole: "self",
-        resolutionHref: "/doctor/schedule",
       });
     }
   }
@@ -277,9 +272,7 @@ export async function checkStartConsultationReadiness(
   }
 
   const businessDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "UTC" });
-  const today = businessDateFormatter.format(new Date());
   const appointmentDate = businessDateFormatter.format(appointment.startsAt);
-
   const activeSitting = await database.doctorSitting.findFirst({
     where: {
       tenantId: context.tenantId,
@@ -292,20 +285,21 @@ export async function checkStartConsultationReadiness(
   if (!activeSitting) {
     blockers.push({
       code: "no-active-sitting",
-      reason: appointmentDate === today
-        ? "You have not started a sitting today, so no consultation room is open. Start your sitting first."
-        : `You have no active sitting recorded for ${appointmentDate}.`,
+      reason: `You have no active sitting recorded for ${appointmentDate}.`,
       resolverRole: "self",
       resolutionHref: "/doctor/schedule",
     });
   }
 
   if (!appointment.checkedInAt) {
+    const patientName = appointment.patient
+      ? `${appointment.patient.givenName} ${appointment.patient.familyName}`.trim()
+      : "The patient";
     blockers.push({
       code: "patient-not-checked-in",
-      reason: `${appointment.patient.givenName} ${appointment.patient.familyName} has not been checked in yet. Ask reception to check them in at the front desk.`,
+      reason: `${patientName} has not checked in at reception yet.`,
       resolverRole: "reception",
-      resolutionHref: "/operations/reception",
+      resolutionHref: "/operations/queue",
     });
   }
 
@@ -363,7 +357,7 @@ export async function checkBookAppointmentReadiness(
       code: "patient-not-found",
       reason: "This patient record does not exist or has been archived. Register the patient before booking.",
       resolverRole: "reception",
-      resolutionHref: "/operations/patients/register",
+      resolutionHref: "/operations/reception",
     });
   }
 
@@ -376,7 +370,7 @@ export async function checkBookAppointmentReadiness(
       code: "doctor-not-found",
       reason: "This doctor does not exist in this hospital.",
       resolverRole: "reception",
-      resolutionHref: "/operations/appointments/new",
+      resolutionHref: "/operations/reception",
     });
   }
 
@@ -388,7 +382,7 @@ export async function checkBookAppointmentReadiness(
       code: "invalid-time-range",
       reason: "The selected appointment time is invalid. Choose a time from the available slots list.",
       resolverRole: "self",
-      resolutionHref: "/operations/appointments/new",
+      resolutionHref: "/operations/reception",
     });
   }
 
@@ -442,7 +436,7 @@ export async function checkBookAppointmentReadiness(
         code: "slot-taken",
         reason: "This time was just booked by someone else. Choose a different available time.",
         resolverRole: "self",
-        resolutionHref: "/operations/appointments/new",
+        resolutionHref: "/operations/reception",
       });
     }
   }

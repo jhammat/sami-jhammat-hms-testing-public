@@ -118,6 +118,19 @@ const fullNavigationGroups:
         },
         {
           label:
+            "Reception Desk",
+
+          href:
+            "/operations/reception",
+
+          icon:
+            LayoutDashboard,
+
+          description:
+            "Search, register, appoint and bill patients in one workspace",
+        },
+        {
+          label:
             "Patient Directory",
 
           href:
@@ -127,18 +140,6 @@ const fullNavigationGroups:
 
           description:
             "Search and manage patient identities",
-        },
-        {
-          label:
-            "Register Patient",
-
-          href:
-            "/operations/patients/register",
-
-          icon: UserPlus,
-
-          description:
-            "Create a new hospital patient record",
         },
         {
           label:
@@ -152,19 +153,6 @@ const fullNavigationGroups:
 
           description:
             "Appointment directory and scheduling calendar",
-        },
-        {
-          label:
-            "Book Appointment",
-
-          href:
-            "/operations/appointments/new",
-
-          icon:
-            CalendarPlus,
-
-          description:
-            "Create a doctor appointment",
         },
         {
           label:
@@ -385,25 +373,11 @@ const receptionNavigationGroups:
             "Search, register, appoint and bill patients in one workspace",
         },
         {
-          label: "Register Patient",
-          href: "/operations/patients/register",
-          icon: UserPlus,
-          description:
-            "Register a new patient at the hospital counter",
-        },
-        {
           label: "Today’s Appointments",
           href: "/operations/appointments",
           icon: CalendarDays,
           description:
             "View and manage today’s appointment schedule",
-        },
-        {
-          label: "New Appointment",
-          href: "/operations/appointments/new",
-          icon: CalendarPlus,
-          description:
-            "Book a patient into a doctor’s available slot",
         },
         {
           label: "Patient Directory",
@@ -1653,28 +1627,50 @@ function useSignedInAvatar(identityId: string | undefined): string | null {
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (identityId === undefined) return;
+    if (!identityId) return;
+    let isCancelled = false;
     const controller = new AbortController();
+
     const load = async () => {
+      if (isCancelled || controller.signal.aborted) return;
       try {
         const response = await fetch("/api/v1/me/avatar", { cache: "no-store", signal: controller.signal });
-        if (!response.ok) return;
-        const body = await response.json() as { avatarUrl?: string | null };
-        setAvatarUrl(body.avatarUrl ?? null);
-      } catch (error) {
-        // An aborted fetch (unmount, or identity changed mid-request) is
-        // expected, not a failure -- a missing avatar otherwise isn't worth
-        // surfacing either way; initials remain in both cases. No custom
-        // abort reason is passed to controller.abort() below, so this is
-        // always the standard AbortError DOMException, never a raw value.
-        if (error instanceof DOMException && error.name === "AbortError") return;
+        if (!response.ok || isCancelled) return;
+        const body = (await response.json()) as { avatarUrl?: string | null };
+        if (!isCancelled) {
+          setAvatarUrl(body.avatarUrl ?? null);
+        }
+      } catch (error: unknown) {
+        // Silently swallow any fetch abort / cancellation error
+        if (
+          isCancelled ||
+          controller.signal.aborted ||
+          (typeof error === "object" && error !== null && "name" in error && (error as { name: string }).name === "AbortError") ||
+          (error instanceof Error && (error.name === "AbortError" || error.message.toLowerCase().includes("abort"))) ||
+          (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError")
+        ) {
+          return;
+        }
       }
     };
-    void load();
-    window.addEventListener(WONFLOW_AVATAR_CHANGED_EVENT, load);
+
+    void load().catch(() => {});
+
+    const onAvatarChanged = () => {
+      if (!isCancelled) {
+        void load().catch(() => {});
+      }
+    };
+
+    window.addEventListener(WONFLOW_AVATAR_CHANGED_EVENT, onAvatarChanged);
     return () => {
-      controller.abort();
-      window.removeEventListener(WONFLOW_AVATAR_CHANGED_EVENT, load);
+      isCancelled = true;
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+      window.removeEventListener(WONFLOW_AVATAR_CHANGED_EVENT, onAvatarChanged);
     };
   }, [identityId]);
 

@@ -1,52 +1,15 @@
 "use client";
 
 import Link from "next/link";
-
-import {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-
-import type {
-  MockBranch,
-} from "@wonflow/mock-data";
-
-import {
-  DataEmpty,
-  DataError,
-  DataLoading,
-} from "@wonflow/ui";
-
-import {
-  useWonFlowHospitalService,
-} from "@/app/_providers";
-
-import {
-  WonFlowAsyncDataBoundary,
-  WonFlowEmptyState,
-  useWonFlowConfirm,
-} from "@/components/feedback";
-
-import {
-  WonFlowActionBar,
-  WonFlowActionButton,
-  WonFlowOperationalPanel,
-  WonFlowPageHeader,
-} from "@/components/workspace";
-
-import {
-  useWonFlowAsyncData,
-} from "@/lib/data";
-
-import {
-  useApiResource,
-} from "@/lib/api";
-
-import type {
-  ListPatientsQuery,
-} from "@/lib/api/patients";
-
+import { useEffect, useMemo, useState } from "react";
+import type { MockBranch } from "@wonflow/mock-data";
+import { DataEmpty, DataError, DataLoading } from "@wonflow/ui";
+import { useWonFlowHospitalService } from "@/app/_providers";
+import { WonFlowAsyncDataBoundary, useWonFlowConfirm } from "@/components/feedback";
+import { WonFlowPageHeader } from "@/components/workspace";
+import { useWonFlowAsyncData } from "@/lib/data";
+import { useApiResource } from "@/lib/api";
+import type { ListPatientsQuery } from "@/lib/api/patients";
 import {
   createInitialPatientDirectoryFilters,
   fetchDirectoryPage,
@@ -54,234 +17,54 @@ import {
   primeLegacyPatientDirectoryCache,
   removeDirectoryPatient,
 } from "@/lib/patients";
-
-import type {
-  DirectoryPage,
-} from "@/lib/patients";
-
 import type {
   DemoPatientRegistrationResult,
+  DirectoryPage,
   PatientDirectoryFilters,
   PatientDirectoryGenderFilter,
   PatientDirectorySort,
 } from "@/lib/patients";
-
-import {
-  formatWonFlowDashboardDateTime,
-} from "@/lib/dashboard";
+import { formatWonFlowDashboardDateTime } from "@/lib/dashboard";
+import { updateReceptionPatient } from "@/lib/api/reception-api";
 
 const INPUT_CLASS_NAME = [
   "h-11 w-full",
   "rounded-xl border",
-  "border-slate-200",
-  "bg-white px-3.5",
-  "text-sm text-slate-900",
+  "border-slate-200 dark:border-slate-700",
+  "bg-white dark:bg-slate-800/90 px-3.5",
+  "text-sm text-slate-900 dark:text-slate-100",
   "outline-none transition",
-  "placeholder:text-slate-400",
-  "focus:border-blue-400",
+  "placeholder:text-slate-400 dark:placeholder:text-slate-500",
+  "focus:border-blue-500 dark:focus:border-blue-400",
   "focus:ring-2",
-  "focus:ring-blue-100",
+  "focus:ring-blue-100 dark:focus:ring-blue-900/40",
 ].join(" ");
 
-function PatientIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <circle
-        cx="12"
-        cy="8"
-        r="3"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="M5 21a7 7 0 0 1 14 0"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="M19 7h3M20.5 5.5v3"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function SearchIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-4 w-4"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <circle
-        cx="11"
-        cy="11"
-        r="7"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="m16.5 16.5 4 4"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function UsersIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <circle
-        cx="9"
-        cy="8"
-        r="3"
-        stroke="currentColor"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="M3.5 20a5.5 5.5 0 0 1 11 0M15 6.5a3 3 0 0 1 0 5.8M16.5 15a5 5 0 0 1 4 5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-
-function FilterIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M4 6h16M7 12h10M10 18h4"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function ShieldIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-5 w-5"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M12 3 20 6v5c0 5-3.4 8.5-8 10-4.6-1.5-8-5-8-10V6l8-3Z"
-        stroke="currentColor"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-
-      <path
-        d="m8.5 12 2.2 2.2 4.8-5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function RefreshIcon() {
-  return (
-    <svg
-      aria-hidden="true"
-      className="h-4 w-4"
-      fill="none"
-      viewBox="0 0 24 24"
-    >
-      <path
-        d="M20 7v5h-5M4 17v-5h5"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="2"
-      />
-
-      <path
-        d="M6.1 9a7 7 0 0 1 11.7-2.4L20 12M4 12l2.2 5.4A7 7 0 0 0 17.9 15"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      />
-    </svg>
-  );
-}
-
-function humanizeValue(
-  value: string,
-): string {
+function humanizeValue(value: string): string {
   return value
     .replaceAll("-", " ")
-    .replace(
-      /\b\w/g,
-      (character) =>
-        character.toUpperCase(),
-    );
+    .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function getInitials(
-  name: string,
-): string {
+function getInitials(name: string): string {
   return name
-    .split(" ")
+    .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
-    .map(
-      (part) =>
-        part.charAt(0)
-          .toUpperCase(),
-    )
+    .map((part) => part.charAt(0).toUpperCase())
     .join("");
 }
 
-function getGenderBadgeClass(
-  gender: string,
-): string {
-  switch (gender) {
+function getGenderBadgeClass(gender: string): string {
+  switch (gender.toLowerCase()) {
     case "female":
-      return "bg-rose-50 text-rose-700 ring-rose-100";
-
+      return "bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 ring-rose-200/70 dark:ring-rose-900/50";
     case "male":
-      return "bg-blue-50 text-blue-700 ring-blue-100";
-
+      return "bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 ring-blue-200/70 dark:ring-blue-900/50";
     case "other":
-      return "bg-violet-50 text-violet-700 ring-violet-100";
-
+      return "bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 ring-violet-200/70 dark:ring-violet-900/50";
     default:
-      return "bg-slate-100 text-slate-600 ring-slate-200";
+      return "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 ring-slate-200 dark:ring-slate-700";
   }
 }
 
@@ -296,7 +79,7 @@ function StatusBadge({
     <span
       className={[
         "inline-flex items-center",
-        "rounded-full px-2.5 py-1",
+        "rounded-full px-2.5 py-0.5",
         "text-[11px] font-bold",
         "ring-1",
         className,
@@ -307,29 +90,769 @@ function StatusBadge({
   );
 }
 
-interface PatientDirectoryContentProps {
-  branches:
-    readonly MockBranch[];
+// -------------------------------------------------------------
+// Interactive Patient Detail & Edit Pop-up Modal
+// -------------------------------------------------------------
+interface PatientDetailModalProps {
+  patient: DemoPatientRegistrationResult;
+  branchesById: ReadonlyMap<string, MockBranch>;
+  initialTab?: "view" | "edit";
+  onClose: () => void;
+  onSaved: () => void;
+  onRemove: (patient: DemoPatientRegistrationResult) => void;
 }
 
-function PatientDirectoryContent({
-  branches,
-}: PatientDirectoryContentProps) {
-  const [
-    filters,
-    setFilters,
-  ] = useState<
-    PatientDirectoryFilters
-  >(
+function PatientDetailModal({
+  patient,
+  branchesById,
+  initialTab = "view",
+  onClose,
+  onSaved,
+  onRemove,
+}: PatientDetailModalProps) {
+  const [tab, setTab] = useState<"view" | "edit">(initialTab);
+
+  // Edit form state
+  const [givenName, setGivenName] = useState(
+    patient.draft.givenName || patient.displayName.split(/\s+/)[0] || "",
+  );
+  const [middleName, setMiddleName] = useState(patient.draft.middleName || "");
+  const [familyName, setFamilyName] = useState(
+    patient.displayName.split(/\s+/).slice(1).join(" ") || "",
+  );
+  const [fatherName, setFatherName] = useState(patient.draft.fatherName || "");
+  const [cnicNumber, setCnicNumber] = useState(patient.draft.cnicNumber || "");
+  const [phone, setPhone] = useState(patient.draft.mobileNumber || "");
+  const [email, setEmail] = useState(patient.draft.emailAddress || "");
+  const [gender, setGender] = useState(patient.draft.gender || "male");
+  const [dateOfBirth, setDateOfBirth] = useState(patient.draft.dateOfBirth || "");
+  const [bloodGroup, setBloodGroup] = useState(patient.draft.bloodGroup || "");
+  const [patientCategory, setPatientCategory] = useState<
+    "self-pay" | "insurance" | "corporate" | "government" | "charity"
+  >(patient.draft.patientCategory || "self-pay");
+  const [addressLine, setAddressLine] = useState(patient.draft.addressLine || "");
+  const [city, setCity] = useState(patient.draft.city || "");
+  const [emergencyContactName, setEmergencyContactName] = useState(
+    patient.draft.emergencyContactName || "",
+  );
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState(
+    patient.draft.emergencyContactPhone || "",
+  );
+  const [emergencyContactRelation, setEmergencyContactRelation] = useState(
+    patient.draft.emergencyContactRelation || "",
+  );
+  const [notes, setNotes] = useState(patient.draft.notes || "");
+  const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [error, setError] = useState("");
+
+  const age = getDemoPatientRegistrationAge(patient);
+  const branch = branchesById.get(patient.draft.branchId);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    if (!givenName.trim()) {
+      setError("Patient given / first name is required.");
+      return;
+    }
+    setSaving(true);
+    setError("");
+    setSaveSuccess(false);
+
+    try {
+      await updateReceptionPatient(patient.id, {
+        givenName: givenName.trim(),
+        middleName: middleName.trim() || undefined,
+        familyName: familyName.trim() || givenName.trim(),
+        fatherName: fatherName.trim() || undefined,
+        phone: phone.trim() || undefined,
+        email: email.trim() || undefined,
+        sex: gender.toLowerCase(),
+        dateOfBirth: dateOfBirth || undefined,
+        bloodGroup: bloodGroup.trim() || undefined,
+        address: { text: addressLine.trim(), city: city.trim() },
+        guardianData: {
+          fatherName: fatherName.trim() || undefined,
+          emergencyContactName: emergencyContactName.trim() || undefined,
+          emergencyContactPhone: emergencyContactPhone.trim() || undefined,
+          emergencyContactRelation: emergencyContactRelation.trim() || undefined,
+        },
+        consentData: {
+          bloodGroup: bloodGroup.trim() || undefined,
+          patientCategory,
+          notes: notes.trim() || undefined,
+        },
+        identifiers: cnicNumber.trim()
+          ? [
+              {
+                type: "NATIONAL_ID",
+                system: "pk.nadra.cnic",
+                value: cnicNumber.trim(),
+                isPrimary: true,
+              },
+            ]
+          : undefined,
+      });
+
+      setSaveSuccess(true);
+      onSaved();
+      setTimeout(() => {
+        setTab("view");
+        setSaveSuccess(false);
+      }, 700);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to update patient record.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-3 sm:p-6 backdrop-blur-md animate-in fade-in duration-200"
+      role="dialog"
+    >
+      <div className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[28px] border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-[0_25px_70px_rgba(0,0,0,0.35)]">
+        
+        {/* Banner Header */}
+        <div className="relative overflow-hidden bg-gradient-to-r from-blue-700 via-indigo-700 to-violet-800 p-5 text-white sm:p-6">
+          <div className="pointer-events-none absolute inset-0 opacity-15 [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:16px_16px]" />
+          
+          <div className="relative flex items-center justify-between gap-4">
+            <div className="flex items-center gap-4 min-w-0">
+              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-white/20 text-lg font-black ring-1 ring-white/30 backdrop-blur-md shadow-inner">
+                {getInitials(patient.displayName)}
+              </div>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="truncate text-xl font-black text-white sm:text-2xl">
+                    {patient.displayName}
+                  </h2>
+                  <span className="rounded-full bg-white/20 px-2.5 py-0.5 text-xs font-black tracking-wide text-indigo-100 backdrop-blur">
+                    {patient.mrNumber}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs font-semibold text-indigo-100/90">
+                  Registered {formatWonFlowDashboardDateTime(patient.registeredAt)}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {/* Tab Selector */}
+              <div className="flex rounded-xl bg-black/25 p-1 backdrop-blur-md">
+                <button
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                    tab === "view"
+                      ? "bg-white text-indigo-950 shadow-sm"
+                      : "text-indigo-100 hover:text-white"
+                  }`}
+                  onClick={() => setTab("view")}
+                  type="button"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                    <path
+                      d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                    />
+                    <circle cx="12" cy="12" r="3" stroke="currentColor" strokeWidth="2" />
+                  </svg>
+                  <span>Profile</span>
+                </button>
+
+                <button
+                  className={`flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                    tab === "edit"
+                      ? "bg-white text-indigo-950 shadow-sm"
+                      : "text-indigo-100 hover:text-white"
+                  }`}
+                  onClick={() => setTab("edit")}
+                  type="button"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                    <path
+                      d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                    />
+                    <path
+                      d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+                      stroke="currentColor"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2"
+                    />
+                  </svg>
+                  <span>Edit</span>
+                </button>
+              </div>
+
+              <button
+                aria-label="Close dialog"
+                className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white transition hover:bg-white/20"
+                onClick={onClose}
+                type="button"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Modal Scrollable Body */}
+        <div className="flex-1 overflow-y-auto p-5 sm:p-6">
+          {tab === "view" ? (
+            <div className="space-y-5">
+              {/* Structured cards layout */}
+              <div className="grid gap-4 md:grid-cols-2">
+                
+                {/* 1. Demographics & Identity */}
+                <div className="rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 p-4">
+                  <div className="flex items-center gap-2 border-b border-slate-200/60 dark:border-slate-700/60 pb-2.5 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    <svg className="h-4 w-4 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24">
+                      <circle cx="12" cy="8" r="4" stroke="currentColor" strokeWidth="2" />
+                      <path d="M6 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" stroke="currentColor" strokeWidth="2" />
+                    </svg>
+                    <span>Identity & Demographics</span>
+                  </div>
+
+                  <dl className="mt-3.5 grid grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <dt className="text-[10px] font-bold text-slate-400">Father / Guardian</dt>
+                      <dd className="mt-0.5 font-bold text-slate-900 dark:text-white">
+                        {patient.draft.fatherName || "—"}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt className="text-[10px] font-bold text-slate-400">CNIC / National ID</dt>
+                      <dd className="mt-0.5 font-mono font-bold text-slate-900 dark:text-white">
+                        {patient.draft.cnicNumber || "—"}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt className="text-[10px] font-bold text-slate-400">Gender & Age</dt>
+                      <dd className="mt-1">
+                        <StatusBadge
+                          className={getGenderBadgeClass(patient.draft.gender)}
+                          label={`${humanizeValue(patient.draft.gender)}${age !== undefined ? ` · ${age}y` : ""}`}
+                        />
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt className="text-[10px] font-bold text-slate-400">Blood Group</dt>
+                      <dd className="mt-1">
+                        {patient.draft.bloodGroup ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 dark:bg-rose-950/60 px-2.5 py-0.5 text-xs font-black text-rose-700 dark:text-rose-300 ring-1 ring-rose-200 dark:ring-rose-900/50">
+                            🩸 {patient.draft.bloodGroup}
+                          </span>
+                        ) : (
+                          <span className="font-semibold text-slate-400">Not recorded</span>
+                        )}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt className="text-[10px] font-bold text-slate-400">Date of Birth</dt>
+                      <dd className="mt-0.5 font-semibold text-slate-700 dark:text-slate-300">
+                        {patient.draft.dateOfBirth || "—"}
+                      </dd>
+                    </div>
+
+                    <div>
+                      <dt className="text-[10px] font-bold text-slate-400">Patient Category</dt>
+                      <dd className="mt-0.5 font-bold text-blue-700 dark:text-blue-400">
+                        {humanizeValue(patient.draft.patientCategory)}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+
+                {/* 2. Contact & Location */}
+                <div className="rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 p-4">
+                  <div className="flex items-center gap-2 border-b border-slate-200/60 dark:border-slate-700/60 pb-2.5 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    <svg className="h-4 w-4 text-emerald-600 dark:text-emerald-400" fill="none" viewBox="0 0 24 24">
+                      <path
+                        d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                      />
+                    </svg>
+                    <span>Contact & Location</span>
+                  </div>
+
+                  <dl className="mt-3.5 space-y-3 text-xs">
+                    <div className="flex items-start justify-between">
+                      <dt className="text-[10px] font-bold text-slate-400">Mobile Phone</dt>
+                      <dd className="font-bold text-slate-900 dark:text-white">
+                        {patient.draft.mobileNumber ? (
+                          <a className="text-blue-600 hover:underline" href={`tel:${patient.draft.mobileNumber}`}>
+                            {patient.draft.mobileNumber}
+                          </a>
+                        ) : (
+                          "—"
+                        )}
+                      </dd>
+                    </div>
+
+                    <div className="flex items-start justify-between">
+                      <dt className="text-[10px] font-bold text-slate-400">Email Address</dt>
+                      <dd className="font-semibold text-slate-700 dark:text-slate-300">
+                        {patient.draft.emailAddress || "—"}
+                      </dd>
+                    </div>
+
+                    <div className="flex items-start justify-between">
+                      <dt className="text-[10px] font-bold text-slate-400">City</dt>
+                      <dd className="font-bold text-slate-800 dark:text-slate-200">
+                        {patient.draft.city || "—"}
+                      </dd>
+                    </div>
+
+                    <div className="flex items-start justify-between">
+                      <dt className="text-[10px] font-bold text-slate-400">Street Address</dt>
+                      <dd className="max-w-[60%] text-right font-medium text-slate-700 dark:text-slate-300">
+                        {patient.draft.addressLine || "—"}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+
+                {/* 3. Emergency Contact */}
+                <div className="rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 p-4">
+                  <div className="flex items-center gap-2 border-b border-slate-200/60 dark:border-slate-700/60 pb-2.5 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    <svg className="h-4 w-4 text-amber-600 dark:text-amber-400" fill="none" viewBox="0 0 24 24">
+                      <path
+                        d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                      />
+                    </svg>
+                    <span>Emergency Contact</span>
+                  </div>
+
+                  <dl className="mt-3.5 space-y-2.5 text-xs">
+                    <div className="flex items-start justify-between">
+                      <dt className="text-[10px] font-bold text-slate-400">Contact Person</dt>
+                      <dd className="font-bold text-slate-900 dark:text-white">
+                        {patient.draft.emergencyContactName || "—"}
+                      </dd>
+                    </div>
+
+                    <div className="flex items-start justify-between">
+                      <dt className="text-[10px] font-bold text-slate-400">Relationship</dt>
+                      <dd className="font-semibold text-slate-700 dark:text-slate-300">
+                        {patient.draft.emergencyContactRelation || "—"}
+                      </dd>
+                    </div>
+
+                    <div className="flex items-start justify-between">
+                      <dt className="text-[10px] font-bold text-slate-400">Emergency Phone</dt>
+                      <dd className="font-bold text-slate-900 dark:text-white">
+                        {patient.draft.emergencyContactPhone || "—"}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+
+                {/* 4. Branch & Hospital Profile */}
+                <div className="rounded-2xl border border-slate-100 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/50 p-4">
+                  <div className="flex items-center gap-2 border-b border-slate-200/60 dark:border-slate-700/60 pb-2.5 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    <svg className="h-4 w-4 text-violet-600 dark:text-violet-400" fill="none" viewBox="0 0 24 24">
+                      <path
+                        d="M3 21h18M3 7v14M21 7v14M6 7V3h12v4M9 11h2M13 11h2M9 15h2M13 15h2"
+                        stroke="currentColor"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth="2"
+                      />
+                    </svg>
+                    <span>Hospital Enrollment</span>
+                  </div>
+
+                  <dl className="mt-3.5 space-y-2.5 text-xs">
+                    <div className="flex items-start justify-between">
+                      <dt className="text-[10px] font-bold text-slate-400">Branch</dt>
+                      <dd className="font-bold text-slate-900 dark:text-white">
+                        {branch?.name ?? "Main Branch"}
+                      </dd>
+                    </div>
+
+                    <div className="flex items-start justify-between">
+                      <dt className="text-[10px] font-bold text-slate-400">Record Status</dt>
+                      <dd className="inline-flex items-center gap-1 font-bold text-emerald-600 dark:text-emerald-400">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        Active Live Record
+                      </dd>
+                    </div>
+
+                    <div className="flex items-start justify-between">
+                      <dt className="text-[10px] font-bold text-slate-400">Preferred Language</dt>
+                      <dd className="font-semibold text-slate-700 dark:text-slate-300">
+                        {patient.draft.preferredLanguage === "ur" ? "Urdu" : "English"}
+                      </dd>
+                    </div>
+                  </dl>
+                </div>
+              </div>
+
+              {/* Quick Clinical Links */}
+              <div className="rounded-2xl border border-slate-200/70 dark:border-slate-800 bg-white dark:bg-slate-900/60 p-4">
+                <div className="text-[11px] font-black uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-2.5">
+                  Clinical & Records
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:border-blue-300 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-700 dark:hover:text-blue-300 transition"
+                    href={`/operations/patients/${encodeURIComponent(patient.id)}/results`}
+                  >
+                    🧪 Laboratory Results
+                  </Link>
+
+                  <Link
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:border-violet-300 dark:hover:border-violet-600 hover:bg-violet-50 dark:hover:bg-violet-950/40 hover:text-violet-700 dark:hover:text-violet-300 transition"
+                    href={`/operations/patients/${encodeURIComponent(patient.id)}/imaging`}
+                  >
+                    🩻 Imaging Timeline
+                  </Link>
+
+                  <Link
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:border-emerald-300 dark:hover:border-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 hover:text-emerald-700 dark:hover:text-emerald-300 transition"
+                    href={`/operations/patients/${encodeURIComponent(patient.id)}/medicines`}
+                  >
+                    💊 Medicine History
+                  </Link>
+
+                  <Link
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:border-blue-300 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 hover:text-blue-700 dark:hover:text-blue-300 transition"
+                    href={`/operations/patients/${encodeURIComponent(patient.id)}/billing`}
+                  >
+                    💳 Billing Ledger
+                  </Link>
+
+                  <Link
+                    className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-3 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:border-indigo-300 dark:hover:border-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 hover:text-indigo-700 dark:hover:text-indigo-300 transition"
+                    href={`/operations/inpatient/wards?patientId=${encodeURIComponent(patient.id)}`}
+                  >
+                    🏥 Admit Patient
+                  </Link>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Edit Form */
+            <form className="space-y-4" onSubmit={(e) => void handleSave(e)}>
+              {error !== "" && (
+                <div className="rounded-xl bg-rose-50 dark:bg-rose-950/60 p-3 text-xs font-bold text-rose-700 dark:text-rose-300 ring-1 ring-rose-200 dark:ring-rose-900/50">
+                  {error}
+                </div>
+              )}
+
+              {saveSuccess && (
+                <div className="rounded-xl bg-emerald-50 dark:bg-emerald-950/60 p-3 text-xs font-bold text-emerald-700 dark:text-emerald-300 ring-1 ring-emerald-200 dark:ring-emerald-900/50">
+                  ✓ Patient record updated successfully!
+                </div>
+              )}
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">First / Given Name *</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setGivenName(e.target.value)}
+                    required
+                    type="text"
+                    value={givenName}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Middle Name</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setMiddleName(e.target.value)}
+                    type="text"
+                    value={middleName}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Family Name</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setFamilyName(e.target.value)}
+                    type="text"
+                    value={familyName}
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Father / Guardian Name</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setFatherName(e.target.value)}
+                    placeholder="Father or guardian name"
+                    type="text"
+                    value={fatherName}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">CNIC / National ID</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setCnicNumber(e.target.value)}
+                    placeholder="35201-xxxxxxx-x"
+                    type="text"
+                    value={cnicNumber}
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Mobile Phone</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="03xx-xxxxxxx"
+                    type="tel"
+                    value={phone}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Gender</span>
+                  <select
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setGender(e.target.value as "female" | "male" | "other" | "unknown")}
+                    value={gender}
+                  >
+                    <option value="male">Male</option>
+                    <option value="female">Female</option>
+                    <option value="other">Other</option>
+                    <option value="unknown">Not Specified</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Date of Birth</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setDateOfBirth(e.target.value)}
+                    type="date"
+                    value={dateOfBirth}
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Blood Group</span>
+                  <select
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setBloodGroup(e.target.value)}
+                    value={bloodGroup}
+                  >
+                    <option value="">Select blood group</option>
+                    <option value="A+">A+</option>
+                    <option value="A-">A-</option>
+                    <option value="B+">B+</option>
+                    <option value="B-">B-</option>
+                    <option value="AB+">AB+</option>
+                    <option value="AB-">AB-</option>
+                    <option value="O+">O+</option>
+                    <option value="O-">O-</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Patient Category</span>
+                  <select
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) =>
+                      setPatientCategory(
+                        e.target.value as
+                          | "self-pay"
+                          | "insurance"
+                          | "corporate"
+                          | "government"
+                          | "charity",
+                      )
+                    }
+                    value={patientCategory}
+                  >
+                    <option value="self-pay">Self Pay</option>
+                    <option value="insurance">Insurance</option>
+                    <option value="corporate">Corporate</option>
+                    <option value="government">Government / Panel</option>
+                    <option value="charity">Charity / Welfare / Zakat</option>
+                  </select>
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Email Address</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="patient@example.com"
+                    type="email"
+                    value={email}
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Street Address</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setAddressLine(e.target.value)}
+                    placeholder="House, Street, Area"
+                    type="text"
+                    value={addressLine}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">City</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder="City"
+                    type="text"
+                    value={city}
+                  />
+                </label>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-3">
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Emergency Contact Name</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setEmergencyContactName(e.target.value)}
+                    placeholder="Name"
+                    type="text"
+                    value={emergencyContactName}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Emergency Phone</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setEmergencyContactPhone(e.target.value)}
+                    placeholder="03xx-xxxxxxx"
+                    type="tel"
+                    value={emergencyContactPhone}
+                  />
+                </label>
+
+                <label className="block">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">Relationship</span>
+                  <input
+                    className={INPUT_CLASS_NAME}
+                    onChange={(e) => setEmergencyContactRelation(e.target.value)}
+                    placeholder="Brother, Spouse, etc."
+                    type="text"
+                    value={emergencyContactRelation}
+                  />
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2.5 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700 transition"
+                  onClick={() => setTab("view")}
+                  type="button"
+                >
+                  Cancel
+                </button>
+                <button
+                  className="rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-2.5 text-xs font-black text-white shadow hover:from-blue-700 hover:to-indigo-700 transition disabled:opacity-50"
+                  disabled={saving}
+                  type="submit"
+                >
+                  {saving ? "Saving Changes…" : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
+
+        {/* Modal Footer Actions */}
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/90 dark:bg-slate-800/80 px-5 py-3.5 sm:px-6">
+          <div className="flex items-center gap-2">
+            <button
+              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/40 px-3 py-2 text-xs font-bold text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/50 transition"
+              onClick={() => onRemove(patient)}
+              type="button"
+            >
+              🗑️ Delete Patient
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {tab === "view" ? (
+              <button
+                className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-4 py-2 text-xs font-black text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition"
+                onClick={() => setTab("edit")}
+                type="button"
+              >
+                ✏️ Edit Record
+              </button>
+            ) : null}
+
+            <Link
+              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-xs font-black text-white shadow-sm hover:from-blue-700 hover:to-indigo-700 transition"
+              href={`/operations/reception?patientId=${encodeURIComponent(patient.id)}`}
+            >
+              🗓️ Book Appointment
+            </Link>
+
+            <button
+              className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+              onClick={onClose}
+              type="button"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// Main Patient Directory Content & Table
+// -------------------------------------------------------------
+interface PatientDirectoryContentProps {
+  branches: readonly MockBranch[];
+}
+
+function PatientDirectoryContent({ branches }: PatientDirectoryContentProps) {
+  const [filters, setFilters] = useState<PatientDirectoryFilters>(
     createInitialPatientDirectoryFilters,
   );
 
-  // Debounced so the server is queried after typing pauses, not on every
-  // keystroke.
-  const [
-    debouncedQuery,
-    setDebouncedQuery,
-  ] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -344,7 +867,6 @@ function PatientDirectoryContent({
   const [page, setPage] = useState(1);
   const pageSize = 25;
 
-  // A changed search term or filter always starts back at page 1.
   useEffect(() => {
     queueMicrotask(() => {
       setPage(1);
@@ -357,19 +879,14 @@ function PatientDirectoryContent({
     filters.sort,
   ]);
 
-  const [
-    selectedPatientId,
-    setSelectedPatientId,
-  ] = useState(
-    () =>
-      typeof window === "undefined"
-        ? ""
-        : new URLSearchParams(window.location.search).get("patientId") ?? "",
-  );
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [activeModalPatient, setActiveModalPatient] = useState<{
+    patient: DemoPatientRegistrationResult;
+    tab: "view" | "edit";
+  } | null>(null);
 
   const [removingId, setRemovingId] = useState("");
   const [removeError, setRemoveError] = useState("");
-  const [filtersOpen, setFiltersOpen] = useState(false);
   const { confirm, dialog: confirmDialog } = useWonFlowConfirm();
 
   const listQuery = useMemo<ListPatientsQuery>(
@@ -402,73 +919,54 @@ function PatientDirectoryContent({
   const registrations = directory.data?.patients ?? [];
   const directoryData = directory.data;
 
-  // Screens not yet wired to the live API (billing, diagnostics, pharmacy)
-  // resolve a patient by id from this in-memory cache; keep it warm.
   useEffect(() => {
     if (directoryData !== undefined && directoryData.patients.length > 0) {
       primeLegacyPatientDirectoryCache(directoryData.patients);
     }
   }, [directoryData]);
 
-  const branchesById =
-    useMemo(
-      () =>
-        new Map(
-          branches.map(
-            (branch) => [
-              branch.id,
-              branch,
-            ],
-          ),
-        ),
-      [branches],
-    );
+  const branchesById = useMemo(
+    () => new Map(branches.map((branch) => [branch.id, branch])),
+    [branches],
+  );
 
-  const selectedPatient =
-    registrations.find(
-      (registration) =>
-        registration.id ===
-        selectedPatientId,
-    ) ??
-    registrations[0];
-
-  function updateFilter<
-    TField extends
-      keyof PatientDirectoryFilters,
-  >(
+  function updateFilter<TField extends keyof PatientDirectoryFilters>(
     field: TField,
-    value:
-      PatientDirectoryFilters[TField],
+    value: PatientDirectoryFilters[TField],
   ) {
-    setFilters(
-      (currentFilters) => ({
-        ...currentFilters,
-        [field]: value,
-      }),
-    );
+    setFilters((currentFilters) => ({
+      ...currentFilters,
+      [field]: value,
+    }));
   }
 
   function clearFilters() {
-    setFilters(
-      createInitialPatientDirectoryFilters(),
-    );
+    setFilters(createInitialPatientDirectoryFilters());
   }
 
   async function removePatient(patient: DemoPatientRegistrationResult) {
-    const confirmed = await confirm({
-      title: "Remove patient",
-      message: `${patient.displayName} (${patient.mrNumber}) leaves the patient directory. Appointments, invoices and clinical history are retained for audit.`,
-      confirmLabel: "Remove patient",
+    const accepted = await confirm({
+      confirmLabel: "Delete patient",
+      message: `This removes ${patient.displayName} from the active patient directory. Clinical and financial history will remain stored for audit.`,
+      title: `Remove ${patient.displayName}?`,
+      tone: "danger",
     });
-    if (!confirmed) return;
+
+    if (!accepted) {
+      return;
+    }
+
     setRemovingId(patient.id);
     setRemoveError("");
+
     try {
       await removeDirectoryPatient(patient.id);
-      setSelectedPatientId("");
+      setActiveModalPatient(null);
       directory.reload();
-    } catch (caught) {
-      setRemoveError(caught instanceof Error ? caught.message : "The patient could not be removed.");
+    } catch (error) {
+      setRemoveError(
+        error instanceof Error ? error.message : "Patient could not be removed.",
+      );
     } finally {
       setRemovingId("");
     }
@@ -477,1113 +975,528 @@ function PatientDirectoryContent({
   return (
     <div className="space-y-4">
       {confirmDialog}
-      <WonFlowActionBar
-        description="Search patients by name, MR number, CNIC, father name or phone number."
-        filters={
-          <>
-            <label className="relative min-w-64 flex-1">
-              <span className="sr-only">
-                Search patients
-              </span>
 
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400"
+      {/* Detail & Edit Modal Pop-up */}
+      {activeModalPatient && (
+        <PatientDetailModal
+          branchesById={branchesById}
+          initialTab={activeModalPatient.tab}
+          onClose={() => setActiveModalPatient(null)}
+          onRemove={(patient) => void removePatient(patient)}
+          onSaved={() => {
+            directory.reload();
+          }}
+          patient={activeModalPatient.patient}
+        />
+      )}
+
+      {/* KPI Cards Strip */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            Total Patients
+          </div>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-2xl font-black text-slate-900 dark:text-white">
+              {directory.data?.summary.totalPatients ?? 0}
+            </span>
+            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+              Active Records
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            Matching Search
+          </div>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-2xl font-black text-indigo-600 dark:text-indigo-400">
+              {directory.data?.total ?? 0}
+            </span>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              Shown
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            Male Patients
+          </div>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-2xl font-black text-blue-600 dark:text-blue-400">
+              {directory.data?.summary.malePatients ?? 0}
+            </span>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              Registered
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+            Female Patients
+          </div>
+          <div className="mt-1.5 flex items-baseline gap-2">
+            <span className="text-2xl font-black text-rose-600 dark:text-rose-400">
+              {directory.data?.summary.femalePatients ?? 0}
+            </span>
+            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              Registered
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Search & Filter Header Bar */}
+      <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+          <div className="relative flex-1">
+            <span className="pointer-events-none absolute inset-y-0 left-3.5 flex items-center text-slate-400 dark:text-slate-500">
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2" />
+                <path d="m16.5 16.5 4 4" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+              </svg>
+            </span>
+
+            <input
+              className={`${INPUT_CLASS_NAME} pl-10`}
+              onChange={(e) => updateFilter("query", e.target.value)}
+              placeholder="Search by Patient Name, MR Number, CNIC, Father Name or Phone…"
+              type="search"
+              value={filters.query}
+            />
+
+            {filters.query.trim() !== "" && (
+              <button
+                className="absolute inset-y-0 right-3 flex items-center text-xs font-bold text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                onClick={() => updateFilter("query", "")}
+                type="button"
               >
-                <SearchIcon />
-              </span>
+                Clear
+              </button>
+            )}
+          </div>
 
-              <input
-                autoFocus
-                className={[
-                  INPUT_CLASS_NAME,
-                  "pl-10",
-                ].join(" ")}
-                onChange={(
-                  event,
-                ) => {
-                  updateFilter(
-                    "query",
-                    event.target.value,
-                  );
-                }}
-                placeholder="Name, MR, CNIC, father name or phone"
-                type="search"
-                value={filters.query}
-              />
-
-              {/* Matches surface directly under the box, the way the reception
-                  desk presents them, so a match can be opened without reading
-                  the table below. */}
-              {filters.query.trim() !== "" ? (
-                <div className="absolute left-0 right-0 top-full z-20 mt-1.5 overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-[0_18px_44px_rgba(79,70,229,0.16)]">
-                  {registrations.length === 0 ? (
-                    <p className="px-4 py-3 text-xs font-semibold text-slate-500">No patient matches “{filters.query.trim()}”.</p>
-                  ) : (
-                    <ul className="max-h-72 overflow-y-auto">
-                      {registrations.slice(0, 8).map((registration) => (
-                        <li key={registration.id}>
-                          <button
-                            className={`flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:bg-indigo-50 ${registration.id === selectedPatientId ? "bg-indigo-50/70" : ""}`}
-                            onClick={() => setSelectedPatientId(registration.id)}
-                            type="button"
-                          >
-                            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 text-[10px] font-black text-white">
-                              {registration.displayName.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part.charAt(0)).join("").toLocaleUpperCase() || "PT"}
-                            </span>
-                            <span className="min-w-0 flex-1">
-                              <span className="block truncate text-sm font-bold text-slate-900">{registration.displayName}</span>
-                              <span className="block truncate text-[11px] font-semibold text-slate-500">
-                                {registration.mrNumber}
-                                {registration.draft.mobileNumber ? ` · ${registration.draft.mobileNumber}` : ""}
-                                {registration.draft.cnicNumber ? ` · ${registration.draft.cnicNumber}` : ""}
-                              </span>
-                            </span>
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  {registrations.length > 8 ? (
-                    <p className="border-t border-slate-100 px-4 py-2 text-[10px] font-bold text-slate-500">
-                      Showing 8 of {registrations.length} matches — refine the search or use the list below.
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-            </label>
-
+          <div className="flex flex-wrap items-center gap-2">
             <select
               aria-label="Sort patients"
-              className="h-11 min-w-52 rounded-xl border border-slate-200 bg-white px-3.5 text-sm font-semibold text-slate-700 outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-100"
-              onChange={(
-                event,
-              ) => {
-                updateFilter(
-                  "sort",
-                  event.target
-                    .value as
-                    PatientDirectorySort,
-                );
-              }}
+              className="h-11 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 text-xs font-bold text-slate-700 dark:text-slate-200 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:focus:ring-blue-900/40"
+              onChange={(e) => updateFilter("sort", e.target.value as PatientDirectorySort)}
               value={filters.sort}
             >
-              <option value="recent">
-                Recently Registered
-              </option>
-
-              <option value="name-ascending">
-                Patient Name A–Z
-              </option>
-
-              <option value="mr-ascending">
-                MR Number
-              </option>
-
-              <option value="age-ascending">
-                Age: Youngest First
-              </option>
-
-              <option value="age-descending">
-                Age: Oldest First
-              </option>
+              <option value="recent">Recently Registered</option>
+              <option value="name-ascending">Patient Name A–Z</option>
+              <option value="mr-ascending">MR Number</option>
+              <option value="age-ascending">Age: Youngest First</option>
+              <option value="age-descending">Age: Oldest First</option>
             </select>
-          </>
-        }
-        primaryActions={
-          <WonFlowActionButton
-            icon={<RefreshIcon />}
-            onClick={
-              directory.reload
-            }
-            variant="primary"
-          >
-            Refresh Directory
-          </WonFlowActionButton>
-        }
-        secondaryActions={
-          <>
-            <WonFlowActionButton
+
+            <button
+              className={`flex h-11 items-center gap-2 rounded-xl border px-3.5 text-xs font-bold transition ${
+                filtersOpen
+                  ? "border-blue-500 bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300"
+                  : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+              }`}
               onClick={() => setFiltersOpen((open) => !open)}
-              variant="ghost"
+              type="button"
             >
-              {filtersOpen ? "Hide filters" : "Filters"}
-            </WonFlowActionButton>
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24">
+                <path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+              </svg>
+              <span>{filtersOpen ? "Hide Filters" : "Filters"}</span>
+            </button>
 
-            <WonFlowActionButton
-              onClick={clearFilters}
-              variant="ghost"
+            <button
+              className="flex h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition"
+              onClick={() => directory.reload()}
+              type="button"
             >
-              Clear Filters
-            </WonFlowActionButton>
-          </>
-        }
-        summary={
-          `${directory.data?.total ?? 0} of ${directory.data?.summary.totalPatients ?? 0} patients`
-        }
-        title="Patient Search"
-      />
-
-      {/* Filters stay collapsed so the search, counts and list fit one screen. */}
-      <div className={filtersOpen ? "" : "hidden"}>
-      <WonFlowOperationalPanel
-        compact
-        description="Refine the patient directory using hospital-relevant filters."
-        icon={<FilterIcon />}
-        title="Directory Filters"
-        tone="slate"
-      >
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <label>
-            <span className="text-xs font-bold text-slate-500">
-              Registration Branch
-            </span>
-
-            <select
-              className={[
-                INPUT_CLASS_NAME,
-                "mt-1.5",
-              ].join(" ")}
-              onChange={(
-                event,
-              ) => {
-                updateFilter(
-                  "branchId",
-                  event.target.value,
-                );
-              }}
-              value={
-                filters.branchId
-              }
-            >
-              <option value="all">
-                All Branches
-              </option>
-
-              {branches.map(
-                (branch) => (
-                  <option
-                    key={branch.id}
-                    value={branch.id}
-                  >
-                    {branch.name}
-                  </option>
-                ),
-              )}
-            </select>
-          </label>
-
-          <label>
-            <span className="text-xs font-bold text-slate-500">
-              Gender
-            </span>
-
-            <select
-              className={[
-                INPUT_CLASS_NAME,
-                "mt-1.5",
-              ].join(" ")}
-              onChange={(
-                event,
-              ) => {
-                updateFilter(
-                  "gender",
-                  event.target
-                    .value as
-                    PatientDirectoryGenderFilter,
-                );
-              }}
-              value={filters.gender}
-            >
-              <option value="all">
-                All Genders
-              </option>
-
-              <option value="female">
-                Female
-              </option>
-
-              <option value="male">
-                Male
-              </option>
-
-              <option value="other">
-                Other
-              </option>
-
-              <option value="unknown">
-                Not Recorded
-              </option>
-            </select>
-          </label>
-
-          <label>
-            <span className="text-xs font-bold text-slate-500">
-              Minimum Age
-            </span>
-
-            <input
-              className={[
-                INPUT_CLASS_NAME,
-                "mt-1.5",
-              ].join(" ")}
-              max="130"
-              min="0"
-              onChange={(
-                event,
-              ) => {
-                updateFilter(
-                  "minimumAge",
-                  event.target.value,
-                );
-              }}
-              placeholder="0"
-              type="number"
-              value={
-                filters.minimumAge
-              }
-            />
-          </label>
-
-          <label>
-            <span className="text-xs font-bold text-slate-500">
-              Maximum Age
-            </span>
-
-            <input
-              className={[
-                INPUT_CLASS_NAME,
-                "mt-1.5",
-              ].join(" ")}
-              max="130"
-              min="0"
-              onChange={(
-                event,
-              ) => {
-                updateFilter(
-                  "maximumAge",
-                  event.target.value,
-                );
-              }}
-              placeholder="130"
-              type="number"
-              value={
-                filters.maximumAge
-              }
-            />
-          </label>
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                <path d="M20 7v5h-5M4 17v-5h5" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+                <path d="M6.1 9a7 7 0 0 1 11.7-2.4L20 12M4 12l2.2 5.4A7 7 0 0 0 17.9 15" stroke="currentColor" strokeLinecap="round" strokeWidth="2" />
+              </svg>
+              <span>Refresh</span>
+            </button>
+          </div>
         </div>
-      </WonFlowOperationalPanel>
+
+        {/* Collapsible Advanced Filters */}
+        {filtersOpen && (
+          <div className="mt-4 pt-4 border-t border-slate-100 dark:border-slate-800 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 animate-in fade-in duration-150">
+            <label>
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Branch</span>
+              <select
+                className={`${INPUT_CLASS_NAME} mt-1.5`}
+                onChange={(e) => updateFilter("branchId", e.target.value)}
+                value={filters.branchId}
+              >
+                <option value="all">All Branches</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>{b.name}</option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Gender</span>
+              <select
+                className={`${INPUT_CLASS_NAME} mt-1.5`}
+                onChange={(e) => updateFilter("gender", e.target.value as PatientDirectoryGenderFilter)}
+                value={filters.gender}
+              >
+                <option value="all">All Genders</option>
+                <option value="female">Female</option>
+                <option value="male">Male</option>
+                <option value="other">Other</option>
+                <option value="unknown">Not Recorded</option>
+              </select>
+            </label>
+
+            <label>
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Minimum Age</span>
+              <input
+                className={`${INPUT_CLASS_NAME} mt-1.5`}
+                max="130"
+                min="0"
+                onChange={(e) => updateFilter("minimumAge", e.target.value)}
+                placeholder="0"
+                type="number"
+                value={filters.minimumAge}
+              />
+            </label>
+
+            <label>
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Maximum Age</span>
+              <input
+                className={`${INPUT_CLASS_NAME} mt-1.5`}
+                max="130"
+                min="0"
+                onChange={(e) => updateFilter("maximumAge", e.target.value)}
+                placeholder="130"
+                type="number"
+                value={filters.maximumAge}
+              />
+            </label>
+
+            <div className="sm:col-span-2 lg:col-span-4 flex justify-end">
+              <button
+                className="text-xs font-bold text-indigo-600 dark:text-indigo-400 hover:underline"
+                onClick={clearFilters}
+                type="button"
+              >
+                Reset All Filters
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* A single strip instead of four cards: the same counts, one row tall. */}
-      <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-indigo-100 bg-white/80 px-3 py-2 shadow-sm">
-        {[
-          { label: "Total", value: directory.data?.summary.totalPatients ?? 0, tone: "text-indigo-700 bg-indigo-50" },
-          { label: "Matching", value: directory.data?.total ?? 0, tone: "text-violet-700 bg-violet-50" },
-          { label: "Male", value: directory.data?.summary.malePatients ?? 0, tone: "text-emerald-700 bg-emerald-50" },
-          { label: "Female", value: directory.data?.summary.femalePatients ?? 0, tone: "text-rose-700 bg-rose-50" },
-        ].map((stat) => (
-          <span className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[11px] font-bold ${stat.tone}`} key={stat.label}>
-            {stat.label}
-            <strong className="text-sm tabular-nums">{stat.value}</strong>
-          </span>
-        ))}
-      </div>
-
-      {directory.status ===
-      "loading" ? (
-        <WonFlowOperationalPanel
-          description="Loading the patient directory."
-          title="Registered Patients"
-          tone="blue"
-        >
-          <DataLoading
-            label="Loading patients"
-            rows={8}
-            shape="table"
-          />
-        </WonFlowOperationalPanel>
-      ) : directory.status ===
-        "error" ? (
-        <DataError
-          detail={
-            directory.error
-              ?.message
-          }
-          onRetry={
-            directory.reload
-          }
-          what="the patient directory"
-        />
-      ) : directory.status ===
-          "empty" &&
-        (
-          directory.data
-            ?.summary
-            .totalPatients ??
-          0
-        ) === 0 ? (
-        <WonFlowOperationalPanel
-          description="No patients are registered for this hospital yet."
-          title="No Registered Patients"
-          tone="amber"
-        >
+      {/* Patients Table & Data Rendering */}
+      {directory.status === "loading" ? (
+        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-8 shadow-sm">
+          <DataLoading label="Loading registered patient directory…" rows={8} shape="table" />
+        </div>
+      ) : directory.status === "error" ? (
+        <div className="rounded-2xl border border-rose-200 dark:border-rose-900/50 bg-white dark:bg-slate-900 p-8 shadow-sm">
+          <DataError detail={directory.error?.message} onRetry={directory.reload} what="patient directory" />
+        </div>
+      ) : registrations.length === 0 ? (
+        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 p-12 text-center shadow-sm">
           <DataEmpty
             action={
               <Link
-                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-bold text-white transition hover:bg-blue-700"
-                href="/operations/patients/register"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-sm hover:bg-blue-700 transition"
+                href="/operations/reception"
               >
-                Register First Patient
+                Register New Patient
               </Link>
             }
+            description="No patients match the search criteria. Click below to register at the Reception Desk."
             itemLabel="patients"
-            title="No patient records"
+            title="No Matching Patients"
           />
-        </WonFlowOperationalPanel>
+        </div>
       ) : (
-        <div className="wf-workflow-split">
-          <div className="wf-workflow-main">
-            <WonFlowOperationalPanel
-            description="Registered patient identities matching the current search."
-            icon={<UsersIcon />}
-            status={
-              <StatusBadge
-                className="bg-blue-50 text-blue-700 ring-blue-100"
-                label={`${registrations.length} records`}
-              />
-            }
-            title="Registered Patients"
-            tone="blue"
-          >
-            {registrations.length ===
-            0 ? (
-              <DataEmpty
-                action={{
-                  label:
-                    "Clear filters",
-                  onClick:
-                    clearFilters,
-                }}
-                description="No patient matches the selected search and filters."
-                itemLabel="matching patients"
-                title="No matching patients"
-              />
-            ) : (
-              <>
-                {/* The list scrolls inside its panel so the summary and actions
-                    stay reachable without scrolling the whole page. */}
-                <div className="hidden max-h-[26rem] overflow-auto lg:block">
-                  <table className="w-full min-w-[1120px] border-separate border-spacing-y-2 text-left">
-                    <thead>
-                      <tr className="text-[10px] uppercase tracking-[0.14em] text-slate-400">
-                        <th className="pb-3 font-extrabold">
-                          Patient
-                        </th>
-
-                        <th className="pb-3 font-extrabold">
-                          MR Number
-                        </th>
-
-                        <th className="pb-3 font-extrabold">
-                          CNIC / B-Form
-                        </th>
-
-                        <th className="pb-3 font-extrabold">
-                          Father / Guardian
-                        </th>
-
-                        <th className="pb-3 font-extrabold">
-                          Gender / Age
-                        </th>
-
-                        <th className="pb-3 font-extrabold">
-                          Mobile
-                        </th>
-
-                        <th className="pb-3 font-extrabold">
-                          Branch
-                        </th>
-
-                        <th className="pb-3 text-right font-extrabold">
-                          Actions
-                        </th>
-                      </tr>
-                    </thead>
-
-                    <tbody>
-                      {registrations.map(
-                        (
-                          registration,
-                        ) => {
-                          const age =
-                            getDemoPatientRegistrationAge(
-                              registration,
-                            );
-
-                          const branch =
-                            branchesById.get(
-                              registration
-                                .draft
-                                .branchId,
-                            );
-
-                          const isSelected =
-                            selectedPatient
-                              ?.id ===
-                            registration.id;
-
-                          return (
-                            <tr
-                              className={[
-                                "group transition [&>td]:border-y [&>td]:border-slate-100 [&>td]:bg-white [&>td:first-child]:rounded-l-2xl [&>td:first-child]:border-l [&>td:last-child]:rounded-r-2xl [&>td:last-child]:border-r",
-                                isSelected
-                                  ? "[&>td]:border-indigo-200 [&>td]:bg-indigo-50/80 shadow-[0_8px_24px_rgba(79,70,229,0.08)]"
-                                  : "hover:[&>td]:border-blue-200 hover:[&>td]:bg-blue-50/45 hover:shadow-[0_8px_24px_rgba(37,99,235,0.07)]",
-                              ].join(" ")}
-                              key={
-                                registration.id
-                              }
-                            >
-                              <td className="py-4 pr-4">
-                                <button
-                                  className="flex items-center gap-3 text-left"
-                                  onClick={() => {
-                                    setSelectedPatientId(
-                                      registration.id,
-                                    );
-                                  }}
-                                  type="button"
-                                >
-                                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-100 to-violet-100 text-xs font-black text-indigo-700 ring-1 ring-indigo-200">
-                                    {getInitials(
-                                      registration.displayName,
-                                    )}
-                                  </span>
-
-                                  <span>
-                                    <span className="block text-sm font-extrabold text-slate-950">
-                                      {
-                                        registration.displayName
-                                      }
-                                    </span>
-
-                                    <span className="mt-1 block text-xs text-slate-500">
-                                      {
-                                        humanizeValue(
-                                          registration
-                                            .draft
-                                            .patientCategory,
-                                        )
-                                      }
-                                    </span>
-                                  </span>
-                                </button>
-                              </td>
-
-                              <td className="py-4 pr-4 text-sm font-black text-indigo-700">
-                                {
-                                  registration.mrNumber
-                                }
-                              </td>
-
-                              <td className="py-4 pr-4 font-mono text-xs font-semibold text-slate-600">
-                                {
-                                  registration
-                                    .draft
-                                    .cnicNumber
-                                }
-                              </td>
-
-                              <td className="py-4 pr-4 text-sm font-semibold text-slate-700">
-                                {
-                                  registration
-                                    .draft
-                                    .fatherName
-                                }
-                              </td>
-
-                              <td className="py-4 pr-4">
-                                <StatusBadge
-                                  className={getGenderBadgeClass(
-                                    registration
-                                      .draft
-                                      .gender,
-                                  )}
-                                  label={`${humanizeValue(
-                                    registration
-                                      .draft
-                                      .gender,
-                                  )}${age === undefined ? "" : ` · ${age} years`}`}
-                                />
-                              </td>
-
-                              <td className="py-4 pr-4 text-sm font-semibold text-slate-700">
-                                {
-                                  registration
-                                    .draft
-                                    .mobileNumber
-                                }
-                              </td>
-
-                              <td className="py-4 pr-4 text-sm font-semibold text-slate-600">
-                                {branch
-                                  ?.name ??
-                                  "Unknown branch"}
-                              </td>
-
-                              <td className="py-4 text-right">
-                                <div className="flex justify-end gap-2">
-                                  <button
-                                    className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100"
-                                    onClick={() => {
-                                      setSelectedPatientId(
-                                        registration.id,
-                                      );
-                                    }}
-                                    type="button"
-                                  >
-                                    Open
-                                  </button>
-
-                                  <Link
-                                    className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700 transition hover:bg-blue-100"
-                                    href={`/operations/appointments/new?patientId=${encodeURIComponent(
-                                      registration.id,
-                                    )}`}
-                                  >
-                                    Book
-                                  </Link>
-
-                                  <Link
-                                    className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white transition hover:bg-indigo-700"
-                                    href={`/operations/billing/new?patientId=${encodeURIComponent(
-                                      registration.id,
-                                    )}`}
-                                  >
-                                    Create Bill
-                                  </Link>
-                                </div>
-                              </td>
-                            </tr>
-                          );
-                        },
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div className="max-h-[26rem] space-y-3 overflow-auto lg:hidden">
-                  {registrations.map(
-                    (
-                      registration,
-                    ) => {
-                      const age =
-                        getDemoPatientRegistrationAge(
-                          registration,
-                        );
-
-                      const branch =
-                        branchesById.get(
-                          registration
-                            .draft
-                            .branchId,
-                        );
-
-                      return (
-                        <article
-                          className="rounded-[20px] border border-indigo-100/80 bg-gradient-to-br from-white via-blue-50/35 to-violet-50/55 p-4 shadow-[0_12px_30px_rgba(37,99,235,0.08)]"
-                          key={
-                            registration.id
-                          }
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-100 to-violet-100 text-xs font-black text-indigo-700">
-                              {getInitials(
-                                registration.displayName,
-                              )}
-                            </div>
-
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-black text-slate-950">
-                                {
-                                  registration.displayName
-                                }
-                              </div>
-
-                              <div className="mt-1 text-xs font-bold text-indigo-700">
-                                {
-                                  registration.mrNumber
-                                }
-                              </div>
-                            </div>
-
-                            <StatusBadge
-                              className={getGenderBadgeClass(
-                                registration
-                                  .draft
-                                  .gender,
-                              )}
-                              label={
-                                age === undefined
-                                  ? humanizeValue(
-                                      registration
-                                        .draft
-                                        .gender,
-                                    )
-                                  : `${age} years`
-                              }
-                            />
-                          </div>
-
-                          <div className="mt-4 grid grid-cols-2 gap-3 rounded-xl bg-slate-50 p-3 text-xs">
-                            <MobileSummary
-                              label="CNIC"
-                              value={
-                                registration
-                                  .draft
-                                  .cnicNumber
-                              }
-                            />
-
-                            <MobileSummary
-                              label="Mobile"
-                              value={
-                                registration
-                                  .draft
-                                  .mobileNumber
-                              }
-                            />
-
-                            <MobileSummary
-                              label="Father"
-                              value={
-                                registration
-                                  .draft
-                                  .fatherName
-                              }
-                            />
-
-                            <MobileSummary
-                              label="Branch"
-                              value={
-                                branch?.name ??
-                                "Unknown"
-                              }
-                            />
-                          </div>
-
-                          <div className="mt-4 grid grid-cols-2 gap-2">
-                            <button
-                              className="min-h-10 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700"
-                              onClick={() => {
-                                setSelectedPatientId(
-                                  registration.id,
-                                );
-                              }}
-                              type="button"
-                            >
-                              Open Patient
-                            </button>
-
-                            <Link
-                              className="flex min-h-10 items-center justify-center rounded-xl bg-indigo-600 px-3 text-xs font-bold text-white"
-                              href={`/operations/billing/new?patientId=${encodeURIComponent(
-                                registration.id,
-                              )}`}
-                            >
-                              Create Bill
-                            </Link>
-                          </div>
-                        </article>
-                      );
-                    },
-                  )}
-                </div>
-              </>
-            )}
-            </WonFlowOperationalPanel>
-
-            {directory.data !==
-              undefined &&
-            directory.data.total >
-              pageSize ? (
-              <nav
-                aria-label="Patient directory pagination"
-                className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-indigo-100 bg-white/80 px-3 py-2 text-xs font-bold text-slate-600 shadow-sm"
-              >
-                <button
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={
-                    page <= 1
-                  }
-                  onClick={() => {
-                    setPage(
-                      (current) =>
-                        Math.max(
-                          1,
-                          current -
-                            1,
-                        ),
-                    );
-                  }}
-                  type="button"
-                >
-                  Previous
-                </button>
-
-                <span>
-                  Page {directory.data.page} of{" "}
-                  {Math.max(
-                    1,
-                    Math.ceil(
-                      directory
-                        .data
-                        .total /
-                        pageSize,
-                    ),
-                  )}
-                </span>
-
-                <button
-                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                  disabled={
-                    directory
-                      .data
-                      .page *
-                      pageSize >=
-                    directory
-                      .data
-                      .total
-                  }
-                  onClick={() => {
-                    setPage(
-                      (current) =>
-                        current +
-                        1,
-                    );
-                  }}
-                  type="button"
-                >
-                  Next
-                </button>
-              </nav>
-            ) : null}
+        <div className="rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
+          
+          {/* Header Bar within Table */}
+          <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-800 px-5 py-3.5 bg-slate-50/50 dark:bg-slate-800/40">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-black text-slate-900 dark:text-white">Registered Patients</span>
+              <span className="rounded-full bg-blue-50 dark:bg-blue-950/60 px-2.5 py-0.5 text-xs font-black text-blue-700 dark:text-blue-300 ring-1 ring-blue-100 dark:ring-blue-900/50">
+                {registrations.length} Records
+              </span>
+            </div>
+            <span className="text-xs font-semibold text-slate-400 dark:text-slate-500">
+              💡 Click any patient row to open their profile & edit
+            </span>
           </div>
 
-          <aside className="wf-workflow-aside space-y-3 xl:sticky xl:top-4 xl:self-start">
-            <PatientSummaryPanel
-              branchesById={
-                branchesById
-              }
-              patient={
-                selectedPatient
-              }
-            />
+          {/* Desktop Table */}
+          <div className="hidden lg:block overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="border-b border-slate-100 dark:border-slate-800 text-[10px] font-black uppercase tracking-[0.12em] text-slate-400 dark:text-slate-500 bg-slate-50/30 dark:bg-slate-800/20">
+                  <th className="py-3.5 pl-5 pr-4">Patient</th>
+                  <th className="py-3.5 px-4">MR Number</th>
+                  <th className="py-3.5 px-4">CNIC / B-Form</th>
+                  <th className="py-3.5 px-4">Father / Guardian</th>
+                  <th className="py-3.5 px-4">Gender & Age</th>
+                  <th className="py-3.5 px-4">Blood Group</th>
+                  <th className="py-3.5 px-4">Mobile Phone</th>
+                  <th className="py-3.5 px-4">Category</th>
+                  <th className="py-3.5 pl-4 pr-5 text-right">Actions</th>
+                </tr>
+              </thead>
 
-            {selectedPatient !== undefined ? (
-              <div className="rounded-[20px] border border-rose-200 bg-rose-50/60 p-4">
-                <h3 className="text-xs font-black text-rose-900">Remove patient</h3>
-                <p className="mt-1 text-[11px] font-semibold leading-5 text-rose-800">
-                  {selectedPatient.displayName} leaves the directory. Appointments, invoices and clinical history are retained for audit.
-                </p>
-                {removeError !== "" ? <p className="mt-2 text-[11px] font-bold text-rose-700" role="alert">{removeError}</p> : null}
-                <button
-                  className="mt-3 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-rose-300 bg-white px-4 text-xs font-black text-rose-700 transition hover:bg-rose-100 disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={removingId !== ""}
-                  onClick={() => void removePatient(selectedPatient)}
-                  type="button"
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/60">
+                {registrations.map((registration) => {
+                  const age = getDemoPatientRegistrationAge(registration);
+
+                  return (
+                    <tr
+                      className="group cursor-pointer transition hover:bg-indigo-50/40 dark:hover:bg-slate-800/60"
+                      key={registration.id}
+                      onClick={() => setActiveModalPatient({ patient: registration, tab: "view" })}
+                    >
+                      {/* Name & Avatar */}
+                      <td className="py-4 pl-5 pr-4">
+                        <div className="flex items-center gap-3">
+                          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 text-xs font-black text-white shadow-sm">
+                            {getInitials(registration.displayName)}
+                          </div>
+                          <div className="min-w-0">
+                            <span className="block font-black text-slate-950 dark:text-white transition group-hover:text-blue-600 dark:group-hover:text-blue-400">
+                              {registration.displayName}
+                            </span>
+                            <span className="mt-0.5 block text-xs font-semibold text-slate-400 dark:text-slate-500">
+                              {registration.draft.city ? `${registration.draft.city} · ` : ""}
+                              Registered {formatWonFlowDashboardDateTime(registration.registeredAt)}
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* MR Number */}
+                      <td className="py-4 px-4 font-mono text-sm font-black text-indigo-700 dark:text-indigo-400">
+                        {registration.mrNumber}
+                      </td>
+
+                      {/* CNIC */}
+                      <td className="py-4 px-4 font-mono text-xs font-semibold text-slate-600 dark:text-slate-300">
+                        {registration.draft.cnicNumber || "—"}
+                      </td>
+
+                      {/* Father / Guardian */}
+                      <td className="py-4 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        {registration.draft.fatherName || "—"}
+                      </td>
+
+                      {/* Gender & Age */}
+                      <td className="py-4 px-4">
+                        <StatusBadge
+                          className={getGenderBadgeClass(registration.draft.gender)}
+                          label={`${humanizeValue(registration.draft.gender)}${age !== undefined ? ` · ${age}y` : ""}`}
+                        />
+                      </td>
+
+                      {/* Blood Group */}
+                      <td className="py-4 px-4">
+                        {registration.draft.bloodGroup ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 dark:bg-rose-950/60 px-2 py-0.5 text-xs font-black text-rose-700 dark:text-rose-300 ring-1 ring-rose-200 dark:ring-rose-900/50">
+                            🩸 {registration.draft.bloodGroup}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
+                        )}
+                      </td>
+
+                      {/* Mobile */}
+                      <td className="py-4 px-4 text-sm font-semibold text-slate-700 dark:text-slate-200">
+                        {registration.draft.mobileNumber || "—"}
+                      </td>
+
+                      {/* Category */}
+                      <td className="py-4 px-4 text-xs font-bold text-slate-600 dark:text-slate-400">
+                        {humanizeValue(registration.draft.patientCategory)}
+                      </td>
+
+                      {/* Row Actions */}
+                      <td
+                        className="py-4 pl-4 pr-5 text-right"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition"
+                            onClick={() => setActiveModalPatient({ patient: registration, tab: "view" })}
+                            type="button"
+                          >
+                            Details
+                          </button>
+
+                          <button
+                            className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 transition"
+                            onClick={() => setActiveModalPatient({ patient: registration, tab: "edit" })}
+                            type="button"
+                          >
+                            Edit
+                          </button>
+
+                          <Link
+                            className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-blue-700 transition shadow-sm"
+                            href={`/operations/reception?patientId=${encodeURIComponent(registration.id)}`}
+                          >
+                            Book
+                          </Link>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile Cards View */}
+          <div className="divide-y divide-slate-100 dark:divide-slate-800 lg:hidden">
+            {registrations.map((registration) => {
+              const age = getDemoPatientRegistrationAge(registration);
+
+              return (
+                <div
+                  className="cursor-pointer p-4 transition hover:bg-slate-50 dark:hover:bg-slate-800/60"
+                  key={registration.id}
+                  onClick={() => setActiveModalPatient({ patient: registration, tab: "view" })}
                 >
-                  {removingId === selectedPatient.id ? "Removing…" : "Delete patient"}
-                </button>
-              </div>
-            ) : null}
-          </aside>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 text-xs font-black text-white shadow-sm">
+                        {getInitials(registration.displayName)}
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="truncate font-black text-slate-950 dark:text-white">
+                          {registration.displayName}
+                        </h3>
+                        <p className="mt-0.5 font-mono text-xs font-bold text-indigo-700 dark:text-indigo-400">
+                          {registration.mrNumber}
+                        </p>
+                      </div>
+                    </div>
+
+                    <StatusBadge
+                      className={getGenderBadgeClass(registration.draft.gender)}
+                      label={`${humanizeValue(registration.draft.gender)}${age !== undefined ? ` · ${age}y` : ""}`}
+                    />
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400">CNIC: </span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                        {registration.draft.cnicNumber || "—"}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400">Phone: </span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                        {registration.draft.mobileNumber || "—"}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400">Father: </span>
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                        {registration.draft.fatherName || "—"}
+                      </span>
+                    </div>
+
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400">Blood: </span>
+                      <span className="font-bold text-rose-600 dark:text-rose-400">
+                        {registration.draft.bloodGroup || "—"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    className="mt-3 flex items-center justify-end gap-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-700 dark:text-slate-200"
+                      onClick={() => setActiveModalPatient({ patient: registration, tab: "view" })}
+                      type="button"
+                    >
+                      View Profile
+                    </button>
+
+                    <button
+                      className="rounded-xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/60 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:text-indigo-300"
+                      onClick={() => setActiveModalPatient({ patient: registration, tab: "edit" })}
+                      type="button"
+                    >
+                      Edit
+                    </button>
+
+                    <Link
+                      className="rounded-xl bg-blue-600 px-3 py-1.5 text-xs font-bold text-white"
+                      href={`/operations/reception?patientId=${encodeURIComponent(registration.id)}`}
+                    >
+                      Book
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Pagination Navigation */}
+          {directory.data !== undefined && directory.data.total > pageSize && (
+            <div className="flex items-center justify-between border-t border-slate-100 dark:border-slate-800 px-5 py-3 text-xs font-bold text-slate-600 dark:text-slate-300 bg-slate-50/40 dark:bg-slate-800/30">
+              <button
+                className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition disabled:opacity-50"
+                disabled={page <= 1}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                type="button"
+              >
+                Previous
+              </button>
+
+              <span>
+                Page {directory.data.page} of {Math.max(1, Math.ceil(directory.data.total / pageSize))}
+              </span>
+
+              <button
+                className="rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-3.5 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 transition disabled:opacity-50"
+                disabled={directory.data.page * pageSize >= directory.data.total}
+                onClick={() => setPage((current) => current + 1)}
+                type="button"
+              >
+                Next
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function PatientSummaryPanel({
-  patient,
-  branchesById,
-}: {
-  patient:
-    DemoPatientRegistrationResult |
-    undefined;
-
-  branchesById:
-    ReadonlyMap<
-      string,
-      MockBranch
-    >;
-}) {
-  if (patient === undefined) {
-    return (
-      <WonFlowOperationalPanel
-        description="Select a patient from the directory."
-        title="Patient Summary"
-        tone="slate"
-      >
-        <WonFlowEmptyState
-          description="No patient is currently selected."
-          title="Select a patient"
-        />
-      </WonFlowOperationalPanel>
-    );
-  }
-
-  const age =
-    getDemoPatientRegistrationAge(
-      patient,
-    );
-
-  const branch =
-    branchesById.get(
-      patient.draft.branchId,
-    );
-
-  return (
-    <section className="overflow-hidden rounded-[24px] border border-indigo-200/70 bg-white shadow-[0_18px_50px_rgba(79,70,229,0.12)]">
-      <div className="relative overflow-hidden bg-[radial-gradient(circle_at_top_right,rgba(34,211,238,0.38),transparent_36%),linear-gradient(120deg,#172554,#1d4ed8_52%,#6d28d9)] p-5 text-white">
-        <div className="pointer-events-none absolute inset-0 opacity-20 [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:18px_18px]" />
-        <div className="relative flex items-center gap-4">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-3xl bg-white/15 text-base font-black ring-1 ring-white/25">
-            {getInitials(
-              patient.displayName,
-            )}
-          </div>
-
-          <div className="min-w-0">
-            <div className="truncate text-lg font-black">
-              {patient.displayName}
-            </div>
-
-            <div className="mt-1 text-xs font-bold text-indigo-100">
-              {patient.mrNumber}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="p-5">
-        <dl className="space-y-4">
-          <SummaryItem
-            label="Father / Guardian"
-            value={
-              patient.draft
-                .fatherName
-            }
-          />
-
-          <SummaryItem
-            label="CNIC / B-Form"
-            value={
-              patient.draft
-                .cnicNumber
-            }
-          />
-
-          <SummaryItem
-            label="Gender and Age"
-            value={[
-              humanizeValue(
-                patient.draft
-                  .gender,
-              ),
-
-              age === undefined
-                ? undefined
-                : `${age} years`,
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          />
-
-          <SummaryItem
-            label="Mobile"
-            value={
-              patient.draft
-                .mobileNumber
-            }
-          />
-
-          <SummaryItem
-            label="Registration Branch"
-            value={
-              branch?.name ??
-              "Unknown branch"
-            }
-          />
-
-          <SummaryItem
-            label="Patient Category"
-            value={humanizeValue(
-              patient.draft
-                .patientCategory,
-            )}
-          />
-
-          <SummaryItem
-            label="Registered"
-            value={formatWonFlowDashboardDateTime(
-              patient.registeredAt,
-            )}
-          />
-        </dl>
-
-        <div className="mt-6 space-y-2">
-          <Link
-            className="rounded-xl border border-cyan-200 bg-cyan-50 px-3 py-2 text-xs font-bold text-cyan-700"
-            href={`/operations/patients/${encodeURIComponent(
-              patient.id,
-            )}/results`}
-          >
-            Laboratory Results
-          </Link>
-
-          <Link
-            className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700"
-            href={`/operations/patients/${encodeURIComponent(
-              patient.id,
-            )}/imaging`}
-          >
-            Imaging Timeline
-          </Link>
-
-          <Link
-            className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700"
-            href={`/operations/patients/${encodeURIComponent(
-              patient.id,
-            )}/medicines`}
-          >
-            Medicine History
-          </Link>
-
-          <Link
-            className="rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-bold text-blue-700"
-            href={`/operations/patients/${encodeURIComponent(
-              patient.id,
-            )}/billing`}
-          >
-            Billing Ledger
-          </Link>
-
-          <Link
-            className="rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700"
-            href="/operations/insurance"
-          >
-            Insurance Claims
-          </Link>
-
-          <Link
-            className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-700"
-            href={`/operations/inpatient/wards?patientId=${encodeURIComponent(
-              patient.id,
-            )}`}
-          >
-            Admit Patient
-          </Link>
-
-          <Link
-            className="flex min-h-11 w-full items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-100"
-            href={`/operations/appointments/new?patientId=${encodeURIComponent(
-              patient.id,
-            )}`}
-          >
-            Book Appointment
-          </Link>
-
-          <Link
-            className="flex min-h-11 w-full items-center justify-center rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 text-sm font-bold text-white transition hover:from-emerald-700 hover:to-teal-700"
-            href={`/operations/billing/new?patientId=${encodeURIComponent(
-              patient.id,
-            )}`}
-          >
-            Add Services and Create Bill
-          </Link>
-
-          <Link
-            className="flex min-h-11 w-full items-center justify-center rounded-xl border border-blue-200 bg-blue-50 px-4 text-sm font-bold text-blue-700 transition hover:bg-blue-100"
-            href="/operations/patients/register"
-          >
-            Register New Patient
-          </Link>
-        </div>
-
-        <div className="mt-5 rounded-2xl bg-violet-50 p-4 text-xs leading-5 text-violet-700 ring-1 ring-violet-100">
-          <div className="flex items-start gap-2">
-            <ShieldIcon />
-
-            <span>
-              Live tenant record. Access is authorised by hospital permissions and written to the audit trail.
-            </span>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function SummaryItem({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div>
-      <dt className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-slate-400">
-        {label}
-      </dt>
-
-      <dd className="mt-1 break-words text-sm font-bold text-slate-800">
-        {value || "Not recorded"}
-      </dd>
-    </div>
-  );
-}
-
-function MobileSummary({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="min-w-0">
-      <div className="text-[10px] font-extrabold uppercase tracking-wide text-slate-400">
-        {label}
-      </div>
-
-      <div className="mt-1 truncate font-semibold text-slate-700">
-        {value || "Not recorded"}
-      </div>
-    </div>
-  );
-}
-
+// -------------------------------------------------------------
+// Main Workflow Component
+// -------------------------------------------------------------
 export function PatientDirectoryWorkflow() {
-  const hospitalService =
-    useWonFlowHospitalService();
+  const hospitalService = useWonFlowHospitalService();
 
-  const branches =
-    useWonFlowAsyncData({
-      key:
-        "patient-directory:branches",
-
-      loader: (signal) =>
-        hospitalService.listBranches(
-          signal,
-        ),
-
-      isEmpty: (items) =>
-        items.length === 0,
-    });
+  const branches = useWonFlowAsyncData({
+    key: "patient-directory:branches",
+    loader: (signal) => hospitalService.listBranches(signal),
+    isEmpty: (items) => items.length === 0,
+  });
 
   return (
     <div className="space-y-4">
@@ -1591,47 +1504,40 @@ export function PatientDirectoryWorkflow() {
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
-              className="inline-flex min-h-10 items-center justify-center rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-2 text-sm font-bold text-indigo-700 transition hover:bg-indigo-100"
-              href="/operations/billing/new"
-            >
-              Create Bill
-            </Link>
-
-            <Link
               className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700"
-              href="/operations/patients/register"
+              href="/operations/reception"
             >
-              Register Patient
+              + Register New Patient
             </Link>
           </div>
         }
         breadcrumbs={[
           {
-            label:
-              "Hospital Operations",
+            label: "Hospital Operations",
             href: "/operations",
           },
           {
-            label:
-              "Patients",
+            label: "Patients",
           },
           {
-            label:
-              "Patient Directory",
+            label: "Patient Directory",
           },
         ]}
-        description="Search registered patients using MR number, CNIC, father name, phone, gender, age and hospital branch."
+        description="Full-width patient directory with fast search, filters, and clean instant popup profiles with inline edit."
         eyebrow="Patient Management"
-        leading={<PatientIcon />}
+        leading={
+          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24">
+            <circle cx="12" cy="8" r="3" stroke="currentColor" strokeWidth="1.8" />
+            <path d="M5 21a7 7 0 0 1 14 0" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+            <path d="M19 7h3M20.5 5.5v3" stroke="currentColor" strokeLinecap="round" strokeWidth="1.8" />
+          </svg>
+        }
         metadata={
           <>
-            <span className="rounded-full bg-blue-50 px-2.5 py-1 font-bold text-blue-700 ring-1 ring-blue-100">
-              Fast counter search
+            <span className="rounded-full bg-blue-50 dark:bg-blue-950/60 px-2.5 py-1 font-bold text-blue-700 dark:text-blue-300 ring-1 ring-blue-100 dark:ring-blue-900/50">
+              Live Counter Records
             </span>
-
-            <span>
-              Live tenant records
-            </span>
+            <span>All Branches</span>
           </>
         }
         title="Patient Directory"
@@ -1645,13 +1551,7 @@ export function PatientDirectoryWorkflow() {
         onRetry={branches.reload}
         state={branches}
       >
-        {(branchRecords) => (
-          <PatientDirectoryContent
-            branches={
-              branchRecords
-            }
-          />
-        )}
+        {(branchRecords) => <PatientDirectoryContent branches={branchRecords} />}
       </WonFlowAsyncDataBoundary>
     </div>
   );

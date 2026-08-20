@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { Archive, ArrowRight, Building2, CircleOff, CreditCard, ShieldCheck, Users, Check } from "lucide-react";
+import { Archive, ArrowRight, Building2, CircleOff, CreditCard, ShieldCheck, Users, Check, KeyRound, Copy, Eye, EyeOff } from "lucide-react";
 
 import { PLATFORM_MODULE_CATALOG, usePlatformAdministration } from "./platform-administration-context";
 import type { ActivatePlatformTenantInput, PlatformTenantStatus } from "./platform-administration-context";
@@ -35,6 +35,167 @@ function generateTemporaryPassword(): string {
 
 const fieldClass = "mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
 const labelClass = "block text-xs font-semibold text-slate-600";
+
+function ResetTenantPasswordAction({ tenantId, organizationName }: { tenantId: string; organizationName: string }) {
+  const { resetTenantAdminPassword } = usePlatformAdministration();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState(generateTemporaryPassword());
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ email: string; temporaryPassword: string } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  if (!open && !result) {
+    return (
+      <button
+        className="inline-flex h-10 items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-4 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 dark:border-indigo-500/30 dark:bg-indigo-950/50 dark:text-indigo-300 dark:hover:bg-indigo-900/50"
+        onClick={() => {
+          setOpen(true);
+          setPassword(generateTemporaryPassword());
+          setError("");
+          setResult(null);
+        }}
+        type="button"
+      >
+        <KeyRound aria-hidden size={16} />
+        Reset admin password
+      </button>
+    );
+  }
+
+  if (result) {
+    const copyText = `Hospital: ${organizationName}\nAdmin Login: ${result.email}\nTemporary Password: ${result.temporaryPassword}`;
+    return (
+      <div className="w-full max-w-xl space-y-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4 dark:border-emerald-500/30 dark:bg-emerald-950/40">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
+            <p className="text-sm font-bold text-emerald-950 dark:text-emerald-200">Password Reset Successful</p>
+          </div>
+          <button
+            className="text-xs font-semibold text-emerald-700 hover:text-emerald-900 dark:text-emerald-400 dark:hover:text-emerald-200"
+            onClick={() => {
+              setResult(null);
+              setOpen(false);
+            }}
+            type="button"
+          >
+            Close
+          </button>
+        </div>
+        <p className="text-xs leading-5 text-emerald-800 dark:text-emerald-300">
+          The administrator password for <strong>{organizationName}</strong> has been updated. Share these credentials with the tenant owner:
+        </p>
+        <div className="space-y-1.5 rounded-xl border border-emerald-200 bg-white p-3 font-mono text-xs dark:border-emerald-500/20 dark:bg-slate-900">
+          <p className="text-slate-800 dark:text-slate-200">
+            <strong className="text-emerald-800 dark:text-emerald-400">Admin Email:</strong> {result.email}
+          </p>
+          <p className="text-slate-800 dark:text-slate-200">
+            <strong className="text-emerald-800 dark:text-emerald-400">Temporary Password:</strong>{" "}
+            <span className="font-bold text-indigo-700 dark:text-indigo-300">{result.temporaryPassword}</span>
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2 pt-1">
+          <button
+            className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-700 px-3.5 text-xs font-semibold text-white transition hover:bg-emerald-800"
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(copyText);
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+              } catch {
+                setCopied(false);
+              }
+            }}
+            type="button"
+          >
+            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copied ? "Copied credentials!" : "Copy credentials"}
+          </button>
+          <button
+            className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            onClick={() => {
+              setResult(null);
+              setOpen(false);
+            }}
+            type="button"
+          >
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="w-full max-w-xl space-y-3 rounded-2xl border border-indigo-200 bg-indigo-50/70 p-4 dark:border-indigo-500/30 dark:bg-indigo-950/40">
+      <div>
+        <p className="text-sm font-semibold text-indigo-950 dark:text-indigo-200">Reset tenant admin password</p>
+        <p className="mt-1 text-xs leading-5 text-indigo-800 dark:text-indigo-300">
+          This sets a new password for the hospital&apos;s primary administrator account, unlocks access, and activates the login.
+        </p>
+      </div>
+      {error ? <p className="text-xs font-semibold text-rose-700 dark:text-rose-400">{error}</p> : null}
+      <label className={labelClass}>
+        Temporary password
+        <div className="mt-1 flex gap-2">
+          <div className="relative flex-1">
+            <input
+              className={`${fieldClass} mt-0 font-mono pr-9`}
+              onChange={(e) => setPassword(e.target.value)}
+              type={showPassword ? "text" : "password"}
+              value={password}
+            />
+            <button
+              aria-label={showPassword ? "Hide password" : "Show password"}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+              onClick={() => setShowPassword(!showPassword)}
+              type="button"
+            >
+              {showPassword ? <EyeOff size={15} /> : <Eye size={15} />}
+            </button>
+          </div>
+          <button
+            className="h-10 shrink-0 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            onClick={() => setPassword(generateTemporaryPassword())}
+            type="button"
+          >
+            Regenerate
+          </button>
+        </div>
+      </label>
+      <div className="flex flex-wrap gap-2 pt-1">
+        <button
+          className="inline-flex h-10 items-center rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-50"
+          disabled={busy || !password.trim()}
+          onClick={async () => {
+            setError("");
+            setBusy(true);
+            try {
+              const res = await resetTenantAdminPassword(tenantId, password.trim());
+              setResult(res);
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : "Failed to reset password.");
+            } finally {
+              setBusy(false);
+            }
+          }}
+          type="button"
+        >
+          {busy ? "Resetting…" : "Confirm password reset"}
+        </button>
+        <button
+          className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          onClick={() => setOpen(false)}
+          type="button"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function StatCard({ icon, label, value, detail, configured }: { icon: React.ReactNode; label: string; value: string; detail?: string; configured?: boolean }) {
   return (
@@ -300,6 +461,7 @@ export function PlatformTenantDetails({ tenantId }: { tenantId: string }) {
             </div>
           ) : (
             <div className="flex flex-wrap gap-2">
+              <ResetTenantPasswordAction organizationName={tenant.organizationName} tenantId={tenantId} />
               {tenant.subscription.billingStatus !== "unconfigured" && tenant.subscription.billingStatus !== "cancelled" ? <CancelSubscriptionAction tenantId={tenantId} /> : null}
               {tenant.status !== "suspended" ? <StatusAction label="Restrict tenant" target="suspended" tenantId={tenantId} tone="bg-rose-700 hover:bg-rose-800" /> : null}
               {tenant.status === "suspended" ? <StatusAction label="Reactivate" target="active" tenantId={tenantId} tone="bg-emerald-600 hover:bg-emerald-700" /> : null}
@@ -308,6 +470,33 @@ export function PlatformTenantDetails({ tenantId }: { tenantId: string }) {
           )}
         </div>
       </section>
+
+      {tenant.users.length > 0 ? (
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-base font-semibold text-slate-950">Hospital Team ({tenant.users.length})</h2>
+              <p className="text-xs text-slate-500">Active and invited staff members in this hospital.</p>
+            </div>
+            <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700">
+              {tenant.users.length} {tenant.users.length === 1 ? "user" : "users"}
+            </span>
+          </div>
+          <div className="mt-4 divide-y divide-slate-100">
+            {tenant.users.map((user) => (
+              <div className="flex items-center justify-between py-3 first:pt-0 last:pb-0" key={user.id}>
+                <div>
+                  <p className="text-sm font-bold text-slate-950">{user.displayName}</p>
+                  <p className="text-xs text-slate-500">{user.email || "No email"} · {user.role}</p>
+                </div>
+                <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${user.status === "active" ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : user.status === "invited" ? "bg-amber-50 text-amber-700 ring-1 ring-amber-200" : "bg-slate-100 text-slate-600 ring-1 ring-slate-200"}`}>
+                  {user.status}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2">
         <ManageLink configured={tenant.subscription.billingStatus !== "unconfigured"} detail="Plan, seats and billing status" href="/platform/subscriptions" icon={<CreditCard aria-hidden size={18} />} title="Manage subscription" />

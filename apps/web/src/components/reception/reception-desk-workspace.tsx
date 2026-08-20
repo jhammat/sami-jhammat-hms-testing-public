@@ -6,6 +6,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useSearchParams } from "next/navigation";
 
 import type {
   KeyboardEvent as ReactKeyboardEvent,
@@ -48,8 +49,12 @@ import {
   CheckCircle2,
   ChevronRight,
   Clock3,
+  Copy,
+  ExternalLink,
   FileText,
   FlaskConical,
+  Globe,
+  KeyRound,
   Plus,
   Printer,
   RotateCcw,
@@ -59,6 +64,7 @@ import {
   Stethoscope,
   UserPlus,
   UserRound,
+  Video,
   X,
 } from "lucide-react";
 
@@ -80,9 +86,39 @@ type VisitPurpose =
   | "OPD Walk-in"
   | "Scheduled Appointment"
   | "Follow-up"
-  | "Emergency"
-  | "Admission / IPD"
-  | "Diagnostics / Procedure";
+  | "Emergency";
+
+export interface VisitPurposeItem {
+  readonly id: VisitPurpose;
+  readonly label: string;
+  readonly shortDescription: string;
+  readonly badge?: string;
+}
+
+export const VISIT_PURPOSE_LIST: readonly VisitPurposeItem[] = [
+  {
+    id: "OPD Walk-in",
+    label: "OPD Walk-in",
+    shortDescription: "General OPD walk-in & doctor consultation queue",
+    badge: "Most Common",
+  },
+  {
+    id: "Scheduled Appointment",
+    label: "Scheduled Appointment",
+    shortDescription: "Check in a pre-booked appointment",
+  },
+  {
+    id: "Follow-up",
+    label: "Follow-up",
+    shortDescription: "Post-consultation follow-up review",
+  },
+  {
+    id: "Emergency",
+    label: "Emergency",
+    shortDescription: "Immediate triage & urgent ER queue",
+    badge: "Urgent",
+  },
+];
 
 type AppointmentStatus =
   | "Booked"
@@ -117,6 +153,7 @@ interface Patient {
   identityType: IdentityType;
   identityNumber: string;
   mobile: string;
+  email?: string;
   gender: Gender;
   age: number;
   dateOfBirth: string;
@@ -133,6 +170,7 @@ interface PatientDraft {
   identityType: IdentityType | "";
   identityNumber: string;
   mobile: string;
+  email?: string;
   gender: Gender | "";
   age: string;
   dateOfBirth: string;
@@ -235,6 +273,7 @@ const EMPTY_PATIENT_DRAFT:
     identityType: "",
     identityNumber: "",
     mobile: "",
+    email: "",
     gender: "",
     age: "",
     dateOfBirth: "",
@@ -471,12 +510,38 @@ function receptionPatientToLocal(patient: ReceptionPatient): Patient {
   const gender: Gender = patient.sex === "Male" || patient.sex === "Female" || patient.sex === "Other" ? patient.sex : "Other";
 
   const guardianObj = (typeof patient.guardianData === "object" && patient.guardianData !== null ? patient.guardianData : (typeof patient.guardianData === "string" ? (() => { try { return JSON.parse(patient.guardianData) as Record<string, unknown>; } catch { return {}; } })() : {})) as Record<string, unknown>;
+  const consentObj = (typeof patient.consentData === "object" && patient.consentData !== null ? patient.consentData : (typeof patient.consentData === "string" ? (() => { try { return JSON.parse(patient.consentData) as Record<string, unknown>; } catch { return {}; } })() : {})) as Record<string, unknown>;
 
   const fatherName = readJsonText(guardianObj, "fatherName") ||
     readJsonText(guardianObj, "name") ||
     readJsonText(guardianObj, "guardianName") ||
     readJsonText(guardianObj, "guardian") ||
     (typeof (patient as unknown as { fatherName?: string }).fatherName === "string" ? (patient as unknown as { fatherName?: string }).fatherName! : "");
+
+  const bloodGroup = readJsonText(consentObj, "bloodGroup") ||
+    readJsonText(guardianObj, "bloodGroup") ||
+    (typeof (patient as unknown as { bloodGroup?: string }).bloodGroup === "string" ? (patient as unknown as { bloodGroup?: string }).bloodGroup! : "");
+
+  const address = readJsonText(patient.address, "text") ||
+    readJsonText(patient.address, "addressLine") ||
+    readJsonText(patient.address, "line") ||
+    readJsonText(patient.address, "street") ||
+    (typeof patient.address === "string" ? patient.address : "");
+
+  const emergencyContact = readJsonText(guardianObj, "emergencyContactPhone") ||
+    readJsonText(guardianObj, "emergencyContact") ||
+    readJsonText(guardianObj, "emergencyPhone") ||
+    readJsonText(guardianObj, "phone") ||
+    readJsonText(consentObj, "alternateMobileNumber") ||
+    (typeof (patient as unknown as { emergencyContact?: string }).emergencyContact === "string" ? (patient as unknown as { emergencyContact?: string }).emergencyContact! : "");
+
+  const allergies = readJsonText(consentObj, "allergies") ||
+    readJsonText(consentObj, "knownAllergies") ||
+    (typeof (patient as unknown as { allergies?: string }).allergies === "string" ? (patient as unknown as { allergies?: string }).allergies! : "");
+
+  const medicalAlert = readJsonText(consentObj, "medicalAlert") ||
+    readJsonText(consentObj, "notes") ||
+    (typeof (patient as unknown as { medicalAlert?: string }).medicalAlert === "string" ? (patient as unknown as { medicalAlert?: string }).medicalAlert! : "");
 
   return {
     id: patient.id,
@@ -486,14 +551,15 @@ function receptionPatientToLocal(patient: ReceptionPatient): Patient {
     identityType,
     identityNumber: primaryIdentifier?.value ?? "",
     mobile: patient.phone ?? "",
+    email: patient.email ?? "",
     gender,
     age: calculateAge(dateOfBirth) ?? 0,
     dateOfBirth,
-    bloodGroup: "",
-    address: readJsonText(patient.address, "text") || (typeof patient.address === "string" ? patient.address : ""),
-    emergencyContact: readJsonText(guardianObj, "emergencyContact") || readJsonText(guardianObj, "emergencyContactPhone") || readJsonText(guardianObj, "phone"),
-    allergies: "",
-    medicalAlert: "",
+    bloodGroup,
+    address,
+    emergencyContact,
+    allergies,
+    medicalAlert,
   };
 }
 
@@ -598,6 +664,8 @@ function patientToDraft(
       patient.identityNumber,
     mobile:
       patient.mobile,
+    email:
+      patient.email ?? "",
     gender:
       patient.gender,
     age:
@@ -1052,6 +1120,50 @@ export function ReceptionDeskWorkspace() {
     "OPD Walk-in",
   );
 
+  const [bookedPortalAccess, setBookedPortalAccess] = useState<{
+    hasPortalAccess: boolean;
+    isNewlyCreated: boolean;
+    email: string;
+    temporaryPassword?: string;
+    portalUrl: string;
+    videoCallUrl?: string;
+  } | null>(null);
+
+  const [copiedPortalField, setCopiedPortalField] = useState<string | null>(null);
+
+  const searchParams = useSearchParams();
+
+  useEffect(() => {
+    const patientIdParam = searchParams?.get("patientId");
+    const doctorIdParam = searchParams?.get("doctorId");
+    const searchParam = searchParams?.get("search") || searchParams?.get("query");
+    const modeParam = searchParams?.get("mode");
+
+    if (modeParam === "new") {
+      setPatientMode("new");
+      setPatientDraft(EMPTY_PATIENT_DRAFT);
+      setSelectedPatientId(null);
+      setPatientSaved(false);
+    } else if (searchParam) {
+      setSearchQuery(searchParam);
+    }
+
+    if (doctorIdParam) {
+      setSelectedDoctorId(doctorIdParam);
+    }
+
+    if (patientIdParam) {
+      void phaseOneApi<{ patient: ReceptionPatient }>(`/api/v1/patients/${encodeURIComponent(patientIdParam)}`)
+        .then(({ patient }) => {
+          if (patient) {
+            const local = receptionPatientToLocal(patient);
+            selectPatient(local);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [searchParams]);
+
   const [
     appointmentReference,
     setAppointmentReference,
@@ -1474,35 +1586,18 @@ export function ReceptionDeskWorkspace() {
     );
 
   const doctorChargeApplies =
-    visitPurpose ===
-      "OPD Walk-in" ||
-    visitPurpose ===
-      "Scheduled Appointment" ||
-    visitPurpose ===
-      "Follow-up";
+    visitPurpose === "OPD Walk-in" ||
+    visitPurpose === "Scheduled Appointment" ||
+    visitPurpose === "Follow-up";
 
-  const baseCharge =
-    visitPurpose ===
-    "Admission / IPD"
-      ? admissionDepositValue
-      : doctorChargeApplies
-        ? consultationFee
-        : 0;
+  const baseCharge = doctorChargeApplies ? consultationFee : 0;
 
   const baseChargeLabel =
-    visitPurpose ===
-    "Admission / IPD"
-      ? "Admission Deposit"
-      : visitPurpose ===
-          "Emergency"
-        ? "Emergency Base Charge"
-        : visitPurpose ===
-            "Diagnostics / Procedure"
-          ? "Service Charge"
-          : visitPurpose ===
-              "Follow-up"
-            ? "Follow-up Fee"
-            : "Consultation Fee";
+    visitPurpose === "Emergency"
+      ? "Emergency Base Charge"
+      : visitPurpose === "Follow-up"
+        ? "Follow-up Fee"
+        : "Consultation Fee";
 
   const subtotal =
     baseCharge +
@@ -1559,14 +1654,9 @@ export function ReceptionDeskWorkspace() {
     selectedPatient !== null;
 
   const requiresDoctorRouting =
-    visitPurpose ===
-      "OPD Walk-in" ||
-    visitPurpose ===
-      "Scheduled Appointment" ||
-    visitPurpose ===
-      "Follow-up" ||
-    visitPurpose ===
-      "Admission / IPD";
+    visitPurpose === "OPD Walk-in" ||
+    visitPurpose === "Scheduled Appointment" ||
+    visitPurpose === "Follow-up";
 
   const purposeReady =
     useMemo(() => {
@@ -1574,98 +1664,47 @@ export function ReceptionDeskWorkspace() {
         return false;
       }
 
-      switch (
-        visitPurpose
-      ) {
+      switch (visitPurpose) {
         case "OPD Walk-in":
           return (
-            selectedSpecialty !==
-              "" &&
-            selectedDoctor !==
-              null &&
+            selectedSpecialty !== "" &&
+            selectedDoctor !== null &&
             selectedConsultationService !== undefined &&
-            consultationReason
-              .trim() !== ""
+            consultationReason.trim() !== ""
           );
 
         case "Scheduled Appointment":
           return (
-            appointmentReference
-              .trim() !== "" &&
-            appointmentStatus !==
-              "Cancelled" &&
-            selectedSpecialty !==
-              "" &&
-            selectedDoctor !==
-              null &&
+            appointmentReference.trim() !== "" &&
+            appointmentStatus !== "Cancelled" &&
+            selectedSpecialty !== "" &&
+            selectedDoctor !== null &&
             selectedConsultationService !== undefined &&
-            appointmentDate !==
-              "" &&
-            appointmentTime !==
-              "" &&
-            consultationReason
-              .trim() !== ""
+            appointmentDate !== "" &&
+            appointmentTime !== "" &&
+            consultationReason.trim() !== ""
           );
 
         case "Follow-up":
           return (
-            followUpReference
-              .trim() !== "" &&
-            selectedSpecialty !==
-              "" &&
-            selectedDoctor !==
-              null &&
+            followUpReference.trim() !== "" &&
+            selectedSpecialty !== "" &&
+            selectedDoctor !== null &&
             selectedConsultationService !== undefined &&
-            appointmentDate !==
-              "" &&
-            appointmentTime !==
-              "" &&
-            consultationReason
-              .trim() !== ""
+            appointmentDate !== "" &&
+            appointmentTime !== "" &&
+            consultationReason.trim() !== ""
           );
 
         case "Emergency":
-          return (
-            emergencyComplaint
-              .trim() !== ""
-          );
-
-        case "Admission / IPD":
-          return (
-            selectedSpecialty !==
-              "" &&
-            selectedDoctor !==
-              null &&
-            admissionReason
-              .trim() !== "" &&
-            admissionWard
-              .trim() !== ""
-          );
-
-        case "Diagnostics / Procedure":
-          return (
-            diagnosticService
-              .trim() !== "" &&
-            appointmentDate !==
-              "" &&
-            (
-              diagnosticDestination ===
-                "Laboratory" ||
-              appointmentTime !==
-                ""
-            )
-          );
+          return emergencyComplaint.trim() !== "";
       }
     }, [
-      admissionReason,
-      admissionWard,
       appointmentDate,
       appointmentReference,
       appointmentStatus,
       appointmentTime,
       consultationReason,
-      diagnosticDestination,
-      diagnosticService,
       emergencyComplaint,
       followUpReference,
       patientReady,
@@ -1676,58 +1715,24 @@ export function ReceptionDeskWorkspace() {
     ]);
 
   const prepareActionLabel = {
-    "OPD Walk-in":
-      "Prepare OPD Visit",
-    "Scheduled Appointment":
-      "Load Appointment",
-    "Follow-up":
-      "Prepare Follow-up",
-    Emergency:
-      "Prepare Emergency Route",
-    "Admission / IPD":
-      "Prepare Admission",
-    "Diagnostics / Procedure":
-      "Prepare Diagnostic Route",
+    "OPD Walk-in": "Prepare OPD Visit",
+    "Scheduled Appointment": "Load Appointment",
+    "Follow-up": "Prepare Follow-up",
+    Emergency: "Prepare Emergency Route",
   }[visitPurpose];
 
   const finalActionLabel = {
-    "OPD Walk-in":
-      "Create OPD Visit & Send to Doctor",
-    "Scheduled Appointment":
-      "Check In & Send to Doctor",
-    "Follow-up":
-      "Create Follow-up Visit",
-    Emergency:
-      "Send to Emergency Queue",
-    "Admission / IPD":
-      "Create Admission & Send to Ward",
-    "Diagnostics / Procedure":
-      diagnosticDestination ===
-      "Laboratory"
-        ? "Send to Laboratory"
-        : diagnosticDestination ===
-            "Radiology"
-          ? "Send to Radiology"
-          : "Schedule Procedure",
+    "OPD Walk-in": "Create OPD Visit & Send to Doctor",
+    "Scheduled Appointment": "Check In & Send to Doctor",
+    "Follow-up": "Create Follow-up Visit",
+    Emergency: "Send to Emergency Queue",
   }[visitPurpose];
 
   const routeDestination = {
-    "OPD Walk-in":
-      selectedDoctor?.name ??
-      "Doctor Queue",
-    "Scheduled Appointment":
-      selectedDoctor?.name ??
-      "Doctor Queue",
-    "Follow-up":
-      selectedDoctor?.name ??
-      "Doctor Queue",
-    Emergency:
-      "Emergency Department",
-    "Admission / IPD":
-      admissionWard ||
-      "Inpatient Ward",
-    "Diagnostics / Procedure":
-      diagnosticDestination,
+    "OPD Walk-in": selectedDoctor?.name ?? "Doctor Queue",
+    "Scheduled Appointment": selectedDoctor?.name ?? "Doctor Queue",
+    "Follow-up": selectedDoctor?.name ?? "Doctor Queue",
+    Emergency: "Emergency Department",
   }[visitPurpose];
 
   function updatePatientDraft(
@@ -1909,8 +1914,13 @@ export function ReceptionDeskWorkspace() {
         sex: patientDraft.gender,
         phone: patientDraft.mobile,
         fatherName: patientDraft.fatherName.trim(),
+        bloodGroup: patientDraft.bloodGroup.trim() || undefined,
         address: patientDraft.address ? { text: patientDraft.address.trim() } : undefined,
-        guardianData: { fatherName: patientDraft.fatherName.trim(), emergencyContact: patientDraft.emergencyContact.trim() },
+        guardianData: {
+          fatherName: patientDraft.fatherName.trim(),
+          emergencyContact: patientDraft.emergencyContact.trim(),
+          emergencyContactPhone: patientDraft.emergencyContact.trim(),
+        },
       }).catch(() => {
         // Fallback for non-blocking local state update
       });
@@ -1981,8 +1991,13 @@ export function ReceptionDeskWorkspace() {
         sex: patientDraft.gender,
         phone: patientDraft.mobile,
         fatherName: patientDraft.fatherName.trim(),
-        address: patientDraft.address ? { text: patientDraft.address } : undefined,
-        guardianData: { fatherName: patientDraft.fatherName.trim(), emergencyContact: patientDraft.emergencyContact.trim() },
+        bloodGroup: patientDraft.bloodGroup.trim() || undefined,
+        address: patientDraft.address ? { text: patientDraft.address.trim() } : undefined,
+        guardianData: {
+          fatherName: patientDraft.fatherName.trim(),
+          emergencyContact: patientDraft.emergencyContact.trim(),
+          emergencyContactPhone: patientDraft.emergencyContact.trim(),
+        },
         identifiers: [{ type: identityType, system: identityType.toLowerCase(), value: patientDraft.identityNumber, isPrimary: true }],
       });
     const newPatient: Patient = {
@@ -2419,6 +2434,52 @@ export function ReceptionDeskWorkspace() {
         setEstimatedWaitMinutes(0);
         setIssuedRoomLabel(selectedSlot?.roomLabel ?? "OPD Room");
       }
+
+      // Automatically check or provision patient portal credentials for video call & records
+      let portalInfo: {
+        hasPortalAccess: boolean;
+        isNewlyCreated: boolean;
+        email: string;
+        temporaryPassword?: string;
+        portalUrl: string;
+        videoCallUrl?: string;
+      } | null = null;
+
+      try {
+        const credRes = await fetch(`/api/v1/patients/${selectedPatient.id}/portal-credentials`, { cache: "no-store" });
+        if (credRes.ok) {
+          const credData = (await credRes.json()) as { hasPortalAccess: boolean; email?: string };
+          if (credData.hasPortalAccess) {
+            portalInfo = {
+              hasPortalAccess: true,
+              isNewlyCreated: false,
+              email: credData.email || selectedPatient.email || `${selectedPatient.mrNumber.toLowerCase()}@patient.wonflow.com`,
+              portalUrl: "/patient",
+              videoCallUrl: `/patient/appointments/${appointment.id}/video`,
+            };
+          } else {
+            const createRes = await fetch(`/api/v1/patients/${selectedPatient.id}/portal-credentials`, {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ email: selectedPatient.email || undefined }),
+            });
+            if (createRes.ok) {
+              const created = (await createRes.json()) as { email: string; temporaryPassword?: string; portalUrl?: string };
+              portalInfo = {
+                hasPortalAccess: true,
+                isNewlyCreated: true,
+                email: created.email,
+                temporaryPassword: created.temporaryPassword,
+                portalUrl: created.portalUrl || "/patient",
+                videoCallUrl: `/patient/appointments/${appointment.id}/video`,
+              };
+            }
+          }
+        }
+      } catch {
+        // Portal credential error non-blocking for reception booking
+      }
+      setBookedPortalAccess(portalInfo);
     } catch (caught) {
       setActionError(
         caught instanceof Error
@@ -2584,6 +2645,19 @@ export function ReceptionDeskWorkspace() {
                   <div class="item"><small>Route</small><strong>${escapeHtml(routeDestination)}</strong></div>
                   <div class="item services"><small>Reason for Consultation</small><strong>${escapeHtml(consultationReason)}</strong></div>
                   <div class="item services"><small>Services / Tests</small><strong>${serviceNames}</strong></div>
+                  <div class="item services" style="background: #eef2ff; border: 1px dashed #6366f1;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
+                      <small style="color: #4f46e5; font-weight: 800;">🌐 Patient Portal &amp; Video Consultation Access</small>
+                      <span style="font-size: 8px; font-weight: 800; background: #4f46e5; color: #fff; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">${bookedPortalAccess?.isNewlyCreated ? "New Account" : "Active Portal"}</span>
+                    </div>
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px;">
+                      <div><small>Login Portal</small><strong>${escapeHtml(window.location.origin + "/patient")}</strong></div>
+                      <div><small>Login Email / User ID</small><strong>${escapeHtml(bookedPortalAccess?.email || selectedPatient.email || `${selectedPatient.mrNumber.toLowerCase()}@patient.wonflow.com`)}</strong></div>
+                      <div><small>Portal Password</small><strong style="font-family: monospace; color: #1e1b4b;">${escapeHtml(bookedPortalAccess?.temporaryPassword || "Existing Account Password")}</strong></div>
+                      <div><small>Consultation Mode</small><strong>${consultationMode === "ONLINE" ? "🎥 Online Video Call" : "🏥 In-Person OPD"}</strong></div>
+                    </div>
+                    ${consultationMode === "ONLINE" || bookedPortalAccess?.videoCallUrl ? `<div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed #c7d2fe; font-size: 10px; color: #4338ca;"><strong>🎥 Direct Video Room Link:</strong> ${escapeHtml(window.location.origin + (bookedPortalAccess?.videoCallUrl || `/patient/appointments`))}</div>` : ""}
+                  </div>
                 </div>
               </div>
               <aside class="qr"><img alt="Appointment QR code" src="${qrDataUrl}" /><strong>Scan to verify token</strong></aside>
@@ -2696,6 +2770,8 @@ export function ReceptionDeskWorkspace() {
     setAppointmentTime("11:30");
 
     setPatientError("");
+    setBookedPortalAccess(null);
+    setCopiedPortalField(null);
     setConfirmationOpen(false);
   }
 
@@ -3423,48 +3499,57 @@ export function ReceptionDeskWorkspace() {
                 />
 
                 <div className="p-3">
-                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                    {(
-                      [
-                        "OPD Walk-in",
-                        "Scheduled Appointment",
-                        "Follow-up",
-                        "Emergency",
-                        "Admission / IPD",
-                        "Diagnostics / Procedure",
-                      ] as const
-                    ).map(
-                      (purpose) => (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
+                    {VISIT_PURPOSE_LIST.map((item) => {
+                      const isSelected = visitPurpose === item.id;
+                      const isEmergency = item.id === "Emergency";
+
+                      return (
                         <button
-                          className={[
-                            "min-h-10 rounded-lg",
-                            "border px-2 py-1.5",
-                            "text-[8px]",
-                            "font-black leading-3",
-                            "transition",
-                            visitPurpose ===
-                            purpose
-                              ? purpose ===
-                                "Emergency"
-                                ? "border-rose-600 bg-rose-600 text-white"
-                                : "border-indigo-600 bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-[0_8px_18px_rgba(79,70,229,0.20)]"
-                              : "border-slate-200 bg-slate-50/80 text-slate-600 shadow-sm hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700",
-                          ].join(" ")}
-                          disabled={
-                            !patientReady
-                          }
-                          key={purpose}
-                          onClick={() => {
-                            changeVisitPurpose(
-                              purpose,
-                            );
-                          }}
+                          key={item.id}
                           type="button"
+                          disabled={!patientReady}
+                          onClick={() => {
+                            changeVisitPurpose(item.id);
+                          }}
+                          className={[
+                            "relative flex flex-col justify-between rounded-xl p-2.5 text-left transition min-h-[58px] border",
+                            isSelected
+                              ? isEmergency
+                                ? "border-rose-600 bg-rose-600 text-white shadow-[0_6px_16px_rgba(225,29,72,0.20)] ring-1 ring-rose-400"
+                                : "border-indigo-600 bg-gradient-to-br from-indigo-600 to-violet-600 text-white shadow-[0_6px_16px_rgba(79,70,229,0.20)] ring-1 ring-indigo-400"
+                              : "border-slate-200 bg-slate-50/80 text-slate-700 shadow-sm hover:border-indigo-300 hover:bg-indigo-50/60 hover:text-indigo-900",
+                            !patientReady ? "opacity-45 cursor-not-allowed" : "cursor-pointer",
+                          ].join(" ")}
                         >
-                          {purpose}
+                          <div className="flex items-center justify-between gap-1.5 w-full">
+                            <span className={`text-[11px] font-black leading-tight ${isSelected ? "text-white" : "text-slate-900"}`}>
+                              {item.label}
+                            </span>
+                            {item.badge ? (
+                              <span
+                                className={`rounded-md px-1.5 py-0.5 text-[7px] font-black tracking-wide ${
+                                  isSelected
+                                    ? "bg-white/20 text-white"
+                                    : isEmergency
+                                    ? "bg-rose-100 text-rose-800"
+                                    : "bg-indigo-100 text-indigo-800"
+                                }`}
+                              >
+                                {item.badge}
+                              </span>
+                            ) : null}
+                          </div>
+                          <span
+                            className={`mt-1 text-[9px] font-medium leading-tight ${
+                              isSelected ? "text-indigo-100" : "text-slate-500"
+                            }`}
+                          >
+                            {item.shortDescription}
+                          </span>
                         </button>
-                      ),
-                    )}
+                      );
+                    })}
                   </div>
 
                   {visitPurpose ===
@@ -3563,8 +3648,7 @@ export function ReceptionDeskWorkspace() {
                     </div>
                   ) : null}
 
-                  {requiresDoctorRouting &&
-                  visitPurpose !== "Admission / IPD" ? (
+                  {requiresDoctorRouting ? (
                     <div className="mt-3 wf-form-field block min-w-0">
                       {/*
                         Not Field/<label>: two independent toggle buttons
@@ -3618,12 +3702,7 @@ export function ReceptionDeskWorkspace() {
                     "OPD Walk-in" ? (
                     <div className="mt-3 grid gap-2.5 lg:grid-cols-2">
                       <Field
-                        label={
-                          visitPurpose ===
-                          "Admission / IPD"
-                            ? "Department"
-                            : "Specialty / Department"
-                        }
+                        label="Specialty / Department"
                         required
                       >
                         <select
@@ -3671,12 +3750,7 @@ export function ReceptionDeskWorkspace() {
                       </Field>
 
                       <Field
-                        label={
-                          visitPurpose ===
-                          "Admission / IPD"
-                            ? "Admitting Doctor"
-                            : "Doctor"
-                        }
+                        label="Doctor"
                         required
                       >
                         <select
@@ -4196,279 +4270,6 @@ export function ReceptionDeskWorkspace() {
                           />
                         </Field>
                       </div>
-                    </div>
-                  ) : null}
-
-                  {visitPurpose ===
-                  "Admission / IPD" ? (
-                    <div className="mt-2 grid gap-2.5 lg:grid-cols-4">
-                      <Field
-                        label="Admission Type"
-                        required
-                      >
-                        <select
-                          className={
-                            CONTROL_CLASS_NAME
-                          }
-                          onChange={(
-                            event,
-                          ) => {
-                            setAdmissionType(
-                              event.target
-                                .value as
-                                AdmissionType,
-                            );
-                          }}
-                          value={
-                            admissionType
-                          }
-                        >
-                          <option>
-                            Planned
-                          </option>
-
-                          <option>
-                            Urgent
-                          </option>
-                        </select>
-                      </Field>
-
-                      <Field
-                        label="Ward"
-                        required
-                      >
-                        <select
-                          className={
-                            CONTROL_CLASS_NAME
-                          }
-                          onChange={(
-                            event,
-                          ) => {
-                            setAdmissionWard(
-                              event.target.value,
-                            );
-                          }}
-                          value={
-                            admissionWard
-                          }
-                        >
-                          <option value="">
-                            Select ward
-                          </option>
-
-                          <option>
-                            Medical Ward
-                          </option>
-
-                          <option>
-                            Surgical Ward
-                          </option>
-
-                          <option>
-                            Oncology Ward
-                          </option>
-
-                          <option>
-                            ICU
-                          </option>
-
-                          <option>
-                            Private Ward
-                          </option>
-                        </select>
-                      </Field>
-
-                      <Field label="Room / Bed">
-                        <input
-                          className={
-                            CONTROL_CLASS_NAME
-                          }
-                          onChange={(
-                            event,
-                          ) => {
-                            setAdmissionBed(
-                              event.target.value,
-                            );
-                          }}
-                          placeholder="Room or bed"
-                          value={
-                            admissionBed
-                          }
-                        />
-                      </Field>
-
-                      <Field label="Admission Deposit">
-                        <input
-                          className={
-                            CONTROL_CLASS_NAME
-                          }
-                          min="0"
-                          onChange={(
-                            event,
-                          ) => {
-                            setAdmissionDeposit(
-                              event.target.value,
-                            );
-                          }}
-                          type="number"
-                          value={
-                            admissionDeposit
-                          }
-                        />
-                      </Field>
-
-                      <div className="lg:col-span-4">
-                        <Field
-                          label="Admission Reason"
-                          required
-                        >
-                          <textarea
-                            className={
-                              TEXTAREA_CLASS_NAME
-                            }
-                            onChange={(
-                              event,
-                            ) => {
-                              setAdmissionReason(
-                                event.target.value,
-                              );
-                            }}
-                            placeholder="Reason for admission"
-                            value={
-                              admissionReason
-                            }
-                          />
-                        </Field>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {visitPurpose ===
-                  "Diagnostics / Procedure" ? (
-                    <div className="mt-3 grid gap-2.5 lg:grid-cols-3">
-                      <Field
-                        label="Destination"
-                        required
-                      >
-                        <select
-                          className={
-                            CONTROL_CLASS_NAME
-                          }
-                          onChange={(
-                            event,
-                          ) => {
-                            setDiagnosticDestination(
-                              event.target
-                                .value as
-                                DiagnosticDestination,
-                            );
-                          }}
-                          value={
-                            diagnosticDestination
-                          }
-                        >
-                          <option>
-                            Laboratory
-                          </option>
-
-                          <option>
-                            Radiology
-                          </option>
-
-                          <option>
-                            Procedure
-                          </option>
-                        </select>
-                      </Field>
-
-                      <Field
-                        label="Requested Service"
-                        required
-                      >
-                        <input
-                          className={
-                            CONTROL_CLASS_NAME
-                          }
-                          onChange={(
-                            event,
-                          ) => {
-                            setDiagnosticService(
-                              event.target.value,
-                            );
-                          }}
-                          placeholder="Test, scan or procedure"
-                          value={
-                            diagnosticService
-                          }
-                        />
-                      </Field>
-
-                      <Field label="Referring Doctor">
-                        <input
-                          className={
-                            CONTROL_CLASS_NAME
-                          }
-                          onChange={(
-                            event,
-                          ) => {
-                            setReferringDoctor(
-                              event.target.value,
-                            );
-                          }}
-                          placeholder="Doctor or external referral"
-                          value={
-                            referringDoctor
-                          }
-                        />
-                      </Field>
-
-                      <Field
-                        label="Date"
-                        required
-                      >
-                        <input
-                          className={
-                            CONTROL_CLASS_NAME
-                          }
-                          min={getToday()}
-                          onChange={(
-                            event,
-                          ) => {
-                            setAppointmentDate(
-                              event.target.value,
-                            );
-                          }}
-                          type="date"
-                          value={
-                            appointmentDate
-                          }
-                        />
-                      </Field>
-
-                      {diagnosticDestination !==
-                      "Laboratory" ? (
-                        <Field
-                          label="Time"
-                          required
-                        >
-                          <input
-                            className={
-                              CONTROL_CLASS_NAME
-                            }
-                            onChange={(
-                              event,
-                            ) => {
-                              setAppointmentTime(
-                                event.target.value,
-                              );
-                            }}
-                            type="time"
-                            value={
-                              appointmentTime
-                            }
-                          />
-                        </Field>
-                      ) : null}
                     </div>
                   ) : null}
 
@@ -5551,26 +5352,6 @@ export function ReceptionDeskWorkspace() {
                     />
 
                     {visitPurpose ===
-                    "Admission / IPD" ? (
-                      <>
-                        <BillingRow
-                          label="Ward"
-                          value={
-                            admissionWard
-                          }
-                        />
-
-                        <BillingRow
-                          label="Bed"
-                          value={
-                            admissionBed ||
-                            "Not assigned"
-                          }
-                        />
-                      </>
-                    ) : null}
-
-                    {visitPurpose ===
                     "Emergency" ? (
                       <>
                         <BillingRow
@@ -5662,6 +5443,143 @@ export function ReceptionDeskWorkspace() {
                     balance,
                   )}
                 />
+              </div>
+
+              {/* Patient Portal & Video Consultation Access Section */}
+              <div className="mt-3 overflow-hidden rounded-xl border border-indigo-200 bg-gradient-to-br from-indigo-50/90 via-white to-violet-50/80 p-3.5 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-100/80 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Globe className="text-indigo-600" size={15} />
+                    <span className="text-[11px] font-black text-slate-900">
+                      Patient Portal &amp; Tele-Consultation Access
+                    </span>
+                  </div>
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-wide ${bookedPortalAccess?.isNewlyCreated ? "bg-emerald-100 text-emerald-800" : "bg-indigo-100 text-indigo-800"}`}>
+                    <KeyRound size={10} />
+                    {bookedPortalAccess?.isNewlyCreated ? "New Account Created" : "Active Portal Account"}
+                  </span>
+                </div>
+
+                <div className="mt-2.5 grid gap-2 sm:grid-cols-2">
+                  <div className="rounded-lg border border-indigo-100/60 bg-white/90 p-2 text-[10px]">
+                    <span className="text-[9px] font-bold text-slate-400">Login Portal URL</span>
+                    <div className="mt-0.5 flex items-center justify-between gap-1 font-bold text-indigo-700">
+                      <span className="truncate">/patient</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof window !== "undefined") {
+                            navigator.clipboard.writeText(window.location.origin + "/patient");
+                            setCopiedPortalField("portalUrl");
+                            setTimeout(() => setCopiedPortalField(null), 2000);
+                          }
+                        }}
+                        className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                        title="Copy Portal Link"
+                      >
+                        {copiedPortalField === "portalUrl" ? <Check className="text-emerald-600" size={12} /> : <Copy size={12} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-indigo-100/60 bg-white/90 p-2 text-[10px]">
+                    <span className="text-[9px] font-bold text-slate-400">Login Email / Username</span>
+                    <div className="mt-0.5 flex items-center justify-between gap-1 font-bold text-slate-800">
+                      <span className="truncate">
+                        {bookedPortalAccess?.email || selectedPatient.email || `${selectedPatient.mrNumber.toLowerCase()}@patient.wonflow.com`}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof window !== "undefined") {
+                            navigator.clipboard.writeText(bookedPortalAccess?.email || selectedPatient.email || `${selectedPatient.mrNumber.toLowerCase()}@patient.wonflow.com`);
+                            setCopiedPortalField("email");
+                            setTimeout(() => setCopiedPortalField(null), 2000);
+                          }
+                        }}
+                        className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                        title="Copy Login Email"
+                      >
+                        {copiedPortalField === "email" ? <Check className="text-emerald-600" size={12} /> : <Copy size={12} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-indigo-100/60 bg-white/90 p-2 text-[10px]">
+                    <span className="text-[9px] font-bold text-slate-400">Temporary Password</span>
+                    <div className="mt-0.5 flex items-center justify-between gap-1 font-mono font-bold text-indigo-950">
+                      <span>{bookedPortalAccess?.temporaryPassword || "Existing Account Password"}</span>
+                      {bookedPortalAccess?.temporaryPassword && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (typeof window !== "undefined") {
+                              navigator.clipboard.writeText(bookedPortalAccess.temporaryPassword!);
+                              setCopiedPortalField("password");
+                              setTimeout(() => setCopiedPortalField(null), 2000);
+                            }
+                          }}
+                          className="rounded p-1 text-slate-400 hover:bg-indigo-50 hover:text-indigo-600"
+                          title="Copy Password"
+                        >
+                          {copiedPortalField === "password" ? <Check className="text-emerald-600" size={12} /> : <Copy size={12} />}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="rounded-lg border border-indigo-100/60 bg-white/90 p-2 text-[10px]">
+                    <span className="text-[9px] font-bold text-slate-400">Consultation Delivery</span>
+                    <div className="mt-0.5 flex items-center gap-1.5 font-bold text-slate-800">
+                      {consultationMode === "ONLINE" ? (
+                        <span className="inline-flex items-center gap-1 text-purple-700">
+                          <Video size={12} /> Online Video Consultation
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-slate-700">
+                          <Stethoscope size={12} /> In-Person OPD Chamber
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {bookedPortalAccess?.videoCallUrl && (
+                  <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-purple-200 bg-purple-50/70 p-2 text-[10px]">
+                    <div className="flex items-center gap-1.5 font-bold text-purple-900">
+                      <Video className="text-purple-600" size={13} />
+                      <span>Video Consultation Room Link Ready</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (typeof window !== "undefined") {
+                            navigator.clipboard.writeText(window.location.origin + bookedPortalAccess.videoCallUrl!);
+                            setCopiedPortalField("videoUrl");
+                            setTimeout(() => setCopiedPortalField(null), 2000);
+                          }
+                        }}
+                        className="inline-flex items-center gap-1 rounded bg-white px-2 py-1 font-bold text-purple-700 shadow-sm hover:bg-purple-100"
+                      >
+                        {copiedPortalField === "videoUrl" ? <Check className="text-emerald-600" size={11} /> : <Copy size={11} />}
+                        <span>{copiedPortalField === "videoUrl" ? "Copied!" : "Copy Call Link"}</span>
+                      </button>
+                      <a
+                        href={bookedPortalAccess.videoCallUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 rounded bg-purple-600 px-2.5 py-1 font-bold text-white shadow-sm hover:bg-purple-700"
+                      >
+                        <span>Open Video Room</span>
+                        <ExternalLink size={11} />
+                      </a>
+                    </div>
+                  </div>
+                )}
+                <p className="mt-2 text-[9px] text-slate-500">
+                  ℹ️ Reception Handover: Share login details with the patient so they can join online video calls and download prescriptions.
+                </p>
               </div>
 
               <div className="mt-4 grid gap-2 sm:grid-cols-3">

@@ -250,6 +250,10 @@ export interface PlatformAdministrationContextValue {
     confirmation: string,
     reason: string,
   ) => Promise<boolean>;
+  resetTenantAdminPassword: (
+    tenantId: string,
+    password?: string,
+  ) => Promise<{ success: boolean; email: string; temporaryPassword: string }>;
 }
 
 export interface PlatformModuleDefinition {
@@ -445,6 +449,16 @@ interface ServerTenantSubscription {
   updatedAt: string;
 }
 
+interface ServerTenantMembership {
+  id: string;
+  displayName: string;
+  status: string;
+  workspaceCodes?: string[];
+  identity?: { id: string; email: string; status: string } | null;
+  roles?: Array<{ role: { name: string } }>;
+  createdAt: string;
+}
+
 interface ServerTenant {
   id: string;
   slug: string;
@@ -461,6 +475,7 @@ interface ServerTenant {
   organizations: ServerTenantOrganization[];
   subscription: ServerTenantSubscription | null;
   entitlements: Array<{ moduleCode: string; enabled: boolean }>;
+  memberships?: ServerTenantMembership[];
 }
 
 const SERVER_TENANT_STATUS: Record<string, PlatformTenantStatus> = {
@@ -572,6 +587,15 @@ function mapServerTenant(
       })),
     );
 
+  const users: PlatformTenantUserRecord[] = (tenant.memberships ?? []).map((membership) => ({
+    id: membership.id,
+    displayName: membership.displayName,
+    email: membership.identity?.email ?? "",
+    role: membership.roles?.[0]?.role?.name ?? membership.workspaceCodes?.[0] ?? "Staff",
+    status: membership.status === "ACTIVE" ? ("active" as const) : membership.status === "INVITED" ? ("invited" as const) : ("disabled" as const),
+    createdAt: membership.createdAt,
+  }));
+
   return {
     id: tenant.id,
     backendTenantId: tenant.id,
@@ -587,7 +611,7 @@ function mapServerTenant(
     createdAt: tenant.createdAt,
     updatedAt: tenant.updatedAt,
     branches,
-    users: [],
+    users,
     subscription: mapServerSubscription(
       tenant.subscription,
     ),
@@ -1146,6 +1170,36 @@ export function PlatformAdministrationProvider({
     [reload, workspace.tenants],
   );
 
+  const resetTenantAdminPassword = useCallback(
+    async (
+      tenantId: string,
+      password?: string,
+    ): Promise<{ success: boolean; email: string; temporaryPassword: string }> => {
+      const response = await fetch(
+        `/api/v1/platform/organizations/${encodeURIComponent(tenantId)}/reset-admin-password`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ password }),
+        },
+      );
+      if (!response.ok) {
+        const errorBody = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        throw new Error(
+          errorBody.error || "The tenant password could not be reset.",
+        );
+      }
+      return (await response.json()) as {
+        success: boolean;
+        email: string;
+        temporaryPassword: string;
+      };
+    },
+    [],
+  );
+
   const value =
     useMemo<PlatformAdministrationContextValue>(
       () => ({
@@ -1164,6 +1218,7 @@ export function PlatformAdministrationProvider({
         setSupportAccessStatus,
         updateSystemSettings,
         removeTenant,
+        resetTenantAdminPassword,
       }),
       [
         activateTenant,
@@ -1175,6 +1230,7 @@ export function PlatformAdministrationProvider({
         ready,
         reload,
         removeTenant,
+        resetTenantAdminPassword,
         setSupportAccessStatus,
         setTenantStatus,
         updateEntitlement,

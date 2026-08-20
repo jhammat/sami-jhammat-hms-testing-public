@@ -368,3 +368,61 @@ export function getStockAlerts(signal?: AbortSignal): Promise<StockAlerts> {
 export function useStockAlerts(): UseApiResourceResult<StockAlerts> {
   return useApiResource<StockAlerts>({ key: "pharmacy-stock-alerts", tags: [ALERTS_TAG, INVENTORY_TAG], fetcher: (signal) => getStockAlerts(signal), isEmpty: (data) => data.lowStock.length === 0 && data.expiring.length === 0 });
 }
+
+export interface PosSaleInput {
+  patientId?: string;
+  customerName?: string;
+  customerPhone?: string;
+  items: Array<{
+    medicationId: string;
+    inventoryBatchId: string;
+    quantity: number;
+    unitPricePkr: number;
+    instructions?: string;
+  }>;
+  paymentMethod?: "CASH" | "CARD" | "ONLINE" | "UNPAID";
+  discountPercent?: number;
+  taxPercent?: number;
+  notes?: string;
+}
+
+export interface PosSaleReceipt {
+  dispenseId: string;
+  invoiceId: string;
+  invoiceNumber: string;
+  customerName: string;
+  customerPhone: string | null;
+  patientId: string;
+  dispensedAt: string;
+  paymentMethod: string;
+  isPaid: boolean;
+  subtotalPkr: number;
+  discountPercent: number;
+  discountPkr: number;
+  taxPercent: number;
+  taxPkr: number;
+  netTotalPkr: number;
+  items: Array<{
+    medicationId: string;
+    inventoryBatchId: string;
+    batchNumber: string;
+    medicationName: string;
+    strength: string | null;
+    unit: string;
+    quantity: number;
+    unitPricePkr: number;
+    lineTotalPkr: number;
+    instructions: string | null;
+  }>;
+  notes: string | null;
+}
+
+export function executePosSale(input: PosSaleInput): Promise<{ receipt: PosSaleReceipt }> {
+  return apiPost<{ receipt: PosSaleReceipt }, PosSaleInput>("/api/v1/pharmacy/pos-sale", input);
+}
+
+export function usePosSale(): UseApiMutationResult<{ receipt: PosSaleReceipt }, PosSaleInput> {
+  return useApiMutation((input: PosSaleInput) => executePosSale(input), {
+    invalidates: [INVENTORY_TAG, DISPENSES_TAG, MOVEMENTS_TAG, "pharmacy-prescriptions"],
+  });
+}

@@ -288,18 +288,31 @@ function useStartSittingReadiness(
             code: blocker.code,
             reason: blocker.reason,
             resolverLabel: RESOLVER_LABELS[blocker.resolverRole] ?? blocker.resolverRole,
-            resolutionHref: blocker.resolutionHref,
-            resolutionLabel: "Fix this",
+            resolutionHref: blocker.resolutionHref || undefined,
+            resolutionLabel: blocker.resolutionHref ? "Fix this" : undefined,
           })),
         );
-      } catch (caught) {
-        if (caught instanceof DOMException && caught.name === "AbortError") return;
+      } catch (caught: unknown) {
+        if (
+          controller.signal.aborted ||
+          (typeof caught === "object" && caught !== null && "name" in caught && (caught as { name: string }).name === "AbortError") ||
+          (caught instanceof Error && (caught.name === "AbortError" || caught.message.toLowerCase().includes("abort"))) ||
+          (typeof DOMException !== "undefined" && caught instanceof DOMException && caught.name === "AbortError")
+        ) {
+          return;
+        }
       } finally {
         if (!controller.signal.aborted) setLoading(false);
       }
     };
-    void load();
-    return () => controller.abort();
+    void load().catch(() => {});
+    return () => {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    };
   }, [enabled, branchId, businessDate, roomLabel]);
 
   return { blockers, loading };
@@ -340,12 +353,25 @@ function useRoomOccupancy(branchId: string | undefined, businessDate: string, ex
             )
             .map((sitting) => ({ roomLabel: sitting.roomLabel!, doctorName: sitting.doctorName })),
         );
-      } catch (caught) {
-        if (caught instanceof DOMException && caught.name === "AbortError") return;
+      } catch (caught: unknown) {
+        if (
+          controller.signal.aborted ||
+          (typeof caught === "object" && caught !== null && "name" in caught && (caught as { name: string }).name === "AbortError") ||
+          (caught instanceof Error && (caught.name === "AbortError" || caught.message.toLowerCase().includes("abort"))) ||
+          (typeof DOMException !== "undefined" && caught instanceof DOMException && caught.name === "AbortError")
+        ) {
+          return;
+        }
       }
     };
-    void load();
-    return () => controller.abort();
+    void load().catch(() => {});
+    return () => {
+      try {
+        controller.abort();
+      } catch {
+        // ignore
+      }
+    };
   }, [branchId, businessDate, excludeDoctorId]);
 
   return occupied;
@@ -901,8 +927,10 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
               </button>
             </div>
             <select
-              className={fieldClass}
+              aria-label="Consultation room"
+              className={`${fieldClass} ${isNotStarted && !roomLabel.trim() ? "border-amber-300 ring-1 ring-amber-200 dark:border-amber-600 dark:ring-amber-900/40" : ""}`}
               disabled={!isNotStarted && !editingRoom}
+              id="sitting-consultation-room-select"
               onChange={(event) => {
                 if (event.target.value === "__add_new_custom_room__") {
                   setShowAddRoomModal(true);
@@ -912,7 +940,7 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
               }}
               value={roomLabel}
             >
-              <option value="">Select room</option>
+              <option value="">Choose consultation room...</option>
               {rooms.map((room) => {
                 const occupant = occupiedByLabel.get(room.label);
                 return (

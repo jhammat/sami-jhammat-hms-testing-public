@@ -66,6 +66,7 @@ describe("Doctor Custom Rooms and Hospital Branches", () => {
       scope: "tenant",
       tenantId: tenant.id,
       organizationId: organization.id,
+      branchId: null,
       userId: identity.id,
       identityId: identity.id,
       membershipId: membership.id,

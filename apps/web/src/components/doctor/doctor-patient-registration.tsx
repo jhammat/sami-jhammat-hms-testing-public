@@ -216,7 +216,7 @@ export function DoctorPatientRegistration() {
             <div className="flex flex-wrap gap-3">
               <Link
                 className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-4 py-2.5 text-sm font-black text-white shadow-sm transition hover:from-indigo-700 hover:to-violet-700"
-                href={`/operations/appointments/new?patientId=${registered.id}`}
+                href={`/operations/reception?patientId=${registered.id}`}
               >
                 <CalendarPlus aria-hidden className="size-4" />
                 Book an appointment now

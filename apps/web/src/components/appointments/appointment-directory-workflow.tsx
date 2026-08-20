@@ -682,7 +682,7 @@ function AppointmentDirectoryContent({
         <WonFlowOperationalPanel description="No appointments have been booked yet." title="No Appointments" tone="amber">
           <DataEmpty
             action={
-              <Link className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-bold text-white" href="/operations/appointments/new">
+              <Link className="inline-flex min-h-11 items-center justify-center rounded-xl bg-blue-600 px-4 text-sm font-bold text-white" href="/operations/reception">
                 Book Appointment
               </Link>
             }
@@ -964,7 +964,7 @@ export function AppointmentDirectoryWorkflow() {
     <div className="space-y-6">
       <WonFlowPageHeader
         actions={
-          <Link className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm" href="/operations/appointments/new">
+          <Link className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm" href="/operations/reception">
             Book Appointment
           </Link>
         }

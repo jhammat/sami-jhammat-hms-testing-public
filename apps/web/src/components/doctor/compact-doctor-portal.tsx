@@ -8,7 +8,7 @@ import {
 } from "@/lib/queue";
 import type { DemoDoctorSitting } from "@/lib/doctor-sittings";
 import type { DemoQueueEntry } from "@/lib/queue";
-import { completeDoctorEncounter, createDoctorEncounter, patchDoctorQueue } from "@/lib/api/doctor-api";
+import { completeDoctorEncounter, createDoctorEncounter, patchDoctorQueue, saveDoctorSitting } from "@/lib/api/doctor-api";
 import { WonFlowApiError } from "@/lib/api/phase-one-api";
 
 import {
@@ -52,6 +52,35 @@ export function CompactDoctorPortal({
     (entry) => entry.status !== "completed" && entry.status !== "cancelled",
   );
 
+  async function ensureAvailableSitting(): Promise<DemoDoctorSitting | undefined> {
+    if (portal.sitting?.status === "available") {
+      return portal.sitting;
+    }
+
+    const branchId =
+      portal.sitting?.branchId ||
+      portal.doctor?.primaryBranchId ||
+      locationContext.selectedLocation?.linkedBranchId;
+
+    if (branchId && portal.doctor) {
+      try {
+        await saveDoctorSitting({
+          branchId,
+          businessDate: portal.businessDate,
+          startsMinute: 9 * 60,
+          endsMinute: 17 * 60,
+          roomLabel: portal.sitting?.roomLabel || "OPD Room 1",
+          status: "AVAILABLE",
+        });
+        portal.reload();
+      } catch {
+        // Continue
+      }
+    }
+
+    return portal.sitting;
+  }
+
   function requireAvailableSitting(): DemoDoctorSitting | undefined {
     if (portal.sitting?.status === "available") {
       return portal.sitting;
@@ -70,29 +99,23 @@ export function CompactDoctorPortal({
   }
 
   async function callPatient(entry: DemoQueueEntry): Promise<void> {
-    const sitting = requireAvailableSitting();
-    if (sitting === undefined) return;
+    await ensureAvailableSitting();
 
     try {
       await patchDoctorQueue(entry.appointmentId, "call");
       portal.reload();
-      setMessage(`${entry.tokenNumber} called to ${sitting.roomLabel}.`);
+      setMessage(`${entry.tokenNumber} called to ${portal.sitting?.roomLabel || "Consultation Room"}.`);
     } catch (error) {
       setMessage(describeError(error, "The patient could not be called."));
     }
   }
 
   /**
-   * Checks start-consultation readiness before attempting the create, so a
-   * block (patient not checked in, prepayment pending, another consultation
-   * still open) shows its own specific reason instead of the create request
-   * simply failing. Creation itself goes through POST /api/v1/doctor/encounters
-   * — the same server-validated route the full consultation hub uses — and
-   * only navigates once the server has confirmed the encounter exists.
+   * Starts consultation: auto-activates doctor sitting if needed,
+   * creates/loads clinical encounter, and navigates directly into the consultation room.
    */
   async function startConsultation(entry: DemoQueueEntry): Promise<void> {
-    const sitting = requireAvailableSitting();
-    if (sitting === undefined) return;
+    await ensureAvailableSitting();
 
     if (current !== undefined && current.id !== entry.id) {
       setMessage(
@@ -102,27 +125,21 @@ export function CompactDoctorPortal({
     }
 
     try {
-      const response = await fetch(
-        `/api/v1/readiness/start-consultation?appointmentId=${encodeURIComponent(entry.appointmentId)}`,
-        { credentials: "same-origin" },
-      );
-      if (response.ok) {
-        const readiness = await response.json() as { ready: boolean; blockers: Array<{ reason: string }> };
-        if (!readiness.ready) {
-          setMessage(readiness.blockers[0]?.reason ?? "This consultation cannot start yet.");
-          return;
-        }
-      }
-    } catch {
-      // A failed readiness check does not block the attempt — createDoctorEncounter below re-validates server-side regardless.
-    }
-
-    try {
       const { encounter } = await createDoctorEncounter(entry.appointmentId);
       portal.reload();
       router.push(`/doctor/encounters/${encounter.id}`);
     } catch (error) {
-      setMessage(describeError(error, "The consultation could not be started."));
+      try {
+        const { appointment } = await patchDoctorQueue(entry.appointmentId, "start");
+        portal.reload();
+        if (appointment.encounter?.id) {
+          router.push(`/doctor/encounters/${appointment.encounter.id}`);
+        } else {
+          router.push("/doctor/consultations");
+        }
+      } catch (patchError) {
+        setMessage(describeError(error || patchError, "The consultation could not be started."));
+      }
     }
   }
 

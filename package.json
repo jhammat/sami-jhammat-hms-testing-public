@@ -40,7 +40,8 @@
     "db:seed:prod": "pnpm exec tsx tooling/scripts/seed-production.ts",
     "db:seed:dev": "pnpm exec tsx tooling/scripts/seed-development-logins.ts",
     "db:repair-access": "pnpm exec tsx tooling/scripts/repair-workspace-access.ts",
-    "db:seed:demo": "pnpm exec tsx tooling/scripts/seed-demo-data.ts"
+    "db:seed:demo": "pnpm exec tsx tooling/scripts/seed-demo-data.ts",
+    "db:reset:superadmin": "pnpm exec tsx tooling/scripts/reset-to-fresh-superadmin.ts"
   },
   "devDependencies": {
     "dotenv": "^17.4.2",

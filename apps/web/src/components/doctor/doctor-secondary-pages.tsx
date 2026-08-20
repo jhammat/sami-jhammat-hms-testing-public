@@ -4,23 +4,32 @@ import {
   Bell,
   Building2,
   CalendarClock,
+  Check,
   ChevronRight,
   Clock3,
+  Copy,
+  ExternalLink,
   FileClock,
   FileText,
   FlaskConical,
+  Globe,
   History,
   Image as ImageIcon,
+  KeyRound,
   Plus,
+  RefreshCw,
   Save,
   Search,
   Settings,
+  ShieldCheck,
   SlidersHorizontal,
   Smartphone,
   Upload,
   UserRound,
   UsersRound,
+  Video,
   Volume2,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -542,7 +551,7 @@ interface RealConnectedPatient {
   referralSource?: string;
   lastActivityAt?: string;
   lastDiagnosis: string | null;
-  nextAppointment?: { appointmentDate: string; slotStart: string; serviceName: string };
+  nextAppointment?: { id?: string; appointmentDate: string; slotStart: string; serviceName: string; consultationMode?: string };
   encounterCount: number;
   unreadReports: number;
 }
@@ -577,10 +586,254 @@ function useMyConnectedPatients() {
   return { patients, loading, reload };
 }
 
+function DoctorPatientPortalModal({
+  patient,
+  onClose,
+  onSuccess,
+}: {
+  patient: RealConnectedPatient | ConnectedPatient | null;
+  onClose: () => void;
+  onSuccess?: (email: string) => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const [portalStatus, setPortalStatus] = useState<{ hasPortalAccess: boolean; email?: string } | null>(null);
+  const [emailInput, setEmailInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
+  const [provisionResult, setProvisionResult] = useState<{
+    email: string;
+    temporaryPassword?: string;
+    portalUrl: string;
+  } | null>(null);
+  const [error, setError] = useState("");
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!patient) return;
+    setLoading(true);
+    setError("");
+    setProvisionResult(null);
+    void fetch(`/api/v1/patients/${patient.id}/portal-credentials`, { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed to load status"))))
+      .then((data: { hasPortalAccess: boolean; email?: string }) => {
+        setPortalStatus(data);
+        setEmailInput(data.email || "");
+      })
+      .catch((e) => setError(e instanceof Error ? e.message : "Error checking portal status"))
+      .finally(() => setLoading(false));
+  }, [patient]);
+
+  if (!patient) return null;
+
+  async function handleProvision(autoGenerate = true) {
+    if (!patient) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/v1/patients/${patient.id}/portal-credentials`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          email: emailInput.trim() || undefined,
+          password: autoGenerate ? undefined : passwordInput.trim() || undefined,
+        }),
+      });
+      const data = (await res.json()) as { email: string; temporaryPassword?: string; portalUrl?: string; error?: string; message?: string };
+      if (!res.ok) throw new Error(data.error || data.message || "Failed to create portal access");
+      setProvisionResult({
+        email: data.email,
+        temporaryPassword: data.temporaryPassword,
+        portalUrl: data.portalUrl || "/patient",
+      });
+      setPortalStatus({ hasPortalAccess: true, email: data.email });
+      onSuccess?.(data.email);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Portal credentials could not be provisioned.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function copyText(text: string, field: string) {
+    if (typeof window !== "undefined") {
+      navigator.clipboard.writeText(text);
+      setCopiedField(field);
+      setTimeout(() => setCopiedField(null), 2000);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-indigo-200 bg-white shadow-2xl">
+        <div className="flex items-center justify-between bg-gradient-to-r from-indigo-700 via-indigo-600 to-violet-700 px-5 py-4 text-white">
+          <div className="flex items-center gap-2.5">
+            <KeyRound className="size-5" />
+            <div>
+              <h3 className="text-base font-black">Patient Portal Access</h3>
+              <p className="text-xs text-indigo-100">{patient.displayName} · {patient.mrNumber}</p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-white/80 hover:bg-white/10 hover:text-white"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
+              {error}
+            </div>
+          )}
+
+          {/* Current Status */}
+          <div className="flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
+            <div className="flex items-center gap-2">
+              <Globe className="text-indigo-600" size={16} />
+              <div>
+                <div className="text-xs font-black text-slate-900">Portal Account Status</div>
+                <div className="text-[11px] text-slate-500">
+                  {loading
+                    ? "Checking portal status…"
+                    : portalStatus?.hasPortalAccess
+                    ? `Active (${portalStatus.email})`
+                    : "No active patient portal account"}
+                </div>
+              </div>
+            </div>
+            <span
+              className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ${
+                portalStatus?.hasPortalAccess
+                  ? "bg-emerald-100 text-emerald-800"
+                  : "bg-amber-100 text-amber-800"
+              }`}
+            >
+              {portalStatus?.hasPortalAccess ? "🟢 Active" : "⚪ Not Created"}
+            </span>
+          </div>
+
+          {/* Newly Provisioned Credentials View */}
+          {provisionResult ? (
+            <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50/80 to-teal-50/50 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-xs font-black text-emerald-900">
+                <Check className="size-4 text-emerald-600" />
+                <span>Portal Credentials Ready &amp; Active!</span>
+              </div>
+              <div className="grid gap-2 text-[11px]">
+                <div className="flex items-center justify-between rounded-lg bg-white p-2 border border-emerald-100">
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-400">Login URL</span>
+                    <div className="font-bold text-indigo-700">{typeof window !== "undefined" ? window.location.origin : ""}/patient</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyText((typeof window !== "undefined" ? window.location.origin : "") + "/patient", "url")}
+                    className="rounded p-1.5 text-slate-500 hover:bg-slate-100"
+                  >
+                    {copiedField === "url" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between rounded-lg bg-white p-2 border border-emerald-100">
+                  <div>
+                    <span className="text-[9px] font-bold text-slate-400">Login Email</span>
+                    <div className="font-bold text-slate-800">{provisionResult.email}</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyText(provisionResult.email, "email")}
+                    className="rounded p-1.5 text-slate-500 hover:bg-slate-100"
+                  >
+                    {copiedField === "email" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                  </button>
+                </div>
+
+                {provisionResult.temporaryPassword && (
+                  <div className="flex items-center justify-between rounded-lg bg-white p-2 border border-emerald-100">
+                    <div>
+                      <span className="text-[9px] font-bold text-slate-400">Temporary Password</span>
+                      <div className="font-mono font-black text-slate-900">{provisionResult.temporaryPassword}</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => copyText(provisionResult.temporaryPassword!, "pw")}
+                      className="rounded p-1.5 text-slate-500 hover:bg-slate-100"
+                    >
+                      {copiedField === "pw" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                    </button>
+                  </div>
+                )}
+              </div>
+              <p className="text-[10px] text-slate-600">
+                The patient can use these credentials to log in to <strong>/patient</strong> to view prescriptions, medical records, and join scheduled video consultations.
+              </p>
+            </div>
+          ) : (
+            /* Provisioning Form */
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700">Patient Login Email (optional override)</label>
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  placeholder={`${patient.mrNumber.toLowerCase()}@patient.wonflow.com`}
+                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700">Custom Password (leave blank for secure auto-generation)</label>
+                <input
+                  type="text"
+                  value={passwordInput}
+                  onChange={(e) => setPasswordInput(e.target.value)}
+                  placeholder="e.g. Patient#Pass2026 (or auto-generate)"
+                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-mono font-semibold focus:border-indigo-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex flex-wrap gap-2 pt-2">
+                <button
+                  type="button"
+                  disabled={loading}
+                  onClick={() => void handleProvision(passwordInput.trim() === "")}
+                  className="flex-1 rounded-xl bg-indigo-600 px-4 py-2.5 text-xs font-black text-white shadow-lg hover:bg-indigo-700 disabled:opacity-50"
+                >
+                  {loading
+                    ? "Generating…"
+                    : portalStatus?.hasPortalAccess
+                    ? "Reset / Update Credentials"
+                    : "⚡ Generate Portal Credentials"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex justify-end border-t border-slate-100 bg-slate-50 px-5 py-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function DoctorPatientsPage() {
   const { patients, loading } = useMyConnectedPatients();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PatientFilter>("all");
+  const [portalModalPatient, setPortalModalPatient] = useState<RealConnectedPatient | null>(null);
+  const [portalStatusMap, setPortalStatusMap] = useState<Record<string, { hasPortalAccess: boolean; email?: string }>>({});
+
   const today = todayValue();
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visiblePatients = patients.filter((patient) => {
@@ -608,6 +861,23 @@ export function DoctorPatientsPage() {
     if (filter === "unread") return patient.unreadReports > 0;
     return true;
   });
+
+  useEffect(() => {
+    if (visiblePatients.length === 0) return;
+    const unverified = visiblePatients.filter((p) => portalStatusMap[p.id] === undefined);
+    if (unverified.length === 0) return;
+
+    unverified.forEach((p) => {
+      void fetch(`/api/v1/patients/${p.id}/portal-credentials`, { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data: { hasPortalAccess: boolean; email?: string } | null) => {
+          if (data) {
+            setPortalStatusMap((prev) => ({ ...prev, [p.id]: data }));
+          }
+        })
+        .catch(() => {});
+    });
+  }, [visiblePatients, portalStatusMap]);
 
   const filters: Array<{ value: PatientFilter; label: string }> = [
     { value: "all", label: "All Connected" },
@@ -723,6 +993,7 @@ export function DoctorPatientsPage() {
       ) : (
         <div className="grid gap-3 xl:grid-cols-2">
           {visiblePatients.map((patient) => {
+            const portalAccessInfo = portalStatusMap[patient.id];
             return (
               <article
                 className="group relative isolate scroll-mt-24 overflow-hidden rounded-[20px] border border-indigo-100/80 bg-gradient-to-br from-white via-white to-indigo-50/55 p-4 shadow-[0_12px_30px_rgba(79,70,229,0.07)] transition duration-300 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-[0_18px_42px_rgba(79,70,229,0.14)] focus:outline-none focus:ring-2 focus:ring-indigo-400 target:border-indigo-300 target:ring-2 target:ring-indigo-100"
@@ -761,7 +1032,37 @@ export function DoctorPatientsPage() {
                   </div>
                 </div>
 
-                <dl className="mt-4 grid gap-3 rounded-[15px] border border-white bg-gradient-to-r from-slate-50 via-indigo-50/50 to-cyan-50/45 p-3 shadow-inner sm:grid-cols-3">
+                {/* Patient Portal Status & 1-Click Management */}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-indigo-100/70 bg-gradient-to-r from-indigo-50/60 to-white p-2.5">
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    <Globe className="text-indigo-600 size-3.5" />
+                    {portalAccessInfo?.hasPortalAccess ? (
+                      <span className="inline-flex items-center gap-1.5 font-bold text-emerald-700">
+                        <span className="size-2 rounded-full bg-emerald-500" />
+                        Portal Active ({portalAccessInfo.email || "Registered"})
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 font-bold text-slate-500">
+                        <span className="size-2 rounded-full bg-slate-300" />
+                        Portal Not Created
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setPortalModalPatient(patient)}
+                    className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-black transition ${
+                      portalAccessInfo?.hasPortalAccess
+                        ? "bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50 shadow-sm"
+                        : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
+                    }`}
+                  >
+                    <KeyRound size={11} />
+                    {portalAccessInfo?.hasPortalAccess ? "Manage Portal" : "+ Create Portal Access"}
+                  </button>
+                </div>
+
+                <dl className="mt-3 grid gap-3 rounded-[15px] border border-white bg-gradient-to-r from-slate-50 via-indigo-50/50 to-cyan-50/45 p-3 shadow-inner sm:grid-cols-3">
                   <div>
                     <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
                       Last visit
@@ -795,17 +1096,41 @@ export function DoctorPatientsPage() {
                     {patient.encounterCount} encounter
                     {patient.encounterCount === 1 ? "" : "s"}
                   </span>
-                  <Link
-                    className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-indigo-600 px-3 text-[11px] font-black text-white hover:bg-indigo-700"
-                    href={`/operations/appointments/new?patientId=${encodeURIComponent(patient.id)}`}
-                  >
-                    Book appointment <ChevronRight size={13} />
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    {patient.nextAppointment?.id && (
+                      <Link
+                        className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-purple-600 px-3 text-[11px] font-black text-white hover:bg-purple-700 shadow-sm"
+                        href={`/doctor/appointments/${encodeURIComponent(patient.nextAppointment.id)}/video`}
+                      >
+                        <Video size={13} /> Video Call
+                      </Link>
+                    )}
+                    <Link
+                      className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-indigo-600 px-3 text-[11px] font-black text-white hover:bg-indigo-700"
+                      href={`/operations/reception?patientId=${encodeURIComponent(patient.id)}`}
+                    >
+                      Book appointment <ChevronRight size={13} />
+                    </Link>
+                  </div>
                 </div>
               </article>
             );
           })}
         </div>
+      )}
+
+      {/* Patient Portal Credentials Management Modal */}
+      {portalModalPatient && (
+        <DoctorPatientPortalModal
+          patient={portalModalPatient}
+          onClose={() => setPortalModalPatient(null)}
+          onSuccess={(email) => {
+            setPortalStatusMap((prev) => ({
+              ...prev,
+              [portalModalPatient.id]: { hasPortalAccess: true, email },
+            }));
+          }}
+        />
       )}
     </div>
   );
