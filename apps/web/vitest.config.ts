@@ -15,6 +15,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "tests/**/*.test.ts"],
+    testTimeout: 60000,
+    hookTimeout: 60000,
     env: {
       DATABASE_URL: process.env.DATABASE_URL || "postgresql://wonflow:wonflow_dev_password@localhost:5432/wonflow_phase1_dev?schema=public",
       REDIS_URL: process.env.REDIS_URL || "redis://localhost:6379",

@@ -112,9 +112,7 @@ export class AlertEscalationService {
     const escalation = await database.alertEscalation.findUnique({
       where: { id: escalationId },
       include: {
-        AlertEvent: {
-          include: { Patient: true },
-        },
+        AlertEvent: true,
       },
     });
 
@@ -133,12 +131,11 @@ export class AlertEscalationService {
       return;
     }
 
-    const patient = escalation.AlertEvent.Patient;
-    const patientName = `${patient.givenName} ${patient.familyName}`;
     const alert = escalation.AlertEvent;
 
-    // Safety rule: Do NOT put diagnosis or unencrypted PHI in SMS/Push
-    const message = `[WonFlow Clinical Alert - ${alert.severity}] Patient ${patientName} (${patient.patientNumber}) has an active alert: ${alert.title}. Review immediately in portal.`;
+    // Spec requirement (E-02): notifications MUST NOT carry any clinical detail, patient
+    // identifiers, values, or diagnoses. Generic message + secure portal link only.
+    const message = `A post-op patient under your care requires urgent clinical review. Please log in to the portal to respond.`;
 
     try {
       // Create system Notification record

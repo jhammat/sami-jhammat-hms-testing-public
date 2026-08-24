@@ -79,9 +79,7 @@ async function sweepAlertEscalations() {
         failedAt: null,
       },
       include: {
-        AlertEvent: {
-          include: { Patient: true },
-        },
+        AlertEvent: true,
       },
       take: 25,
     });
@@ -96,10 +94,11 @@ async function sweepAlertEscalations() {
         continue;
       }
 
-      const patient = esc.AlertEvent.Patient;
-      const patientName = `${patient.givenName} ${patient.familyName}`;
       const alert = esc.AlertEvent;
-      const message = `[WonFlow Clinical Alert - ${alert.severity}] Patient ${patientName} (${patient.patientNumber}) has an active alert: ${alert.title}. Review in portal.`;
+      // IMPORTANT: notification MUST NOT carry any clinical detail, values, or diagnoses.
+      // It must only say "a patient needs your attention" and provide the secure portal link.
+      const safeMessage = `A post-op patient under your care requires urgent clinical review. Please log in to the portal to review.`;
+      const portalLink = `/operations/alerts?alertId=${alert.id}`;
 
       await database.notification.create({
         data: {
@@ -114,8 +113,8 @@ async function sweepAlertEscalations() {
             alertEventId: alert.id,
             severity: alert.severity,
             step: esc.step,
-            message,
-            link: `/operations/alerts?alertId=${alert.id}`,
+            message: safeMessage,
+            link: portalLink,
           },
         },
       });
