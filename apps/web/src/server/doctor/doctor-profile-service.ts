@@ -56,6 +56,7 @@ function serializeProfile(profile: Awaited<ReturnType<typeof resolveProfile>>["p
     contactPhone: profile.contactPhone ?? "",
     durationMinutes: profile.durationMinutes,
     publiclyBookable: profile.publiclyBookable,
+    signatureImageData: profile.signatureImageData ?? null,
   };
 }
 
@@ -107,6 +108,18 @@ export class DoctorProfileService {
     if (duration !== undefined && (!Number.isInteger(duration) || Number(duration) < 5 || Number(duration) > 480)) {
       throw new WonFlowApiError(400, "invalid-consultation-duration", "Consultation duration must be between 5 and 480 minutes.");
     }
+    // The signature signs clinical notes, so it is validated as strictly as the
+    // profile photo. `null` clears it — that is how "Remove signature" works.
+    const signatureImageData = input.signatureImageData;
+    if (
+      signatureImageData !== undefined &&
+      signatureImageData !== null &&
+      (typeof signatureImageData !== "string" ||
+        !/^data:image\/(jpeg|png|webp);base64,/.test(signatureImageData) ||
+        signatureImageData.length > 1_500_000)
+    ) {
+      throw new WonFlowApiError(400, "invalid-signature-image", "Upload a JPG, PNG or WebP signature smaller than 1 MB.");
+    }
 
     await database.$transaction(async (tx) => {
       await tx.tenantMembership.update({
@@ -128,6 +141,7 @@ export class DoctorProfileService {
           durationMinutes: duration === undefined ? undefined : Number(duration),
           publiclyBookable: typeof input.publiclyBookable === "boolean" ? input.publiclyBookable : undefined,
           profileImageData: profileImageData === undefined ? undefined : profileImageData,
+          signatureImageData: signatureImageData === undefined ? undefined : signatureImageData,
         },
       });
       await tx.auditEvent.create({

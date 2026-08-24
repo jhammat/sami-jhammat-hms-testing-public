@@ -357,16 +357,9 @@ function OrganizationDashboardContent({
     });
   }, [normalizedSearch, projection.branchSummaries, sortMetric]);
 
-  const [clientLogo, setClientLogo] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const stored = localStorage.getItem("wonflow_hospital_logo");
-      if (stored) setClientLogo(stored);
-    }
-  }, []);
-
-  const hospitalLogo = projection.organization.logoDataUrl || clientLogo;
+  // The logo is saved on the organization record by Admin → Profile and comes
+  // down on the projection. There is no browser copy to fall back to.
+  const hospitalLogo = projection.organization.logoDataUrl;
 
   return (
     <div className="space-y-4" id="main-content">

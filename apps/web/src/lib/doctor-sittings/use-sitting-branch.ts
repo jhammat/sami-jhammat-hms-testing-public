@@ -34,7 +34,9 @@ export function useSittingBranch(preferredBranchId?: string) {
   };
 
   useEffect(() => {
-    void load();
+    queueMicrotask(() => {
+      void load();
+    });
   }, []);
 
   const addBranch = (newBranch: SittingBranch) => {

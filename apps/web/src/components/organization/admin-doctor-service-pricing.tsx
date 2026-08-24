@@ -13,12 +13,14 @@ import { nextServiceCode, normalizeServiceCode } from "@/lib/services/service-co
 
 type FeeAuthority = "DOCTOR" | "HOSPITAL";
 type BillingOwner = "HOSPITAL" | "DOCTOR";
-type WorkspaceCode = "ADMIN" | "RECEPTION" | "DOCTOR" | "LABORATORY" | "RADIOLOGY" | "PHARMACY" | "BILLING" | "MANAGEMENT";
+type WorkspaceCode = "ADMIN" | "RECEPTION" | "DOCTOR" | "LABORATORY" | "RADIOLOGY" | "PHARMACY" | "BILLING" | "MANAGEMENT" | "PHYSIOTHERAPIST" | "NUTRITIONIST";
 
 /** Desks that can operate a service, in the order administrators think of them. */
 const serviceDesks: Array<{ code: WorkspaceCode; label: string }> = [
   { code: "RECEPTION", label: "Reception" },
   { code: "DOCTOR", label: "Doctor on duty" },
+  { code: "PHYSIOTHERAPIST", label: "Physiotherapy" },
+  { code: "NUTRITIONIST", label: "Nutrition / Dietetics" },
   { code: "LABORATORY", label: "Laboratory" },
   { code: "RADIOLOGY", label: "Radiology" },
   { code: "PHARMACY", label: "Pharmacy" },

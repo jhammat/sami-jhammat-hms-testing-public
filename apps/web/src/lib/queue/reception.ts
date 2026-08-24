@@ -1,3 +1,4 @@
+import { addTenantPicklistEntry, fetchTenantPicklists } from "@/lib/picklists/use-tenant-picklist";
 import type {
   DemoAppointmentBooking,
 } from "@/lib/appointments";
@@ -136,34 +137,33 @@ export const QUEUE_ROOMS_CHANGED_EVENT = "wonflow:queue-rooms-changed";
 // panel still runs on this demo model (no queue-status-transition endpoints
 // exist yet — see FIX-19 report), so it keeps working, but nothing here
 let demoQueueEntries: DemoQueueEntry[] = [];
-const CUSTOM_ROOMS_STORAGE_KEY = "wonflow:custom-rooms";
 let customQueueRooms: QueueRoomOption[] = [];
 
-function loadCustomRoomsFromStorage(): QueueRoomOption[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(CUSTOM_ROOMS_STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return parsed.filter(
-        (item): item is QueueRoomOption =>
-          typeof item === "object" && item !== null && typeof item.id === "string" && typeof item.label === "string",
-      );
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return [];
+/**
+ * Rooms staff add themselves. These used to be written to localStorage, which
+ * meant a room created on the reception tablet did not exist for the doctor
+ * calling the next patient. They are hospital configuration and live in
+ * PostgreSQL behind the tenant picklist API, per
+ * docs/architecture/client-storage.md. This module keeps a session-lived cache
+ * so the synchronous readers above stay synchronous.
+ */
+function roomFromEntry(entry: { id: string; label: string; metadata: Record<string, unknown> | null }): QueueRoomOption {
+  const category = entry.metadata?.category;
+  return {
+    id: entry.id,
+    label: entry.label,
+    category: category === "triage" || category === "procedure" ? category : "consultation",
+  };
 }
 
-function saveCustomRoomsToStorage(rooms: QueueRoomOption[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(CUSTOM_ROOMS_STORAGE_KEY, JSON.stringify(rooms));
-  } catch {
-    // Ignore storage errors
+/** Refreshes the cache from the server, then notifies any mounted room list. */
+export async function loadQueueRoomOptions(): Promise<QueueRoomOption[]> {
+  const entries = await fetchTenantPicklists(["CONSULTATION_ROOM"]);
+  customQueueRooms = entries.map(roomFromEntry);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(QUEUE_ROOMS_CHANGED_EVENT));
   }
+  return [...QUEUE_ROOM_OPTIONS, ...customQueueRooms];
 }
 
 export const QUEUE_ROOM_OPTIONS:
@@ -210,34 +210,31 @@ export const QUEUE_ROOM_OPTIONS:
     },
   ];
 
+/** Seeded rooms plus whatever `loadQueueRoomOptions` last fetched. */
 export function readQueueRoomOptions(): QueueRoomOption[] {
-  const stored = loadCustomRoomsFromStorage();
-  const mergedCustom = [...customQueueRooms];
-  for (const item of stored) {
-    if (!mergedCustom.some((r) => r.id === item.id || r.label.toLowerCase() === item.label.toLowerCase())) {
-      mergedCustom.push(item);
-    }
-  }
-  customQueueRooms = mergedCustom;
   return [...QUEUE_ROOM_OPTIONS, ...customQueueRooms];
 }
 
-export function addCustomConsultationRoom(
+export async function addCustomConsultationRoom(
   labelInput: string,
   category: QueueRoomOption["category"] = "consultation",
-): QueueRoomOption {
+): Promise<QueueRoomOption> {
   const label = labelInput.trim();
   if (label.length < 2) throw new Error("Enter a room name with at least 2 characters.");
-  const rooms = readQueueRoomOptions();
-  const existing = rooms.find((room) => room.label.toLowerCase() === label.toLowerCase());
+  const existing = readQueueRoomOptions().find((room) => room.label.toLowerCase() === label.toLowerCase());
   if (existing) return existing;
-  const room: QueueRoomOption = {
-    id: `custom-room-${typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36)}`,
+
+  const entry = await addTenantPicklistEntry({
+    kind: "CONSULTATION_ROOM",
     label,
-    category: category || "consultation",
-  };
-  customQueueRooms = [...customQueueRooms, room];
-  saveCustomRoomsToStorage(customQueueRooms);
+    metadata: { category: category || "consultation" },
+  });
+  if (!entry) throw new Error("That room could not be saved. Check your connection and try again.");
+
+  const room = roomFromEntry(entry);
+  if (!customQueueRooms.some((item) => item.id === room.id)) {
+    customQueueRooms = [...customQueueRooms, room];
+  }
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event(QUEUE_ROOMS_CHANGED_EVENT));
   }

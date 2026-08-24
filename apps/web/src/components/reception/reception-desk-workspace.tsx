@@ -1133,12 +1133,15 @@ export function ReceptionDeskWorkspace() {
 
   const searchParams = useSearchParams();
 
+  // Applying the deep-link query string is a one-way sync from the URL into
+  // form state, deferred a tick so it does not cascade inside the effect body.
   useEffect(() => {
     const patientIdParam = searchParams?.get("patientId");
     const doctorIdParam = searchParams?.get("doctorId");
     const searchParam = searchParams?.get("search") || searchParams?.get("query");
     const modeParam = searchParams?.get("mode");
 
+    queueMicrotask(() => {
     if (modeParam === "new") {
       setPatientMode("new");
       setPatientDraft(EMPTY_PATIENT_DRAFT);
@@ -1162,6 +1165,7 @@ export function ReceptionDeskWorkspace() {
         })
         .catch(() => {});
     }
+    });
   }, [searchParams]);
 
   const [
@@ -3976,7 +3980,8 @@ export function ReceptionDeskWorkspace() {
                         {consultationReason.length}/300
                       </div>
                     </div>
-                  ) : null}                  {requiresDoctorRouting &&
+                  ) : null}
+                  {requiresDoctorRouting &&
                   selectedDoctor !== null &&
                   (visitPurpose === "OPD Walk-in" ||
                     visitPurpose === "Scheduled Appointment" ||

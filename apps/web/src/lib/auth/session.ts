@@ -23,4 +23,6 @@ export interface WonFlowSessionPayload {
   passwordChangeRequired: boolean;
   mfaVerified: boolean;
   expiresAt: string;
+  patientId?: string | null;
+  actingRelationship?: string | null;
 }

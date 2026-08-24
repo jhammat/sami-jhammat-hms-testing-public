@@ -1,12 +1,15 @@
 export type WonFlowRole =
   | "platform" | "admin" | "reception" | "doctor" | "patient"
-  | "laboratory" | "radiology" | "pharmacy" | "billing" | "management";
+  | "laboratory" | "radiology" | "pharmacy" | "billing" | "management"
+  | "physiotherapist" | "nutritionist";
 
 export function roleForPath(pathname: string): WonFlowRole | null {
   if (pathname.startsWith("/platform")) return "platform";
   if (pathname.startsWith("/admin") || pathname.startsWith("/organization")) return "admin";
   if (pathname.startsWith("/doctor")) return "doctor";
   if (pathname.startsWith("/patient") && pathname !== "/patient/register") return "patient";
+  if (pathname.startsWith("/physiotherapy")) return "physiotherapist";
+  if (pathname.startsWith("/nutrition")) return "nutritionist";
   if (pathname.startsWith("/management")) return "management";
   if (pathname.startsWith("/operations/laboratory")) return "laboratory";
   if (pathname.startsWith("/operations/radiology")) return "radiology";
@@ -22,5 +25,6 @@ export function homePathForRole(role: WonFlowRole): string {
     doctor: "/doctor", patient: "/patient", laboratory: "/operations/laboratory",
     radiology: "/operations/radiology", pharmacy: "/operations/pharmacy",
     billing: "/operations/billing", management: "/management",
+    physiotherapist: "/physiotherapy", nutritionist: "/nutrition",
   }[role];
 }

@@ -609,6 +609,7 @@ function DoctorPatientPortalModal({
 
   useEffect(() => {
     if (!patient) return;
+    queueMicrotask(() => {
     setLoading(true);
     setError("");
     setProvisionResult(null);
@@ -620,6 +621,7 @@ function DoctorPatientPortalModal({
       })
       .catch((e) => setError(e instanceof Error ? e.message : "Error checking portal status"))
       .finally(() => setLoading(false));
+    });
   }, [patient]);
 
   if (!patient) return null;

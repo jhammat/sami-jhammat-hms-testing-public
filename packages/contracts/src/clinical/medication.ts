@@ -740,3 +740,54 @@ export const WONFLOW_DISPENSE_REQUEST_STATUS_TRANSITIONS: Record<
   cancelled: [],
   expired: [],
 };
+
+export interface MedicationDoseItem {
+  id: string;
+  medicationName: string;
+  dose: string;
+  frequency: string;
+  route?: string;
+  scheduledFor: string;
+  dueBy?: string | null;
+  status: "PENDING" | "COMPLETED" | "SKIPPED" | "MISSED";
+  completedAt?: string | null;
+  skipReason?: string | null;
+  instructions?: string | null;
+  isWithMeals?: boolean;
+}
+
+export interface MedicationScheduleSummary {
+  patientId: string;
+  date: string;
+  todayDoses: MedicationDoseItem[];
+  takenCount: number;
+  pendingCount: number;
+  skippedCount: number;
+  missedCount: number;
+  adherencePercentage: number;
+}
+
+export interface MedicationAdherenceSummary {
+  medicationId?: string;
+  medicationName: string;
+  dose: string;
+  frequency: string;
+  totalPrescribedDoses: number;
+  takenDoses: number;
+  skippedDoses: number;
+  missedDoses: number;
+  adherenceRate: number;
+  recentDoses: {
+    id: string;
+    scheduledFor: string;
+    status: "PENDING" | "COMPLETED" | "SKIPPED" | "MISSED";
+    completedAt?: string | null;
+    skipReason?: string | null;
+  }[];
+}
+
+export interface GenerateMedicationRemindersInput {
+  prescriptionId: string;
+  carePlanId?: string;
+  durationDays?: number;
+}

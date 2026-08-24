@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useTenantPicklist } from "@/lib/picklists/use-tenant-picklist";
 import {
   Activity,
   AlertCircle,
@@ -1069,18 +1070,13 @@ function ConsultationNotePanel({
   const [noteVersion, setNoteVersion] = useState(currentNote?.version);
   const [amending, setAmending] = useState(false);
 
-  // Dynamic chief complaints list
-  const [complaintOptions, setComplaintOptions] = useState<string[]>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("wonflow_custom_complaints");
-      if (saved) {
-        try {
-          return Array.from(new Set([...INITIAL_CHIEF_COMPLAINTS, ...JSON.parse(saved)]));
-        } catch {}
-      }
-    }
-    return INITIAL_CHIEF_COMPLAINTS;
-  });
+  // Dynamic chief complaints list, shared across the hospital.
+  const { options: complaintOptions, add: addComplaintOption } = useTenantPicklist<string>(
+    "CHIEF_COMPLAINT",
+    INITIAL_CHIEF_COMPLAINTS,
+    (option) => option,
+    (entry) => entry.label,
+  );
 
   // Selected chief complaints as removable badge tags
   const [selectedComplaints, setSelectedComplaints] = useState<string[]>([]);
@@ -1140,13 +1136,7 @@ function ConsultationNotePanel({
       }
     }
     // Save to options if new
-    if (!complaintOptions.includes(complaint)) {
-      const updated = [...complaintOptions, complaint];
-      setComplaintOptions(updated);
-      try {
-        localStorage.setItem("wonflow_custom_complaints", JSON.stringify(updated));
-      } catch {}
-    }
+    if (!complaintOptions.includes(complaint)) addComplaintOption(complaint);
   }
 
   function handleRemoveComplaint(complaint: string) {
@@ -1356,7 +1346,9 @@ function GlassmorphicPrescriptionPanel({
   }, []);
 
   useEffect(() => {
-    void loadMedications();
+    queueMicrotask(() => {
+      void loadMedications();
+    });
   }, [loadMedications]);
 
   // Save new custom medicine dynamically to pharmacy
@@ -2166,18 +2158,17 @@ function DiagnosesPanel({
   const [notes, setNotes] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Dynamic conditions list
-  const [diagnosisOptions, setDiagnosisOptions] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("wonflow_custom_diagnoses");
-      if (saved) {
-        try {
-          return [...INITIAL_DIAGNOSES, ...JSON.parse(saved)];
-        } catch {}
-      }
-    }
-    return INITIAL_DIAGNOSES;
-  });
+  // Dynamic conditions list, shared across the hospital.
+  const { options: diagnosisOptions, add: addDiagnosisOption } = useTenantPicklist<(typeof INITIAL_DIAGNOSES)[number]>(
+    "DIAGNOSIS",
+    INITIAL_DIAGNOSES,
+    (option) => option.display,
+    (entry) => ({
+      display: entry.label,
+      code: entry.code ?? "CUSTOM",
+      certainty: String((entry.metadata as { certainty?: string } | null)?.certainty ?? "PROVISIONAL"),
+    }) as (typeof INITIAL_DIAGNOSES)[number],
+  );
 
   const { mutate, saveState, error } = useAddDiagnosis(encounter.id);
 
@@ -2193,12 +2184,11 @@ function DiagnosesPanel({
 
     // Save to dynamic options if new
     if (!diagnosisOptions.some((d) => d.display.toLowerCase() === display.trim().toLowerCase())) {
-      const newEntry = { display: display.trim(), code: code.trim() || "CUSTOM", certainty };
-      const updated = [...diagnosisOptions, newEntry];
-      setDiagnosisOptions(updated);
-      try {
-        localStorage.setItem("wonflow_custom_diagnoses", JSON.stringify(updated));
-      } catch {}
+      const newCode = code.trim() || "CUSTOM";
+      addDiagnosisOption(
+        { display: display.trim(), code: newCode, certainty } as (typeof INITIAL_DIAGNOSES)[number],
+        { code: newCode, metadata: { certainty } },
+      );
     }
 
     setDisplay("");
@@ -2374,30 +2364,21 @@ function OrdersPanel({
   const [clinicalReason, setClinicalReason] = useState("");
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  // Dynamic order lists
-  const [labOptions, setLabOptions] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("wonflow_custom_labs");
-      if (saved) {
-        try {
-          return [...INITIAL_LAB_ORDERS, ...JSON.parse(saved)];
-        } catch {}
-      }
-    }
-    return INITIAL_LAB_ORDERS;
-  });
-
-  const [radOptions, setRadOptions] = useState(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("wonflow_custom_rads");
-      if (saved) {
-        try {
-          return [...INITIAL_RADIOLOGY_ORDERS, ...JSON.parse(saved)];
-        } catch {}
-      }
-    }
-    return INITIAL_RADIOLOGY_ORDERS;
-  });
+  // Dynamic order lists, shared across the hospital.
+  const toOrderOption = (entry: { label: string; code: string | null; metadata: Record<string, unknown> | null }) =>
+    ({ name: entry.label, code: entry.code ?? "CUSTOM", priority: String(entry.metadata?.priority ?? "routine") }) as (typeof INITIAL_LAB_ORDERS)[number];
+  const { options: labOptions, add: addLabOption } = useTenantPicklist<(typeof INITIAL_LAB_ORDERS)[number]>(
+    "LABORATORY_ORDER",
+    INITIAL_LAB_ORDERS,
+    (option) => option.name,
+    toOrderOption,
+  );
+  const { options: radOptions, add: addRadOption } = useTenantPicklist<(typeof INITIAL_RADIOLOGY_ORDERS)[number]>(
+    "RADIOLOGY_ORDER",
+    INITIAL_RADIOLOGY_ORDERS,
+    (option) => option.name,
+    toOrderOption as (entry: { label: string; code: string | null; metadata: Record<string, unknown> | null }) => (typeof INITIAL_RADIOLOGY_ORDERS)[number],
+  );
 
   const { mutate, saveState, error } = useCreateOrder(encounter.id);
 
@@ -2416,15 +2397,9 @@ function OrdersPanel({
     const currentList = type === "LABORATORY" ? labOptions : radOptions;
     if (!currentList.some((item) => item.name.toLowerCase() === name.trim().toLowerCase())) {
       const newEntry = { name: name.trim(), code: finalCode, priority };
-      if (type === "LABORATORY") {
-        const updated = [...labOptions, newEntry];
-        setLabOptions(updated);
-        try { localStorage.setItem("wonflow_custom_labs", JSON.stringify(updated)); } catch {}
-      } else {
-        const updated = [...radOptions, newEntry];
-        setRadOptions(updated);
-        try { localStorage.setItem("wonflow_custom_rads", JSON.stringify(updated)); } catch {}
-      }
+      const persist = { code: finalCode, metadata: { priority } };
+      if (type === "LABORATORY") addLabOption(newEntry as (typeof INITIAL_LAB_ORDERS)[number], persist);
+      else addRadOption(newEntry as (typeof INITIAL_RADIOLOGY_ORDERS)[number], persist);
     }
 
     setCode("");
@@ -2677,13 +2652,10 @@ function ConsultationReportModal({
   const patient = encounter.patient;
   const { current: currentNote } = buildNoteChain(encounter);
 
-  // Safely load signature & fetch live doctor profile on mount
+  // The signature travels with the doctor's profile record, not the browser:
+  // it signs clinical notes, so it has to be the same on every workstation and
+  // must not linger in shared-terminal storage after they log out.
   useEffect(() => {
-    try {
-      const savedSig = localStorage.getItem("wonflow_doctor_signature");
-      if (savedSig) setSignatureUrl(savedSig);
-    } catch {}
-
     let active = true;
     async function loadDoctorProfile() {
       try {
@@ -2696,6 +2668,7 @@ function ConsultationReportModal({
             qualifications?: string;
             registrationNumber?: string;
             title?: string;
+            signatureImageData?: string | null;
           };
           branches?: Array<{ id: string; name: string }>;
         };
@@ -2704,6 +2677,7 @@ function ConsultationReportModal({
           if (data.profile.specialtyName) setSpecialty(data.profile.specialtyName);
           if (data.profile.qualifications) setQualifications(data.profile.qualifications);
           if (data.profile.registrationNumber) setLicenseNo(data.profile.registrationNumber);
+          if (data.profile.signatureImageData) setSignatureUrl(data.profile.signatureImageData);
         }
       } catch {}
     }
@@ -2713,6 +2687,16 @@ function ConsultationReportModal({
     };
   }, []);
 
+  async function persistSignature(signatureImageData: string | null) {
+    try {
+      await fetch("/api/v1/doctor/profile", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ signatureImageData }),
+      });
+    } catch {}
+  }
+
   function handleSignatureUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (file) {
@@ -2720,9 +2704,7 @@ function ConsultationReportModal({
       reader.onload = () => {
         const base64 = reader.result as string;
         setSignatureUrl(base64);
-        try {
-          localStorage.setItem("wonflow_doctor_signature", base64);
-        } catch {}
+        void persistSignature(base64);
       };
       reader.readAsDataURL(file);
     }
@@ -2954,7 +2936,7 @@ function ConsultationReportModal({
                   type="button"
                   onClick={() => {
                     setSignatureUrl(null);
-                    try { localStorage.removeItem("wonflow_doctor_signature"); } catch {}
+                    void persistSignature(null);
                   }}
                   className="inline-flex h-9 items-center gap-1 rounded-xl border border-rose-200 bg-rose-50 px-3 font-bold text-rose-600 hover:bg-rose-100"
                 >

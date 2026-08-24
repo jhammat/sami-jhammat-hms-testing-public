@@ -71,17 +71,9 @@ if (
     database;
 }
 
-export type {
-  Prisma,
-} from "./generated/prisma/client";
-
 export {
+  Prisma,
   PrismaClient,
 } from "./generated/prisma/client";
 
-export {
-  PaymentAccountMethod,
-  ServiceBillingOwner,
-  TokenPurpose,
-  WorkspaceCode,
-} from "./generated/prisma/enums";
+export * from "./generated/prisma/enums";

@@ -22,6 +22,7 @@ export * from "./platform/modules";
 export * from "./patient/identity";
 export * from "./patient/encounter";
 export * from "./patient/journey";
+export * from "./patient/caregiver";
 
 // Independent practice and patient portal
 export * from "./practice/practice-location";
@@ -45,6 +46,18 @@ export * from "./operations/check-in-queue";
 // Clinical care
 export * from "./clinical/consultation";
 export * from "./clinical/medication";
+export * from "./clinical/referral";
+export * from "./clinical/observation";
+export * from "./clinical/careplan";
+export * from "./clinical/drain";
+export * from "./clinical/symptom";
+export * from "./clinical/education";
+export * from "./clinical/physiotherapy";
+export * from "./clinical/nutrition";
+export * from "./offline/sync";
+
+
+
 
 // Diagnostics
 export * from "./diagnostics/laboratory";

@@ -10,6 +10,61 @@ import{database}from"@wonflow/database";const interval=Number(process.env.WORKER
 const retentionInterval=Number(process.env.WORKER_RETENTION_INTERVAL_MS??300_000);
 async function sweepVideoConsultations(){const now=new Date();try{const signals=await database.videoCallSignal.deleteMany({where:{expiresAt:{lt:now}}});const sessions=await database.videoCallSession.updateMany({where:{status:{not:"ENDED"},expiresAt:{lt:now}},data:{status:"ENDED",endedAt:now}});if(signals.count||sessions.count)console.log("Video consultation sweep",{expiredSignals:signals.count,closedSessions:sessions.count})}catch(error){console.error("Video consultation sweep failed",error instanceof Error?error.message:error)}}
 
+/**
+ * Periodic sweep for expired clinical referrals.
+ *
+ * Referrals past their validUntil timestamp transition to EXPIRED,
+ * revoking allied health access to the referred patient.
+ */
+const referralSweepInterval = Number(process.env.WORKER_REFERRAL_SWEEP_INTERVAL_MS ?? 60_000);
+async function sweepExpiredReferrals() {
+  const now = new Date();
+  try {
+    const expired = await database.clinicalReferral.findMany({
+      where: {
+        status: { in: ["PENDING", "ACCEPTED", "IN_PROGRESS"] },
+        validUntil: { lt: now },
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        patientId: true,
+        specialty: true,
+      },
+    });
+
+    if (expired.length === 0) return;
+
+    for (const ref of expired) {
+      await database.$transaction(async (tx) => {
+        await tx.clinicalReferral.update({
+          where: { id: ref.id },
+          data: { status: "EXPIRED" },
+        });
+        await tx.auditEvent.create({
+          data: {
+            tenantId: ref.tenantId,
+            requestId: `worker-sweep-${Date.now()}`,
+            action: "clinical.referral.expired",
+            entityType: "clinical-referral",
+            entityId: ref.id,
+            severity: "INFORMATION",
+            sourceApplication: "worker",
+            metadata: {
+              patientId: ref.patientId,
+              specialty: ref.specialty,
+            },
+          },
+        });
+      });
+    }
+    console.log("Expired referrals sweep completed", { expiredCount: expired.length });
+  } catch (error) {
+    console.error("Expired referrals sweep failed", error instanceof Error ? error.message : error);
+  }
+}
+
 console.log("WonFlow worker started");
 setInterval(()=>void poll(),interval);void poll();
 setInterval(()=>void sweepVideoConsultations(),retentionInterval);void sweepVideoConsultations();
+setInterval(()=>void sweepExpiredReferrals(),referralSweepInterval);void sweepExpiredReferrals();

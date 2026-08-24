@@ -12,6 +12,7 @@ const labels: Record<WonFlowSessionPayload["role"], string> = {
   platform: "Platform Administration", admin: "Hospital Administration", reception: "Reception",
   doctor: "Doctor Workspace", patient: "Patient Portal", laboratory: "Laboratory", radiology: "Radiology",
   pharmacy: "Pharmacy", billing: "Billing", management: "Management",
+  physiotherapist: "Physiotherapy Workspace", nutritionist: "Nutrition Workspace",
 };
 
 export async function createSessionCookie(account: AuthenticatedAccount, context: AvailableLoginContext | null,
@@ -22,6 +23,7 @@ export async function createSessionCookie(account: AuthenticatedAccount, context
   await database.authSession.create({ data: {
     identityId: account.identityId, membershipId: context?.membershipId ?? null, tenantId: context?.tenantId ?? null,
     organizationId: context?.organizationId ?? null, branchId: context?.branchId ?? null, workspace: context?.workspace ?? null,
+    patientId: context?.patientId ?? null, actingRelationship: context?.relationship ?? null,
     tokenHash: tokenHash(rawToken), sourceApplication: options?.sourceApplication ?? "web",
     ipAddress: headerStore.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null,
     userAgent: headerStore.get("user-agent"), mfaVerifiedAt: options?.mfaVerified ? new Date() : null, expiresAt,
@@ -115,16 +117,43 @@ export async function readSession(): Promise<WonFlowSessionPayload | null> {
     }
     await database.authSession.update({ where: { id: session.id }, data: { lastSeenAt: new Date() } });
     const role: WonFlowSessionPayload["role"] = session.identity.isPlatformAdministrator && !session.membershipId
-      ? "platform" : session.workspace ? session.workspace.toLowerCase() as WonFlowSessionPayload["role"] : "admin";
+      ? "platform"
+      : session.patientId || (!session.membershipId && session.tenantId)
+        ? "patient"
+        : session.workspace
+          ? session.workspace.toLowerCase() as WonFlowSessionPayload["role"]
+          : "admin";
+
+    let permissions: string[] = [];
+    if (session.identity.isPlatformAdministrator) {
+      permissions = [...session.identity.platformPermissionCodes];
+    } else if (session.patientId) {
+      const access = await database.patientAccess.findFirst({
+        where: {
+          patientId: session.patientId,
+          identityId: session.identityId,
+          isActive: true,
+          OR: [{ expiresAt: null }, { expiresAt: { gte: new Date() } }],
+        },
+        select: { permissions: true },
+      });
+      permissions = access?.permissions ?? ["observations.write", "careplan.complete"];
+    }
+
     return {
       sessionId: session.id, identityId: session.identityId, membershipId: session.membershipId,
       tenantId: session.tenantId, organizationId: session.organizationId, branchId: session.branchId, workspace: session.workspace,
       role, email: session.identity.email, name: session.membership?.displayName ?? session.identity.email,
       orgLabel: session.membership?.organization.displayName ?? "WonFlow Platform",
-      branchLabel: session.membership?.primaryBranch?.name ?? null, portalLabel: labels[role],
-      permissionCodes: session.identity.isPlatformAdministrator ? session.identity.platformPermissionCodes : [],
+      branchLabel: session.actingRelationship && session.actingRelationship !== "self"
+        ? `Caregiver (${session.actingRelationship})`
+        : session.membership?.primaryBranch?.name ?? null,
+      portalLabel: labels[role],
+      permissionCodes: permissions,
       passwordChangeRequired: session.identity.mustChangePassword,
       mfaVerified: session.mfaVerifiedAt !== null, expiresAt: session.expiresAt.toISOString(),
+      patientId: session.patientId ?? null,
+      actingRelationship: session.actingRelationship ?? null,
     };
   } catch (error) {
     /*

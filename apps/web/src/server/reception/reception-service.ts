@@ -61,6 +61,25 @@ async function createPatientRecord(
 }
 
 const diagnosticTypeOf=(category:string):"LABORATORY"|"RADIOLOGY"|null=>{const value=category.trim().toUpperCase().replace(/[^A-Z0-9]+/g,"_");if(value==="LABORATORY"||value==="PATHOLOGY")return"LABORATORY";if(value==="RADIOLOGY"||value==="IMAGING")return"RADIOLOGY";return null;};
+
+async function resolveReferredPatientScope(c: { tenantId: string; membershipId: string | null; workspace: string }): Promise<string[] | null> {
+  const ws = c.workspace?.toUpperCase();
+  const specialty = ws === "PHYSIOTHERAPIST" ? "PHYSIOTHERAPY" : ws === "NUTRITIONIST" ? "NUTRITION" : null;
+  if (!specialty) return null;
+
+  let staffProfileId: string | null = null;
+  if (c.membershipId) {
+    const staff = await database.staffProfile.findUnique({
+      where: { membershipId: c.membershipId },
+      select: { id: true },
+    });
+    staffProfileId = staff?.id ?? null;
+  }
+
+  const { referralService } = await import("@/server/clinical/referral-service");
+  return referralService.getActiveReferredPatientIds(c.tenantId, specialty, staffProfileId);
+}
+
 export class ReceptionService{
 async getCatalog(rc:WonFlowRequestContext){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const[branches,doctors,services]=await Promise.all([database.branch.findMany({where:{tenantId:c.tenantId,organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"},orderBy:[{isMainBranch:"desc"},{name:"asc"}],select:{id:true,name:true,address:true,phone:true,timezone:true}}),database.doctorProfile.findMany({where:{tenantId:c.tenantId,staffProfile:{status:"ACTIVE",membership:{organizationId:c.organizationId,archivedAt:null,status:{in:["ACTIVE","INVITED"]}}}},include:{staffProfile:{include:{membership:true}},department:{select:{id:true,name:true}}},orderBy:{staffProfile:{membership:{displayName:"asc"}}}}),database.serviceDefinition.findMany({where:{tenantId:c.tenantId,isActive:true,OR:[{branchId:null},{branch:{organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"}}]},orderBy:[{category:"asc"},{name:"asc"}]})]);return{branches,practitioners:doctors.map(doctor=>{const doctorServices=services.filter(service=>service.doctorId===doctor.id&&service.priceMinorUnits!==null);const normalFee=doctorServices[0]?.priceMinorUnits??0;return{id:doctor.id,displayName:doctor.staffProfile.membership.displayName,specialtyName:doctor.specialty??"Clinical practitioner",primaryBranchId:doctor.staffProfile.branchId??branches[0]?.id??"",departmentName:doctor.department?.name??null,consultationFee:normalFee/100,urgentConsultationFee:normalFee?normalFee*1.5/100:0};}),services:services.map(service=>({id:service.id,name:service.name,category:service.category,price:service.priceMinorUnits===null?0:service.priceMinorUnits/100,doctorId:service.doctorId,branchId:service.branchId,publiclyBookable:service.publiclyBookable,consultationModes:service.consultationModes,requiresPrepayment:service.requiresPrepayment}))};}
 async getOverview(rc:WonFlowRequestContext,date:string){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const branchId=requireBranchId(c),start=new Date(`${date}T00:00:00.000Z`),end=new Date(`${date}T23:59:59.999Z`);const[appointments,queue,patientsToday]=await Promise.all([database.appointment.findMany({where:{tenantId:c.tenantId,branchId,startsAt:{gte:start,lte:end}},orderBy:{startsAt:"asc"}}),database.queueEntry.findMany({where:{tenantId:c.tenantId,queue:{branchId,queueDate:start}},include:{patient:true,appointment:true},orderBy:[{priority:"desc"},{tokenNumber:"asc"}]}),database.patient.count({where:{tenantId:c.tenantId,createdAt:{gte:start,lte:end}}})]);return{patientsToday,appointmentsToday:appointments.length,waitingCount:queue.filter(x=>x.status==="WAITING").length,checkedInCount:appointments.filter(x=>x.checkedInAt).length,appointments,queue};}
@@ -81,6 +100,10 @@ async archivePatient(rc:WonFlowRequestContext,id:string){const c=requireTenantCo
   return database.patient.update({where:{id:patient.id},data:{status:"ARCHIVED",archivedAt:new Date()}});}
 async getPatient(rc:WonFlowRequestContext,id:string){
   const c=requireTenantContext(rc);requirePermission(c,"patients.read");
+  const referredScope = await resolveReferredPatientScope(c);
+  if (referredScope !== null && !referredScope.includes(id)) {
+    throw new WonFlowApiError(404, "patient-not-found", "The patient could not be found.");
+  }
   const patient=await database.patient.findFirst({where:{id,tenantId:c.tenantId,status:{not:"ARCHIVED"}},include:{identifiers:{select:{type:true,value:true,isPrimary:true}}}});
   if(!patient)throw new WonFlowApiError(404,"patient-not-found","The patient could not be found.");
   return patient;
@@ -186,6 +209,21 @@ async listPatients(rc:WonFlowRequestContext,options:ListPatientsOptions={}){
   const page=Math.max(1,Math.floor(options.page??1));
   const pageSize=Math.min(Math.max(Math.floor(options.pageSize??25),1),100);
   const where:Prisma.PatientWhereInput={tenantId:c.tenantId,status:{not:"ARCHIVED"}};
+
+  const referredScope = await resolveReferredPatientScope(c);
+  if (referredScope !== null) {
+    if (referredScope.length === 0) {
+      return {
+        patients: [],
+        total: 0,
+        page,
+        pageSize,
+        summary: { totalPatients: 0, malePatients: 0, femalePatients: 0 },
+      };
+    }
+    where.id = { in: referredScope };
+  }
+
   const query=options.query?.trim();
   if(query){where.OR=[{patientNumber:{contains:query,mode:"insensitive"}},{givenName:{contains:query,mode:"insensitive"}},{familyName:{contains:query,mode:"insensitive"}},{normalizedPhone:{contains:query.toLowerCase()}},{normalizedEmail:{contains:query.toLowerCase()}},{identifiers:{some:{normalizedValue:{contains:query.toLowerCase()}}}}];}
   if(options.gender&&options.gender!=="all")where.sex=options.gender;
@@ -205,7 +243,9 @@ async listPatients(rc:WonFlowRequestContext,options:ListPatientsOptions={}){
     options.sort==="age-ascending"?[{dateOfBirth:"desc"}]:
     options.sort==="age-descending"?[{dateOfBirth:"asc"}]:
     [{createdAt:"desc"}];
-  const tenantWhere:Prisma.PatientWhereInput={tenantId:c.tenantId,status:{not:"ARCHIVED"}};
+  const tenantWhere:Prisma.PatientWhereInput=referredScope !== null
+    ? { tenantId: c.tenantId, status: { not: "ARCHIVED" }, id: { in: referredScope } }
+    : { tenantId: c.tenantId, status: { not: "ARCHIVED" } };
   const [patients,total,totalPatients,malePatients,femalePatients]=await Promise.all([
     database.patient.findMany({where,include:{identifiers:{select:{type:true,value:true,isPrimary:true}}},orderBy,skip:(page-1)*pageSize,take:pageSize}),
     database.patient.count({where}),

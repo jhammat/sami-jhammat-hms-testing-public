@@ -126,6 +126,9 @@ export type ClinicalObservationStatus =
   | "cancelled"
   | "entered-in-error";
 
+export type ObservationSource = "STAFF" | "PATIENT" | "CAREGIVER" | "DEVICE";
+
+
 export type ClinicalAssessmentItemType =
   | "symptom"
   | "clinical-finding"
@@ -426,9 +429,12 @@ export interface ClinicalObservation {
   organizationId: WonFlowId;
   patientId: WonFlowId;
 
-  encounterId: WonFlowId;
+  encounterId?: WonFlowId;
   consultationId?: WonFlowId;
   clinicalNoteId?: WonFlowId;
+  carePlanTaskId?: WonFlowId;
+
+  source?: ObservationSource;
 
   category: ClinicalObservationCategory;
 
@@ -468,9 +474,12 @@ export interface ClinicalObservation {
   bodySite?: string;
 
   observedAt: IsoDateTime;
+  deviceRecordedAt?: IsoDateTime;
 
   observedByUserId?: WonFlowId;
   observedByPractitionerId?: WonFlowId;
+  recordedByMembershipId?: WonFlowId;
+  recordedByIdentityId?: WonFlowId;
 
   correctedFromObservationId?: WonFlowId;
   correctionReason?: string;

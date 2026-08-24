@@ -28,6 +28,7 @@ import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WONFLOW_AVATAR_CHANGED_EVENT } from "@/components/shell";
+import { OfflineStatusBar } from "./offline-status-bar";
 
 type Section = "home" | "care" | "reports" | "billing";
 
@@ -470,6 +471,9 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
 
   return (
     <div className="space-y-6">
+      {/* ── Offline Status Bar ─────────────────────────────────────────── */}
+      <OfflineStatusBar />
+
       {/* ── Hero Welcome Banner ────────────────────────────────────────── */}
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-700 via-indigo-700 to-violet-800 p-6 text-white shadow-xl sm:p-8">
         <div className="absolute -top-24 -right-24 size-96 rounded-full bg-white/10 blur-3xl" />
@@ -509,6 +513,22 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
+            <Link
+              className="inline-flex min-h-11 items-center gap-2 rounded-2xl bg-emerald-500 px-4 text-sm font-black text-white shadow-md transition hover:bg-emerald-600 hover:shadow-lg active:scale-98"
+              href="/patient/recovery"
+            >
+              <HeartPulse aria-hidden className="size-4" />
+              Recovery Plan
+            </Link>
+
+            <Link
+              className="inline-flex min-h-11 items-center gap-2 rounded-2xl border border-white/30 bg-white/15 px-4 text-sm font-bold text-white backdrop-blur-md transition hover:bg-white/25 active:scale-98"
+              href="/patient/caregivers"
+            >
+              <User aria-hidden className="size-4" />
+              Caregivers
+            </Link>
+
             <Link
               className="inline-flex min-h-11 items-center gap-2 rounded-2xl bg-white px-5 text-sm font-black text-indigo-700 shadow-md transition hover:bg-indigo-50 hover:shadow-lg active:scale-98"
               href="/patient/appointments/book"
@@ -552,6 +572,28 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
       {/* ── Section Views ──────────────────────────────────────────────── */}
       {section === "home" ? (
         <>
+          {/* Recovery Plan Quick Card */}
+          <div className="flex flex-col justify-between gap-4 rounded-3xl border border-emerald-200/80 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-cyan-500/10 p-5 shadow-xs transition hover:shadow-md sm:flex-row sm:items-center dark:border-emerald-900/50 dark:from-emerald-950/30 dark:to-cyan-950/20">
+            <div className="flex items-center gap-3.5">
+              <div className="grid size-12 place-items-center rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-md">
+                <HeartPulse className="size-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900 dark:text-white">Active Recovery Plan & Daily Tasks</h3>
+                <p className="text-xs font-medium text-slate-600 dark:text-slate-400">
+                  Track vital signs, drain outputs, incision checks, exercises, and post-op protocols.
+                </p>
+              </div>
+            </div>
+            <Link
+              href="/patient/recovery"
+              className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-emerald-700 active:scale-98"
+            >
+              <span>Open Recovery Plan</span>
+              <ArrowRight className="size-3.5" />
+            </Link>
+          </div>
+
           {/* Quick Metrics Bar */}
           <div className="grid grid-cols-2 gap-3.5 xl:grid-cols-5">
             {tiles.map((tile) => (

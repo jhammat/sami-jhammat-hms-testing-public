@@ -262,6 +262,25 @@ export class HospitalAdministrationService {
   }
   async deleteService(rc:WonFlowRequestContext,id:string){const c=this.context(rc);requirePermission(c,"organization.services.manage");const service=await database.serviceDefinition.findFirst({where:{id,tenantId:c.tenantId,isActive:true}});if(!service)throw new WonFlowApiError(404,"service-not-found","The service could not be found.");return database.$transaction(async tx=>{const entity=await tx.serviceDefinition.update({where:{id,tenantId:c.tenantId},data:{isActive:false,publiclyBookable:false}});await audit(tx,c,"organization.service.deleted","service",entity.id,"WARNING");return entity;});}
   async listSchedules(rc:WonFlowRequestContext){const c=this.context(rc);requirePermission(c,"organization.schedules.read");return database.availabilityRule.findMany({where:{tenantId:c.tenantId},include:{doctor:true,branch:true,service:true},orderBy:[{weekday:"asc"},{startsMinute:"asc"}]});}
+  /**
+   * Publishes (or withdraws) a doctor from the patient portal. Rostered hours
+   * alone are never enough: the portal also requires this flag, and it defaults
+   * to off so a newly created doctor is never exposed to patients by accident.
+   * Without an administrator-facing switch the only way to turn it on was the
+   * doctor's own profile screen, which left admin-configured clinics invisible
+   * to patients with nothing on any screen explaining why.
+   */
+  async setDoctorPatientBooking(rc:WonFlowRequestContext,doctorId:string,publiclyBookable:boolean){
+    const c=this.context(rc);requirePermission(c,"organization.schedules.manage");
+    if(typeof publiclyBookable!=="boolean")throw new WonFlowApiError(400,"invalid-booking-flag","Specify whether patients may book this doctor online.");
+    const doctor=await database.doctorProfile.findFirst({where:{id:doctorId,tenantId:c.tenantId,staffProfile:{membership:{organizationId:c.organizationId,archivedAt:null}}}});
+    if(!doctor)throw new WonFlowApiError(404,"doctor-not-found","The doctor could not be found.");
+    return database.$transaction(async tx=>{
+      const entity=await tx.doctorProfile.update({where:{id:doctor.id},data:{publiclyBookable}});
+      await audit(tx,c,publiclyBookable?"organization.doctor.patient-booking.enabled":"organization.doctor.patient-booking.disabled","doctor-profile",entity.id);
+      return entity;
+    });
+  }
   async createSchedule(rc:WonFlowRequestContext,input:{doctorId:string;branchId:string;serviceId?:string;weekday:number;startsMinute:number;endsMinute:number;capacity?:number;validFrom:string;validUntil?:string}){const c=this.context(rc);requirePermission(c,"organization.schedules.manage");if(!Number.isInteger(input.weekday)||input.weekday<0||input.weekday>6)throw new WonFlowApiError(400,"invalid-schedule-weekday","Select a valid weekday.");if(!Number.isInteger(input.startsMinute)||!Number.isInteger(input.endsMinute)||input.startsMinute<0||input.endsMinute>1440||input.endsMinute<=input.startsMinute)throw new WonFlowApiError(400,"invalid-schedule-time","End time must be later than start time.");if(input.capacity!==undefined&&(!Number.isInteger(input.capacity)||input.capacity<1))throw new WonFlowApiError(400,"invalid-schedule-capacity","Capacity must be at least one.");const validFrom=new Date(input.validFrom);const validUntil=input.validUntil?new Date(input.validUntil):null;if(Number.isNaN(validFrom.getTime())||(validUntil&&Number.isNaN(validUntil.getTime())))throw new WonFlowApiError(400,"invalid-schedule-date","Select a valid schedule date.");const [branch,doctor,selectedService]=await Promise.all([database.branch.findFirst({where:{id:input.branchId,tenantId:c.tenantId,organizationId:c.organizationId}}),database.doctorProfile.findFirst({where:{id:input.doctorId,tenantId:c.tenantId,staffProfile:{membership:{organizationId:c.organizationId}}}}),input.serviceId?database.serviceDefinition.findFirst({where:{id:input.serviceId,tenantId:c.tenantId}}):Promise.resolve(null)]);if(!branch||!doctor)throw new WonFlowApiError(400,"invalid-schedule-assignment","Doctor or branch is outside this hospital.");if(input.serviceId&&!selectedService)throw new WonFlowApiError(400,"invalid-schedule-service","Service is outside this hospital.");return database.$transaction(async tx=>{const entity=await tx.availabilityRule.create({data:{tenantId:c.tenantId,...input,serviceId:input.serviceId??null,capacity:input.capacity??1,validFrom,validUntil}});await audit(tx,c,"organization.schedule.created","availability-rule",entity.id);return entity;});}
   async updateSchedule(rc:WonFlowRequestContext,id:string,input:{doctorId?:string;branchId?:string;serviceId?:string|null;weekday?:number;startsMinute?:number;endsMinute?:number;capacity?:number;validFrom?:string;validUntil?:string|null;isActive?:boolean}){
     const c=this.context(rc);requirePermission(c,"organization.schedules.manage");

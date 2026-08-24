@@ -49,6 +49,8 @@ const permissionRows = await Promise.all(permissions.map((code) => database.perm
 const accounts = [
   ["admin", "ADMIN", "Hospital Administrator"], ["reception", "RECEPTION", "Reception Officer"],
   ["doctor", "DOCTOR", "Doctor"], ["patient", "PATIENT", "Patient"],
+  ["physiotherapist", "PHYSIOTHERAPIST", "Physiotherapist"],
+  ["nutritionist", "NUTRITIONIST", "Clinical Dietitian"],
   ["laboratory", "LABORATORY", "Laboratory Officer"], ["radiology", "RADIOLOGY", "Radiology Officer"],
   ["pharmacy", "PHARMACY", "Pharmacist"], ["billing", "BILLING", "Billing Officer"],
   ["management", "MANAGEMENT", "Hospital Manager"],
@@ -102,6 +104,24 @@ for (const [name, workspace, displayName] of accounts) {
       update: {
         specialty: "General Medicine",
         publiclyBookable: true,
+      },
+    });
+  } else if (workspace === "PHYSIOTHERAPIST" || workspace === "NUTRITIONIST") {
+    await database.staffProfile.upsert({
+      where: { membershipId: membership.id },
+      create: {
+        tenantId: tenant.id,
+        membershipId: membership.id,
+        branchId: branch.id,
+        employeeNumber: `DEV-${workspace}-001`,
+        staffType: workspace,
+        title: displayName,
+      },
+      update: {
+        branchId: branch.id,
+        staffType: workspace,
+        status: "ACTIVE",
+        title: displayName,
       },
     });
   }

@@ -11,6 +11,7 @@ export interface AvailableLoginContext {
   membershipId: string | null; tenantId: string | null; organizationId: string | null;
   branchId: string | null; workspace: WorkspaceCode | null; role: WonFlowRole;
   organizationLabel: string; branchLabel: string | null; homePath: string;
+  patientId?: string | null; relationship?: string | null; patientName?: string | null;
 }
 export interface AuthenticatedAccount {
   identityId: string; email: string; displayName: string;
@@ -23,7 +24,9 @@ const workspaceRoles: Record<WorkspaceCode, WonFlowRole> = {
   ADMIN: "admin", RECEPTION: "reception", DOCTOR: "doctor", PATIENT: "patient",
   LABORATORY: "laboratory", RADIOLOGY: "radiology", PHARMACY: "pharmacy",
   BILLING: "billing", MANAGEMENT: "management",
+  PHYSIOTHERAPIST: "physiotherapist", NUTRITIONIST: "nutritionist",
 };
+
 
 export async function authenticateAccount(email: string, password: string): Promise<AuthenticatedAccount | null> {
   const identity = await database.identity.findUnique({
@@ -58,6 +61,68 @@ export async function authenticateAccount(email: string, password: string): Prom
         branchLabel: membership.primaryBranch?.name ?? null, homePath: homePathForRole(role) });
     }
   }
+
+  const now = new Date();
+  const patientAccesses = await database.patientAccess.findMany({
+    where: {
+      identityId: identity.id,
+      isActive: true,
+      OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
+      patient: { status: "ACTIVE", tenant: { status: "ACTIVE" } },
+    },
+    include: {
+      patient: {
+        include: {
+          tenant: true,
+        },
+      },
+    },
+    orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
+  });
+
+  for (const access of patientAccesses) {
+    const patientName = `${access.patient.givenName} ${access.patient.familyName}`;
+    const orgLabel = access.patient.tenant.displayName;
+    const isCaregiver = access.relationship !== "self";
+    const branchLabel = isCaregiver ? `Caregiver for ${patientName} (${access.relationship})` : `Patient Portal`;
+
+    // If an existing membership context for this tenant is already a patient context without a patientId, enrich it
+    const existingMembershipPatientContext = contexts.find(
+      (c) => c.tenantId === access.patient.tenantId && c.role === "patient" && !c.patientId,
+    );
+
+    if (existingMembershipPatientContext) {
+      existingMembershipPatientContext.patientId = access.patient.id;
+      existingMembershipPatientContext.relationship = access.relationship;
+      existingMembershipPatientContext.patientName = patientName;
+      if (isCaregiver) {
+        existingMembershipPatientContext.branchLabel = branchLabel;
+      }
+      continue;
+    }
+
+    // Only add if not already in contexts with same patientId/tenantId
+    const alreadyPresent = contexts.some(
+      (c) => c.tenantId === access.patient.tenantId && c.role === "patient" && c.patientId === access.patient.id,
+    );
+    if (!alreadyPresent) {
+      contexts.push({
+        membershipId: null,
+        tenantId: access.patient.tenantId,
+        organizationId: null,
+        branchId: null,
+        workspace: null,
+        role: "patient",
+        organizationLabel: orgLabel,
+        branchLabel,
+        homePath: homePathForRole("patient"),
+        patientId: access.patient.id,
+        relationship: access.relationship,
+        patientName,
+      });
+    }
+  }
+
   return { identityId: identity.id, email: identity.email, displayName: identity.memberships[0]?.displayName ?? identity.email,
     contexts, requiresMfa: identity.mfaCredentials.length > 0, mustChangePassword: identity.mustChangePassword,
     suspendedOrganizationLabel: contexts.length === 0 ? suspendedOrganizationLabel : null };

@@ -193,13 +193,11 @@ function MutationMessage({ error, success }: { error: string; success: string })
 }
 
 function ConfigurationForm({ configuration, onSaved }: { configuration: OrganizationConfiguration; onSaved(): void }) {
-  const [logoPreview, setLogoPreview] = useState<string>(() => {
-    return (
-      (configuration.settings as { logoDataUrl?: string } | null)?.logoDataUrl ??
-      // eslint-disable-next-line no-restricted-syntax
-      (typeof window !== "undefined" ? localStorage.getItem("wonflow_hospital_logo") ?? "" : "")
-    );
-  });
+  // The logo is persisted on the organization record by `submit` below, so the
+  // saved value is the only source. There is no browser mirror to consult.
+  const [logoPreview, setLogoPreview] = useState<string>(
+    () => (configuration.settings as { logoDataUrl?: string } | null)?.logoDataUrl ?? "",
+  );
 
   const [form, setForm] = useState({
     displayName: configuration.displayName,
@@ -220,20 +218,12 @@ function ConfigurationForm({ configuration, onSaved }: { configuration: Organiza
     reader.onload = (e) => {
       const dataUrl = e.target?.result as string;
       setLogoPreview(dataUrl);
-      if (typeof window !== "undefined") {
-        // eslint-disable-next-line no-restricted-syntax
-        localStorage.setItem("wonflow_hospital_logo", dataUrl);
-      }
     };
     reader.readAsDataURL(file);
   };
 
   const removeLogo = () => {
     setLogoPreview("");
-    if (typeof window !== "undefined") {
-      // eslint-disable-next-line no-restricted-syntax
-      localStorage.removeItem("wonflow_hospital_logo");
-    }
   };
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -242,10 +232,6 @@ function ConfigurationForm({ configuration, onSaved }: { configuration: Organiza
     setError("");
     setSuccess("");
     try {
-      if (typeof window !== "undefined" && logoPreview) {
-        // eslint-disable-next-line no-restricted-syntax
-        localStorage.setItem("wonflow_hospital_logo", logoPreview);
-      }
       await phaseOneApi("/api/v1/admin/configuration", {
         method: "PATCH",
         body: JSON.stringify({
@@ -1262,12 +1248,28 @@ function timeToMinute(value: string): number { const [hours = "0", minutes = "0"
 
 type ScheduleForm = { doctorId: string; branchId: string; serviceId: string; weekday: string; startsAt: string; endsAt: string; capacity: string; validFrom: string };
 
+/**
+ * Rostered hours are necessary but not sufficient for the patient portal: it
+ * only offers a clinic whose doctor *and* service are both marked bookable by
+ * patients, and both flags default to off. Every card states which of those is
+ * missing, because the portal side of this is otherwise silent.
+ */
+function patientBookingBlockers(doctor: DoctorRecord | undefined, service: ServiceRecord | undefined, hasService: boolean) {
+  const blockers: string[] = [];
+  if (doctor && !doctor.publiclyBookable) blockers.push("online booking is off for this doctor");
+  if (!hasService) blockers.push("no consultation service is attached");
+  else if (service && !service.isActive) blockers.push(`${service.name} is archived`);
+  else if (service && !service.publiclyBookable) blockers.push(`${service.name} is not open to patient booking`);
+  return blockers;
+}
+
 /** One card per doctor + branch + service, holding every weekday they are rostered. */
-function groupSchedules(schedules: ScheduleRecord[], doctors: DoctorRecord[]) {
-  const groups = new Map<string, { key: string; doctorId: string; title: string; subtitle: string; rules: ScheduleRecord[] }>();
+function groupSchedules(schedules: ScheduleRecord[], doctors: DoctorRecord[], services: ServiceRecord[]) {
+  const groups = new Map<string, { key: string; doctorId: string; title: string; subtitle: string; doctor: DoctorRecord | undefined; blockers: string[]; rules: ScheduleRecord[] }>();
   for (const schedule of schedules) {
     const key = `${schedule.doctor.id}|${schedule.branch.id}|${schedule.service?.id ?? "general"}`;
     const doctor = doctors.find((item) => item.id === schedule.doctor.id);
+    const service = services.find((item) => item.id === schedule.service?.id);
     const existing = groups.get(key);
     if (existing) existing.rules.push(schedule);
     else groups.set(key, {
@@ -1275,6 +1277,8 @@ function groupSchedules(schedules: ScheduleRecord[], doctors: DoctorRecord[]) {
       doctorId: schedule.doctor.id,
       title: doctor?.staffProfile.membership.displayName ?? schedule.doctor.specialty ?? schedule.doctor.registrationNumber ?? "Doctor",
       subtitle: `${schedule.branch.name} · ${schedule.service?.name ?? "General availability"}`,
+      doctor,
+      blockers: patientBookingBlockers(doctor, service, schedule.service !== null),
       rules: [schedule],
     });
   }
@@ -1303,6 +1307,7 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
   const [loadedForm, setLoadedForm] = useState<ScheduleForm>(blankForm);
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [publishing, setPublishing] = useState<string | null>(null);
   const [error, setError] = useState("");
   const { confirm, dialog: confirmDialog } = useWonFlowConfirm();
   const isDirty = JSON.stringify(form) !== JSON.stringify(loadedForm);
@@ -1364,13 +1369,32 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
     }
   }
 
+  async function setPatientBooking(doctorId: string, publiclyBookable: boolean) {
+    setPublishing(doctorId);
+    setError("");
+    try {
+      await phaseOneApi(`/api/v1/admin/doctors/${doctorId}/patient-booking`, { method: "PATCH", body: JSON.stringify({ publiclyBookable }) });
+      onCreated();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Online patient booking could not be changed for this doctor.");
+    } finally {
+      setPublishing(null);
+    }
+  }
+
   const canCreate = doctors.length > 0 && branches.length > 0;
-  const groups = groupSchedules(schedules, doctors);
+  const groups = groupSchedules(schedules, doctors, services);
+  const unpublished = groups.filter((group) => group.blockers.length > 0).length;
   const pagination = useWonFlowPagination(groups, 6);
   return (
     <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
       {confirmDialog}
       <Panel description={`${groups.length} rostered ${groups.length === 1 ? "doctor" : "doctors"} · ${schedules.length} weekly ${schedules.length === 1 ? "window" : "windows"}. Select a day to edit it.`} title="Rostered hours">
+        {unpublished > 0 ? (
+          <p className="mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300">
+            {unpublished} of {groups.length} rostered {groups.length === 1 ? "clinic is" : "clinics are"} invisible to patients booking online. Rostered hours alone do not publish a clinic — the doctor and the consultation service must both be open to patient booking.
+          </p>
+        ) : null}
         {schedules.length === 0 ? (
           <WonFlowEmptyState description={canCreate ? "Use the form to create the first availability rule." : "Create a doctor profile and branch before adding availability."} title="No schedules configured" />
         ) : (
@@ -1387,6 +1411,30 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
                       Book appointment
                     </Link>
                   </div>
+                  {group.blockers.length === 0 ? (
+                    <p className="mt-2 inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-bold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-300">
+                      Patients can book this clinic online
+                    </p>
+                  ) : (
+                    <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-500/30 dark:bg-amber-950/40">
+                      <p className="text-[11px] font-bold text-amber-800 dark:text-amber-300">Not visible in the patient portal — {group.blockers.join("; ")}.</p>
+                      {group.doctor && !group.doctor.publiclyBookable ? (
+                        <button className="mt-2 min-h-8 rounded-lg border border-amber-300 bg-white px-2.5 text-[11px] font-bold text-amber-800 transition hover:bg-amber-100 disabled:opacity-60 dark:border-amber-500/30 dark:bg-slate-800 dark:text-amber-300" disabled={publishing !== null} onClick={() => void setPatientBooking(group.doctorId, true)} type="button">
+                          {publishing === group.doctorId ? "Enabling" : "Enable online booking"}
+                        </button>
+                      ) : null}
+                      {group.blockers.some((blocker) => blocker.includes("patient booking") || blocker.includes("archived")) ? (
+                        <Link className="mt-2 ml-2 inline-flex min-h-8 items-center rounded-lg border border-amber-300 bg-white px-2.5 text-[11px] font-bold text-amber-800 transition hover:bg-amber-100 dark:border-amber-500/30 dark:bg-slate-800 dark:text-amber-300" href="/admin/services">
+                          Open services
+                        </Link>
+                      ) : null}
+                    </div>
+                  )}
+                  {group.doctor?.publiclyBookable && group.blockers.length === 0 ? (
+                    <button className="mt-2 text-[11px] font-bold text-slate-500 underline-offset-2 hover:underline disabled:opacity-60 dark:text-slate-400" disabled={publishing !== null} onClick={() => void setPatientBooking(group.doctorId, false)} type="button">
+                      {publishing === group.doctorId ? "Withdrawing" : "Withdraw from patient portal"}
+                    </button>
+                  ) : null}
                   <ul className="mt-3 space-y-1.5">
                     {group.rules.map((schedule) => {
                       const isEditing = schedule.id === editingId;

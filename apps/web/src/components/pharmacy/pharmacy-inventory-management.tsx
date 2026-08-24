@@ -779,6 +779,10 @@ function MedicationTableRow({
 // -------------------------------------------------------------
 function MedicationBatchesView({ medicationId }: { medicationId: string }) {
   const detail = useInventoryItem(medicationId);
+  // One clock read per mount, so every batch row in a pass is measured against
+  // the same instant and render stays pure. Expiry is a date-level judgement —
+  // it does not need to tick.
+  const [renderedAt] = useState(() => Date.now());
   const batches = detail.data?.batches ?? [];
 
   if (detail.status === "loading") {
@@ -802,8 +806,9 @@ function MedicationBatchesView({ medicationId }: { medicationId: string }) {
       ) : (
         <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           {batches.map((batch) => {
-            const isExpired = new Date(batch.expiryDate) < new Date();
-            const daysToExpiry = Math.ceil((new Date(batch.expiryDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+            const expiryAt = new Date(batch.expiryDate).getTime();
+            const isExpired = expiryAt < renderedAt;
+            const daysToExpiry = Math.ceil((expiryAt - renderedAt) / (1000 * 60 * 60 * 24));
 
             return (
               <div
@@ -884,8 +889,8 @@ function CreateMedicationModal({
         reorderLevel: Number(reorderLevel) || 10,
       });
       onSuccess();
-    } catch (err: any) {
-      setError(err?.message || "Could not add medication.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not add medication.");
     }
   }
 
@@ -1065,8 +1070,8 @@ function QuickBatchIntakeModal({
         quantity: qtyNum,
       });
       onSuccess();
-    } catch (err: any) {
-      setError(err?.message || "Could not add batch.");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Could not add batch.");
     }
   }
 
@@ -1195,7 +1200,7 @@ function AdvancedReceiveStockTab({
       setSuccessMessage(`Goods Received Note (GRN) posted successfully for PKR ${totalGrnCost.toLocaleString()}! Stock updated.`);
       setLines([{ medicationId: "", batchNumber: `BAT-${Date.now().toString(36).toUpperCase()}`, expiryDate: "2028-12-31", quantity: "100", unitCostPkr: "25" }]);
       setInvoiceNumber("");
-    } catch (cause: any) {
+    } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : "The purchase receipt could not be posted.");
     }
   }
@@ -1397,7 +1402,7 @@ function SuppliersVendorTab({
       setContactPerson("");
       setCode(`SUP-${Date.now().toString(36).toUpperCase()}`);
       reloadSuppliers();
-    } catch (cause: any) {
+    } catch (cause: unknown) {
       setError(cause instanceof Error ? cause.message : "The supplier could not be added.");
     }
   }

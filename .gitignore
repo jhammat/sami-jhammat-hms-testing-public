@@ -80,3 +80,7 @@ zero-baseline-audit.txt
 # docs/release/screenshots/ is the intentional, committed evidence set)
 /samitestingscreenshots/
 /final things/
+
+# Standalone front-end showcase site and its raw capture set — local demo only
+/wonflow-showcase/
+/screenshots/

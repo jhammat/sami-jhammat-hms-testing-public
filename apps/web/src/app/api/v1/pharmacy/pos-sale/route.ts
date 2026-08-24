@@ -4,6 +4,76 @@ import { requireBranchId, requirePermission, requireTenantContext } from "@wonfl
 import { requireRequestContext } from "@/lib/auth/permission-service";
 import { handleApiRoute, WonFlowApiError } from "@/server/http/route-handler";
 
+/**
+ * The counter's sales ledger for this branch.
+ *
+ * Every POS sale already writes an Invoice, its lines, a Payment and stock
+ * movements, so the ledger is read back from those rather than from a copy the
+ * browser kept. A till that only remembered its own sales could not be
+ * reconciled, disagreed between workstations, and lost the day on a cache
+ * clear.
+ */
+export function GET(request: Request) {
+  return handleApiRoute(async () => {
+    const requestContext = await requireRequestContext();
+    const context = requireTenantContext(requestContext);
+    requirePermission(context, "pharmacy.dispensing.manage");
+    const branchId = requireBranchId(context);
+
+    const limitParam = Number(new URL(request.url).searchParams.get("limit"));
+    const take = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.trunc(limitParam), 200) : 50;
+
+    const invoices = await database.invoice.findMany({
+      where: { tenantId: context.tenantId, branchId, invoiceNumber: { startsWith: "POS-RX-" } },
+      include: { lines: true, payments: { orderBy: { createdAt: "desc" }, take: 1 }, patient: true },
+      orderBy: { issuedAt: "desc" },
+      take,
+    });
+
+    const minorToPkr = (value: number) => value / 100;
+    const receipts = invoices.map((invoice) => {
+      const subtotalPkr = minorToPkr(invoice.subtotalMinor);
+      const discountPkr = minorToPkr(invoice.discountMinor);
+      const netTotalPkr = minorToPkr(invoice.totalMinor);
+      const afterDiscountPkr = Math.max(0, subtotalPkr - discountPkr);
+      const taxPkr = Math.max(0, netTotalPkr - afterDiscountPkr);
+      const patientName = [invoice.patient?.givenName, invoice.patient?.familyName].filter(Boolean).join(" ").trim();
+      return {
+        dispenseId: `POS-DISP-${invoice.id.slice(0, 8)}`,
+        invoiceId: invoice.id,
+        invoiceNumber: invoice.invoiceNumber,
+        customerName: patientName || "Walk-in Customer",
+        customerPhone: invoice.patient?.phone ?? null,
+        patientId: invoice.patientId,
+        dispensedAt: (invoice.issuedAt ?? invoice.createdAt).toISOString(),
+        paymentMethod: invoice.payments[0]?.method ?? (invoice.status === "PAID" ? "CASH" : "UNPAID"),
+        isPaid: invoice.status === "PAID",
+        subtotalPkr,
+        discountPercent: subtotalPkr > 0 ? Math.round((discountPkr / subtotalPkr) * 100) : 0,
+        discountPkr,
+        taxPercent: afterDiscountPkr > 0 ? Math.round((taxPkr / afterDiscountPkr) * 100) : 0,
+        taxPkr,
+        netTotalPkr,
+        items: invoice.lines.map((line) => ({
+          medicationId: "",
+          inventoryBatchId: "",
+          batchNumber: "",
+          medicationName: line.description,
+          strength: null,
+          unit: "unit",
+          quantity: Number(line.quantity),
+          unitPricePkr: minorToPkr(line.unitPriceMinor),
+          lineTotalPkr: minorToPkr(line.totalMinor),
+          instructions: null,
+        })),
+        notes: null,
+      };
+    });
+
+    return NextResponse.json({ receipts });
+  });
+}
+
 export function POST(request: Request) {
   return handleApiRoute(async () => {
     const requestContext = await requireRequestContext();

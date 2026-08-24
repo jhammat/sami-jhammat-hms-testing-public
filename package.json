@@ -20,6 +20,7 @@
     "db:generate": "node tooling/scripts/check-env.mjs DATABASE_URL && pnpm --filter @wonflow/database db:generate",
     "db:validate": "node tooling/scripts/check-env.mjs DATABASE_URL && pnpm --filter @wonflow/database db:validate",
     "db:migrate": "node tooling/scripts/check-env.mjs DATABASE_URL && pnpm --filter @wonflow/database db:migrate",
+    "db:migrate:safe": "node tooling/scripts/check-env.mjs DATABASE_URL && node tooling/scripts/create-migration.mjs",
     "db:deploy": "node tooling/scripts/check-env.mjs DATABASE_URL && pnpm --filter @wonflow/database db:deploy",
     "db:studio": "node tooling/scripts/check-env.mjs DATABASE_URL && pnpm --filter @wonflow/database db:studio",
     "check": "pnpm lint && pnpm typecheck && pnpm db:validate && pnpm demo:strings:check && git diff --check",
@@ -41,6 +42,7 @@
     "db:seed:dev": "pnpm exec tsx tooling/scripts/seed-development-logins.ts",
     "db:repair-access": "pnpm exec tsx tooling/scripts/repair-workspace-access.ts",
     "db:seed:demo": "pnpm exec tsx tooling/scripts/seed-demo-data.ts",
+    "db:diagnose:booking": "pnpm exec tsx tooling/scripts/diagnose-patient-booking.ts",
     "db:reset:superadmin": "pnpm exec tsx tooling/scripts/reset-to-fresh-superadmin.ts"
   },
   "devDependencies": {

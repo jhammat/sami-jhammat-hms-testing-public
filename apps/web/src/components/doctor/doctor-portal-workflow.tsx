@@ -48,6 +48,7 @@ import {
   calculateDemoQueueWaitMinutes,
   QUEUE_ROOMS_CHANGED_EVENT,
   QUEUE_ROOM_OPTIONS,
+  loadQueueRoomOptions,
   readQueueRoomOptions,
 } from "@/lib/queue";
 import type { DemoQueueEntry, DemoQueuePriority, DemoQueueStatus } from "@/lib/queue";
@@ -87,7 +88,11 @@ function useConsultationRooms() {
   const [rooms, setRooms] = useState(() => [...QUEUE_ROOM_OPTIONS].filter((room) => room.category === "consultation"));
   useEffect(() => {
     const reloadRooms = () => setRooms(readQueueRoomOptions().filter((room) => room.category === "consultation"));
-    queueMicrotask(reloadRooms);
+    // Pull the hospital's saved rooms once, then keep in step with any added
+    // from another panel in this tab.
+    queueMicrotask(() => {
+      void loadQueueRoomOptions().then(reloadRooms).catch(() => undefined);
+    });
     window.addEventListener(QUEUE_ROOMS_CHANGED_EVENT, reloadRooms);
     window.addEventListener("storage", reloadRooms);
     return () => {
@@ -431,22 +436,29 @@ export function AddCustomRoomModal({
   const [label, setLabel] = useState("");
   const [category, setCategory] = useState<"consultation" | "procedure" | "triage">("consultation");
   const [error, setError] = useState<string>();
+  const [saving, setSaving] = useState(false);
 
   if (!isOpen) return null;
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = label.trim();
     if (trimmed.length < 2) {
       setError("Please enter a room name with at least 2 characters.");
       return;
     }
+    setSaving(true);
+    setError("");
     try {
-      const room = addCustomConsultationRoom(trimmed, category);
+      // Saved for the whole hospital, so the room exists for reception and for
+      // every other doctor, not just this browser.
+      const room = await addCustomConsultationRoom(trimmed, category);
       onCreated(room.label);
       onClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add custom room.");
+    } finally {
+      setSaving(false);
     }
   }
 
@@ -477,7 +489,7 @@ export function AddCustomRoomModal({
           </button>
         </div>
 
-        <form className="mt-4 space-y-4" onSubmit={handleSubmit}>
+        <form className="mt-4 space-y-4" onSubmit={(event) => void handleSubmit(event)}>
           {error ? (
             <p className="rounded-xl border border-rose-200 bg-rose-50 p-2.5 text-xs font-bold text-rose-700">{error}</p>
           ) : null}
@@ -523,10 +535,12 @@ export function AddCustomRoomModal({
               Cancel
             </button>
             <button
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={saving}
               type="submit"
             >
-              <Plus size={14} /> Add Room
+              {saving ? <Loader2 className="animate-spin" size={14} /> : <Plus size={14} />}
+              {saving ? "Adding Room..." : "Add Room"}
             </button>
           </div>
         </form>
@@ -719,12 +733,6 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
       }
     });
   }, [model.sitting]);
-
-  useEffect(() => {
-    if (!selectedBranchId && sittingBranchId) {
-      setSelectedBranchId(sittingBranchId);
-    }
-  }, [selectedBranchId, sittingBranchId]);
 
   const activeBranchId = selectedBranchId || sittingBranchId;
   const isNotStarted = model.sitting === undefined || model.sitting.status === "not-started" || model.sitting.status === "finished";

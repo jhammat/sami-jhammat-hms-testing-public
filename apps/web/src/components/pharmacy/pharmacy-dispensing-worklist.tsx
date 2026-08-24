@@ -43,6 +43,7 @@ import {
   Tag,
   Trash2,
   TrendingUp,
+  TriangleAlert,
   Truck,
   User,
   UserCheck,
@@ -134,25 +135,30 @@ export function PharmacyDispensingWorklist() {
   // Completed Receipt Modal (Opens automatically on confirmed payment)
   const [completedReceipt, setCompletedReceipt] = useState<PosSaleReceipt | null>(null);
   const [paymentSuccessNotice, setPaymentSuccessNotice] = useState<string | null>(null);
+  const [paymentFailureNotice, setPaymentFailureNotice] = useState<string | null>(null);
 
   // Focus ref for fast medicine search
   const medicineSearchInputRef = useRef<HTMLInputElement>(null);
 
-  // Mounted state to protect against SSR/client hydration mismatch
-  const [mounted, setMounted] = useState(false);
-
   // Sales History State
   const [salesHistory, setSalesHistory] = useState<PosSaleReceipt[]>([]);
 
-  useEffect(() => {
-    setMounted(true);
+  // The ledger is the branch's invoices, read back from the server, so every
+  // workstation at the counter shows the same day's takings.
+  const loadSalesHistory = useCallback(async () => {
     try {
-      const saved = localStorage.getItem("wonflow_pos_sales_history");
-      if (saved) {
-        setSalesHistory(JSON.parse(saved));
-      }
+      const res = await fetch("/api/v1/pharmacy/pos-sale?limit=50", { cache: "no-store" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { receipts?: PosSaleReceipt[] };
+      setSalesHistory(data.receipts ?? []);
     } catch {}
   }, []);
+
+  useEffect(() => {
+    queueMicrotask(() => {
+      void loadSalesHistory();
+    });
+  }, [loadSalesHistory]);
 
   // Stock Inward Form State
   const [showInwardModal, setShowInwardModal] = useState(false);
@@ -180,7 +186,9 @@ export function PharmacyDispensingWorklist() {
   }, []);
 
   useEffect(() => {
-    void loadMedications();
+    queueMicrotask(() => {
+      void loadMedications();
+    });
   }, [loadMedications]);
 
   function handleResetCustomer() {
@@ -405,17 +413,15 @@ export function PharmacyDispensingWorklist() {
     };
 
     try {
+      setPaymentFailureNotice(null);
       const res = await processSale(payload);
       const receipt = res.receipt;
       setCompletedReceipt(receipt);
       setPaymentSuccessNotice(`Payment of PKR ${receipt.netTotalPkr} Confirmed!`);
 
-      // Save to sales history
-      const updatedHistory = [receipt, ...salesHistory];
-      setSalesHistory(updatedHistory);
-      try {
-        localStorage.setItem("wonflow_pos_sales_history", JSON.stringify(updatedHistory));
-      } catch {}
+      // The sale is now an invoice on the server; re-read the ledger rather
+      // than keeping a second copy of it here.
+      void loadSalesHistory();
 
       // Reset bill for next customer
       setCart([]);
@@ -426,49 +432,15 @@ export function PharmacyDispensingWorklist() {
       setCustomerPhone("");
 
       void loadMedications();
-    } catch (err: any) {
-      // Fallback local receipt generation if network error so POS is 100% reliable
-      const fallbackReceipt: PosSaleReceipt = {
-        dispenseId: `POS-DISP-${Date.now().toString(36).toUpperCase()}`,
-        invoiceId: `INV-${Date.now()}`,
-        invoiceNumber: `POS-RX-${Date.now().toString(36).toUpperCase()}`,
-        customerName: customerName.trim() || "Walk-in Customer",
-        customerPhone: customerPhone.trim() || null,
-        patientId: "WALK-IN",
-        dispensedAt: new Date().toISOString(),
-        paymentMethod,
-        isPaid: paymentMethod !== "UNPAID",
-        subtotalPkr,
-        discountPercent: finalDiscountPercent,
-        discountPkr,
-        taxPercent,
-        taxPkr,
-        netTotalPkr,
-        items: cart.map((c) => ({
-          medicationId: c.medicationId,
-          inventoryBatchId: c.inventoryBatchId,
-          batchNumber: c.batchNumber,
-          medicationName: c.medicationName,
-          strength: c.strength,
-          unit: c.unit,
-          quantity: c.quantity,
-          unitPricePkr: c.unitPricePkr,
-          lineTotalPkr: c.lineTotalPkr,
-          instructions: c.instructions,
-        })),
-        notes: billingNotes.trim() || null,
-      };
-
-      setCompletedReceipt(fallbackReceipt);
-      const updatedHistory = [fallbackReceipt, ...salesHistory];
-      setSalesHistory(updatedHistory);
-      try {
-        localStorage.setItem("wonflow_pos_sales_history", JSON.stringify(updatedHistory));
-      } catch {}
-      setCart([]);
-      setAmountReceived("");
-      setCustomerName("");
-      setCustomerPhone("");
+    } catch {
+      // A sale that did not reach the server is not a sale. Earlier this
+      // fabricated a receipt and an invoice number locally so the counter
+      // "never failed" — which handed the customer proof of a transaction the
+      // hospital had no record of and never decremented the stock. The cart is
+      // kept intact so the operator can retry once the connection is back.
+      setPaymentFailureNotice(
+        "This sale did not reach the server, so no receipt has been issued and no stock has been deducted. The bill has been kept — check the connection and take the payment again.",
+      );
     }
   }
 
@@ -504,10 +476,12 @@ export function PharmacyDispensingWorklist() {
     }
   }
 
-  const todayTotalSalesPkr = useMemo(() => {
-    if (!mounted) return 0;
-    return salesHistory.reduce((sum, s) => sum + s.netTotalPkr, 0);
-  }, [mounted, salesHistory]);
+  // Starts empty on the server and after hydration, then fills once the ledger
+  // arrives — so there is no server/client mismatch to guard against.
+  const todayTotalSalesPkr = useMemo(
+    () => salesHistory.reduce((sum, s) => sum + s.netTotalPkr, 0),
+    [salesHistory],
+  );
 
   return (
     <div className="min-h-screen space-y-6 pb-20">
@@ -539,7 +513,7 @@ export function PharmacyDispensingWorklist() {
             <div className="flex items-center gap-2 rounded-2xl border border-emerald-200/80 bg-emerald-50/80 px-3.5 py-1.5 text-xs font-black text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/40 dark:text-emerald-300">
               <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />
               <span suppressHydrationWarning>
-                Counter Sales: PKR {mounted ? todayTotalSalesPkr.toLocaleString() : "0"}
+                Counter Sales: PKR {todayTotalSalesPkr.toLocaleString()}
               </span>
             </div>
 
@@ -601,6 +575,26 @@ export function PharmacyDispensingWorklist() {
           <span>🧾 Sales Ledger & Cash Memos ({salesHistory.length})</span>
         </button>
       </nav>
+
+      {paymentFailureNotice ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-rose-300 bg-rose-50 p-4 text-sm font-bold text-rose-800 dark:border-rose-500/40 dark:bg-rose-950/40 dark:text-rose-300" role="alert">
+          <TriangleAlert aria-hidden className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{paymentFailureNotice}</span>
+          <button className="ml-auto shrink-0 text-xs font-black underline" onClick={() => setPaymentFailureNotice(null)} type="button">
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+
+      {paymentSuccessNotice ? (
+        <div className="flex items-start gap-3 rounded-2xl border border-emerald-300 bg-emerald-50 p-4 text-sm font-bold text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-950/40 dark:text-emerald-300" role="status">
+          <PackageCheck aria-hidden className="mt-0.5 h-5 w-5 shrink-0" />
+          <span>{paymentSuccessNotice}</span>
+          <button className="ml-auto shrink-0 text-xs font-black underline" onClick={() => setPaymentSuccessNotice(null)} type="button">
+            Dismiss
+          </button>
+        </div>
+      ) : null}
 
       {/* TAB 1: STANDALONE PHARMACY POS BILLING TERMINAL */}
       {activeTab === "billing" && (

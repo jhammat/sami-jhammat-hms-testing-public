@@ -47,6 +47,17 @@ interface Slot {
   available: boolean;
 }
 
+/**
+ * Why the portal has nothing to offer. The server names the missing piece —
+ * an unpublished doctor, a service that is not open to patient booking, a day
+ * with no clinic — so this screen never leaves a patient staring at an empty
+ * dropdown with no idea whether to wait, change the date, or telephone.
+ */
+interface Blocker {
+  code: string;
+  message: string;
+}
+
 interface Appointment {
   id: string;
   startsAt: string;
@@ -170,30 +181,48 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
   );
 }
 
+/**
+ * `toISOString` would give the UTC date, which is the wrong day for a patient
+ * in Karachi booking before 05:00 local — the calendar would refuse today and
+ * default to the wrong tomorrow.
+ */
+function localDate(offsetDays = 0) {
+  const value = new Date();
+  value.setDate(value.getDate() + offsetDays);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, "0")}-${String(value.getDate()).padStart(2, "0")}`;
+}
+
 export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
-  const [date, setDate] = useState(() => new Date(Date.now() + 86_400_000).toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => localDate(1));
   const [options, setOptions] = useState<Option[]>([]);
   const [slots, setSlots] = useState<Slot[]>([]);
+  const [blockers, setBlockers] = useState<Blocker[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [ruleId, setRuleId] = useState("");
   const [slotId, setSlotId] = useState("");
   const [chosenMode, setChosenMode] = useState<"IN_PERSON" | "ONLINE" | "">("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [paymentHref, setPaymentHref] = useState("");
+  const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
     setError("");
+    setLoading(true);
     try {
       const response = await fetch(`/api/v1/patient/booking?date=${date}`, { cache: "no-store" });
-      const body = (await response.json()) as { catalog?: { options: Option[]; slots: Slot[] }; appointments?: Appointment[]; error?: string };
-      if (!response.ok || !body.catalog) throw new Error(body.error);
+      const body = (await response.json()) as { catalog?: { options: Option[]; slots: Slot[]; blockers?: Blocker[] }; appointments?: Appointment[]; error?: string };
+      if (!response.ok || !body.catalog) throw new Error(body.error || "Appointments could not be loaded. Please try again.");
       setOptions(body.catalog.options);
       setSlots(body.catalog.slots);
+      setBlockers(body.catalog.blockers ?? []);
       setAppointments(body.appointments ?? []);
       setRuleId((current) => (current && body.catalog!.options.some((option) => option.ruleId === current) ? current : body.catalog!.options[0]?.ruleId ?? ""));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Appointments could not be loaded.");
+      setError(cause instanceof Error && cause.message ? cause.message : "Appointments could not be loaded. Please try again.");
+    } finally {
+      setLoading(false);
     }
   }, [date]);
 
@@ -215,25 +244,32 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
     setBusy(true);
     setError("");
     setMessage("");
-    const data = new FormData(event.currentTarget);
+    setPaymentHref("");
+    const form = event.currentTarget;
+    const data = new FormData(form);
     try {
       const response = await fetch("/api/v1/patient/booking", {
         method: "POST",
         headers: { "content-type": "application/json" },
+        // The key is generated per submit attempt, so a network retry of the
+        // same click cannot create a second appointment.
         body: JSON.stringify({ slotId, mode, reason: data.get("reason"), idempotencyKey: crypto.randomUUID() }),
       });
-      const body = (await response.json()) as { error?: string };
-      if (!response.ok) throw new Error(body.error);
+      const body = (await response.json()) as { appointment?: { id: string; paymentStatus?: string }; error?: string };
+      if (!response.ok) throw new Error(body.error || "Appointment could not be booked. Please try again.");
+      const awaitingPayment = body.appointment?.paymentStatus === "AWAITING_PAYMENT" || requiresPrepayment;
       setMessage(
-        requiresPrepayment
-          ? "Appointment reserved. Please follow the instructions to upload payment proof."
+        awaitingPayment
+          ? "Appointment reserved. Complete the payment to have it confirmed by the hospital."
           : "Appointment confirmed! Your care team can now see this booking.",
       );
+      if (awaitingPayment && body.appointment?.id) setPaymentHref(`/patient/appointments/${body.appointment.id}/payment`);
       setSlotId("");
       setChosenMode("");
+      form.reset();
       await load();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Appointment could not be booked.");
+      setError(cause instanceof Error && cause.message ? cause.message : "Appointment could not be booked. Please try again.");
     } finally {
       setBusy(false);
     }
@@ -323,9 +359,12 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
       />
 
       {message ? (
-        <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4.5 text-sm font-black text-emerald-800 shadow-xs dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
+        <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4.5 text-sm font-black text-emerald-800 shadow-xs dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
           <CheckCircle2 aria-hidden className="size-5 shrink-0 text-emerald-600" />
           {message}
+          <Link className="ml-auto inline-flex min-h-10 items-center rounded-xl bg-emerald-600 px-4 text-xs font-black text-white transition hover:bg-emerald-700" href={paymentHref || "/patient/appointments"}>
+            {paymentHref ? "Pay Now" : "View My Visits"}
+          </Link>
         </div>
       ) : null}
 
@@ -342,7 +381,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
             <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">1. Select Appointment Date</span>
             <input
               className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-3 focus:ring-blue-100 dark:border-slate-800 dark:bg-slate-800 dark:text-white dark:focus:ring-blue-900/50"
-              min={new Date().toISOString().slice(0, 10)}
+              min={localDate()}
               onChange={(event) => {
                 setDate(event.target.value);
                 setSlotId("");
@@ -363,7 +402,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
               }}
               value={ruleId}
             >
-              <option value="">No published schedules</option>
+              <option value="">{loading ? "Loading clinics…" : options.length ? "Select a doctor" : "No clinics available on this date"}</option>
               {options.map((option) => (
                 <option key={option.ruleId} value={option.ruleId}>
                   {option.specialty ?? "Clinical Care"} · {option.doctorName} · {option.serviceName} ({option.branchName})
@@ -372,6 +411,20 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
             </select>
           </label>
         </div>
+
+        {!loading && blockers.length ? (
+          <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 p-4.5 dark:border-amber-900/50 dark:bg-amber-950/40">
+            <p className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
+              <Info aria-hidden className="size-4 shrink-0 text-amber-600" />
+              Why no times are shown
+            </p>
+            {blockers.map((blocker) => (
+              <p className="text-sm font-semibold text-amber-900 dark:text-amber-200" key={blocker.code}>
+                {blocker.message}
+              </p>
+            ))}
+          </div>
+        ) : null}
 
         {selectedOption ? (
           <div className="space-y-4">
@@ -462,7 +515,13 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
             </div>
           ) : (
             <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-6 text-center text-xs font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-900/40">
-              {ruleId ? "No clinics scheduled for this doctor on this date. Please select another date." : "Select a doctor and date to view bookable consultation slots."}
+              {loading
+                ? "Loading available consultation slots…"
+                : ruleId
+                  ? "No consultation times remain for this doctor on this date. Please select another date."
+                  : options.length
+                    ? "Select a doctor and date to view bookable consultation slots."
+                    : blockers[0]?.message ?? "No consultation slots are available on this date. Please select another date."}
             </div>
           )}
         </fieldset>

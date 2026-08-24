@@ -1102,3 +1102,197 @@ export const WONFLOW_CRITICAL_RESULT_ALERT_TRANSITIONS: Record<
   cancelled: [],
   "entered-in-error": [],
 };
+
+export interface StructuredLabTestDefinition {
+  code: string;
+  name: string;
+  category: "Liver Function" | "Inflammatory Markers" | "Pancreatic & Enzymes" | "Renal Function" | "Complete Blood Count" | "Electrolytes";
+  unit: string;
+  defaultRefLow: number;
+  defaultRefHigh: number;
+  criticalLow?: number;
+  criticalHigh?: number;
+  decimals?: number;
+}
+
+export const STANDARD_LAB_TESTS: Record<string, StructuredLabTestDefinition> = {
+  BILIRUBIN_TOTAL: {
+    code: "BILIRUBIN_TOTAL",
+    name: "Total Bilirubin",
+    category: "Liver Function",
+    unit: "mg/dL",
+    defaultRefLow: 0.2,
+    defaultRefHigh: 1.2,
+    criticalHigh: 15.0,
+    decimals: 2,
+  },
+  BILIRUBIN_DIRECT: {
+    code: "BILIRUBIN_DIRECT",
+    name: "Direct (Conjugated) Bilirubin",
+    category: "Liver Function",
+    unit: "mg/dL",
+    defaultRefLow: 0.0,
+    defaultRefHigh: 0.3,
+    criticalHigh: 5.0,
+    decimals: 2,
+  },
+  ALT: {
+    code: "ALT",
+    name: "Alanine Aminotransferase (ALT / SGPT)",
+    category: "Liver Function",
+    unit: "U/L",
+    defaultRefLow: 7,
+    defaultRefHigh: 56,
+    criticalHigh: 500,
+    decimals: 0,
+  },
+  AST: {
+    code: "AST",
+    name: "Aspartate Aminotransferase (AST / SGOT)",
+    category: "Liver Function",
+    unit: "U/L",
+    defaultRefLow: 10,
+    defaultRefHigh: 40,
+    criticalHigh: 500,
+    decimals: 0,
+  },
+  ALP: {
+    code: "ALP",
+    name: "Alkaline Phosphatase (ALP)",
+    category: "Liver Function",
+    unit: "U/L",
+    defaultRefLow: 44,
+    defaultRefHigh: 147,
+    criticalHigh: 600,
+    decimals: 0,
+  },
+  CRP: {
+    code: "CRP",
+    name: "C-Reactive Protein (CRP)",
+    category: "Inflammatory Markers",
+    unit: "mg/L",
+    defaultRefLow: 0.0,
+    defaultRefHigh: 5.0,
+    criticalHigh: 100.0,
+    decimals: 1,
+  },
+  WBC: {
+    code: "WBC",
+    name: "White Blood Cell Count (WBC)",
+    category: "Inflammatory Markers",
+    unit: "x10^9/L",
+    defaultRefLow: 4.0,
+    defaultRefHigh: 11.0,
+    criticalLow: 2.0,
+    criticalHigh: 25.0,
+    decimals: 1,
+  },
+  AMYLASE_DRAIN: {
+    code: "AMYLASE_DRAIN",
+    name: "Drain Fluid Amylase",
+    category: "Pancreatic & Enzymes",
+    unit: "U/L",
+    defaultRefLow: 0,
+    defaultRefHigh: 100,
+    criticalHigh: 300,
+    decimals: 0,
+  },
+  CREATININE: {
+    code: "CREATININE",
+    name: "Serum Creatinine",
+    category: "Renal Function",
+    unit: "mg/dL",
+    defaultRefLow: 0.6,
+    defaultRefHigh: 1.2,
+    criticalHigh: 4.0,
+    decimals: 2,
+  },
+  HEMOGLOBIN: {
+    code: "HEMOGLOBIN",
+    name: "Hemoglobin (Hb)",
+    category: "Complete Blood Count",
+    unit: "g/dL",
+    defaultRefLow: 12.0,
+    defaultRefHigh: 16.5,
+    criticalLow: 7.0,
+    decimals: 1,
+  },
+  ALBUMIN: {
+    code: "ALBUMIN",
+    name: "Serum Albumin",
+    category: "Liver Function",
+    unit: "g/dL",
+    defaultRefLow: 3.5,
+    defaultRefHigh: 5.0,
+    criticalLow: 2.0,
+    decimals: 1,
+  },
+};
+
+export type LabResultEntryRoute = "STAFF_ENTERED" | "PATIENT_REPORTED" | "DOCUMENT_ATTACHED";
+export type LabAbnormalFlag = "NORMAL" | "HIGH" | "LOW" | "CRITICAL_HIGH" | "CRITICAL_LOW";
+
+export interface StructuredLabResultItem {
+  id: string;
+  orderId?: string | null;
+  patientId: string;
+  code: string;
+  displayName: string;
+  category: string;
+  value: number;
+  unit: string;
+  referenceLow: number;
+  referenceHigh: number;
+  abnormalFlag: LabAbnormalFlag;
+  collectedAt: string;
+  sourceFacility?: string | null;
+  entryRoute: LabResultEntryRoute;
+  isConfirmedByClinician: boolean;
+  confirmedByMembershipId?: string | null;
+  confirmedAt?: string | null;
+  documentId?: string | null;
+  documentUrl?: string | null;
+  notes?: string | null;
+  createdAt: string;
+}
+
+export interface RecordLabResultInput {
+  patientId: string;
+  code: string;
+  displayName?: string;
+  category?: string;
+  value: number;
+  unit?: string;
+  referenceLow?: number;
+  referenceHigh?: number;
+  collectedAt?: string;
+  sourceFacility?: string;
+  entryRoute?: LabResultEntryRoute;
+  documentId?: string;
+  notes?: string;
+}
+
+export interface LabTrendPoint {
+  date: string;
+  value: number;
+  referenceLow: number;
+  referenceHigh: number;
+  abnormalFlag: LabAbnormalFlag;
+  isConfirmed: boolean;
+  sourceFacility?: string | null;
+}
+
+export interface LabTrendSeries {
+  code: string;
+  displayName: string;
+  unit: string;
+  category: string;
+  referenceLow: number;
+  referenceHigh: number;
+  points: LabTrendPoint[];
+}
+
+export interface MultiLabTrendGroup {
+  groupName: "Liver Function" | "Inflammatory Markers" | "Pancreatic & Drain Amylase" | "Complete Blood Count" | "Renal Function";
+  series: LabTrendSeries[];
+}

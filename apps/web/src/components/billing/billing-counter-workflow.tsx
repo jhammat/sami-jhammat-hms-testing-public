@@ -690,17 +690,32 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
     }
   }
 
+  // The letterhead comes from the organization record so every counter prints
+  // the same logo, not just the workstation that uploaded it.
+  const [hospitalLogoUrl, setHospitalLogoUrl] = useState<string>("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      void (async () => {
+        try {
+          const response = await fetch("/api/v1/organization/branding", { cache: "no-store", signal: controller.signal });
+          if (!response.ok) return;
+          const body = (await response.json()) as { logoDataUrl?: string | null };
+          if (!controller.signal.aborted && body.logoDataUrl) setHospitalLogoUrl(body.logoDataUrl);
+        } catch {}
+      })();
+    });
+    return () => controller.abort();
+  }, []);
+
   // Official Hospital Execution Slip / Receipt with Hospital Logo
   function printReceipt(targetInvoice?: InvoiceRecord, paidAmountMinor?: number) {
     const inv = targetInvoice ?? receipt?.invoice;
     if (!inv) return;
     const paid = paidAmountMinor ?? receipt?.paidMinor ?? inv.paidMinor;
 
-    const hospitalLogo =
-      typeof window !== "undefined"
-        ? // eslint-disable-next-line no-restricted-syntax
-          localStorage.getItem("wonflow_hospital_logo") || "/brand/wonflow-logo.png"
-        : "/brand/wonflow-logo.png";
+    const hospitalLogo = hospitalLogoUrl || "/brand/wonflow-logo.png";
 
     const popup = window.open("", "_blank", "width=580,height=820");
     if (!popup) return;
