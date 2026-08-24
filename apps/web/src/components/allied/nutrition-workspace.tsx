@@ -28,6 +28,27 @@ const DEFAULT_MEAL_TEMPLATES: CreateNutritionPlanItemInput[] = [
   { itemType: "ENZYME", name: "Creon 25,000 IU (Pancreatin)", timeOfDay: "Dinner", quantity: 2, unit: "capsules", withMeal: true, instruction: "Take with first bite of dinner" },
 ];
 
+function GaugeBar({ value, max, color, label, unit }: { value: number; max: number; color: string; label: string; unit: string }) {
+  const pct = Math.min(100, Math.round((value / max) * 100));
+  return (
+    <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "16px 18px" }}>
+      <div className="flex justify-between items-center mb-2">
+        <span style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</span>
+        <span style={{ fontSize: 16, fontWeight: 800, color: "#fff" }}>
+          {value} <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", fontWeight: 500 }}>{unit}</span>
+        </span>
+      </div>
+      <div style={{ height: 8, background: "rgba(255,255,255,0.08)", borderRadius: 999, overflow: "hidden" }}>
+        <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: 999, transition: "all 0.5s ease" }} />
+      </div>
+      <div className="flex justify-between mt-1" style={{ fontSize: 10, color: "rgba(255,255,255,0.25)" }}>
+        <span>0</span>
+        <span>Target: {max} {unit}</span>
+      </div>
+    </div>
+  );
+}
+
 export function NutritionWorkspace() {
   const [referrals, setReferrals] = useState<ClinicalReferral[]>([]);
   const [selectedReferral, setSelectedReferral] = useState<ClinicalReferral | null>(null);
@@ -41,8 +62,8 @@ export function NutritionWorkspace() {
   const [appetiteScore, setAppetiteScore] = useState<number>(6);
   const [giSymptoms, setGiSymptoms] = useState<string>("Mild bloating after meals");
   const [enzymeRequirement, setEnzymeRequirement] = useState<boolean>(true);
-  const [assessmentNotes] = useState<string>("");
-  const [, setAssessments] = useState<NutritionAssessmentRecord[]>([]);
+  const [assessmentNotes, setAssessmentNotes] = useState<string>("");
+  const [assessments, setAssessments] = useState<NutritionAssessmentRecord[]>([]);
 
   // Nutrition Plan Form State
   const [planTitle, setPlanTitle] = useState<string>("Post-Operative Pancreatic Dietary Recovery Plan");
@@ -50,7 +71,7 @@ export function NutritionWorkspace() {
   const [caloricTarget, setCaloricTarget] = useState<number>(1800);
   const [proteinTarget, setProteinTarget] = useState<number>(85);
   const [fluidTarget, setFluidTarget] = useState<number>(2000);
-  const [foodsToAvoid] = useState<string>("High-fat fried foods, raw cruciferous vegetables, carbonated beverages");
+  const [foodsToAvoid, setFoodsToAvoid] = useState<string>("High-fat fried foods, raw cruciferous vegetables, carbonated beverages");
   const [planItems, setPlanItems] = useState<CreateNutritionPlanItemInput[]>(DEFAULT_MEAL_TEMPLATES);
   const [syncToCarePlan, setSyncToCarePlan] = useState<boolean>(true);
   const [activePlan, setActivePlan] = useState<NutritionPlanRecord | null>(null);
@@ -66,7 +87,7 @@ export function NutritionWorkspace() {
       ? (numericWeight / Math.pow(numericHeight / 100, 2)).toFixed(1)
       : null;
 
-  async function loadReferrals() {
+  const loadReferrals = useCallback(async () => {
     setIsLoading(true);
     try {
       const res = await fetch("/api/v1/allied/referrals?specialty=NUTRITION");
@@ -82,7 +103,7 @@ export function NutritionWorkspace() {
     } finally {
       setIsLoading(false);
     }
-  }
+  }, [selectedReferral]);
 
   async function loadPatientNutrition(patientId: string) {
     try {
@@ -145,16 +166,11 @@ export function NutritionWorkspace() {
     };
   }, [selectedReferral?.patientId]);
 
-
   async function handleReferralAction(referralId: string, action: "ACCEPT" | "COMPLETE" | "DECLINE") {
     let outcomeNotes = "";
     let reason = "";
-
-    if (action === "COMPLETE") {
-      outcomeNotes = prompt("Enter completion summary & nutritional target status:") || "Nutritional stability achieved.";
-    } else if (action === "DECLINE") {
-      reason = prompt("Reason for declining referral:") || "Patient not indicated.";
-    }
+    if (action === "COMPLETE") outcomeNotes = prompt("Enter completion summary & discharge nutritional status:") || "Nutritional goals achieved.";
+    else if (action === "DECLINE") reason = prompt("Reason for declining referral:") || "Patient transferred or not indicated.";
 
     try {
       const res = await fetch(`/api/v1/allied/referrals/${referralId}`, {
@@ -164,10 +180,7 @@ export function NutritionWorkspace() {
       });
       const data = await res.json();
       if (res.ok) {
-        setFeedback({
-          type: "success",
-          message: `Referral successfully marked as ${action.toLowerCase()}ed.`,
-        });
+        setFeedback({ type: "success", message: `Referral marked as ${action.toLowerCase()}ed.` });
         void loadReferrals();
       } else {
         throw new Error(data.error?.message || "Failed to update referral");
@@ -188,9 +201,9 @@ export function NutritionWorkspace() {
         body: JSON.stringify({
           patientId: selectedReferral.patientId,
           referralId: selectedReferral.id,
-          weightKg: parseFloat(weightKg) || undefined,
-          heightCm: parseFloat(heightCm) || undefined,
-          weightChangeSinceSurgeryKg: parseFloat(weightChangeKg) || undefined,
+          weightKg: numericWeight || undefined,
+          heightCm: numericHeight || undefined,
+          weightChangeKg: parseFloat(weightChangeKg) || undefined,
           appetiteScore,
           giSymptoms: giSymptoms.trim() || undefined,
           enzymeRequirement,
@@ -199,7 +212,7 @@ export function NutritionWorkspace() {
       });
       const data = await res.json();
       if (res.ok) {
-        setFeedback({ type: "success", message: "Nutritional assessment documented successfully." });
+        setFeedback({ type: "success", message: "Nutritional assessment saved successfully." });
         void loadPatientNutrition(selectedReferral.patientId);
       } else {
         throw new Error(data.error?.message || "Failed to save assessment");
@@ -221,26 +234,19 @@ export function NutritionWorkspace() {
           patientId: selectedReferral.patientId,
           referralId: selectedReferral.id,
           title: planTitle.trim(),
-          startDate: new Date().toISOString(),
-          caloricTargetKcal: caloricTarget,
+          dietPhase,
+          caloricTarget,
           proteinTargetGrams: proteinTarget,
           fluidTargetMl: fluidTarget,
-          phase: dietPhase,
           foodsToAvoid: foodsToAvoid.trim() || undefined,
-          items: planItems,
           syncToCarePlan,
+          items: planItems,
         }),
       });
       const data = await res.json();
       if (res.ok) {
-        setFeedback({
-          type: "success",
-          message: syncToCarePlan
-            ? "Nutrition plan created and synchronized to Patient Daily Action Centre!"
-            : "Nutrition plan saved successfully.",
-        });
+        setFeedback({ type: "success", message: "Dietary plan created and synced to patient Daily Action Centre!" });
         void loadPatientNutrition(selectedReferral.patientId);
-        setActiveTab("history");
       } else {
         throw new Error(data.error?.message || "Failed to create nutrition plan");
       }
@@ -249,598 +255,476 @@ export function NutritionWorkspace() {
     }
   }
 
-
-  function handleAddItem() {
+  function handleAddPlanItem() {
     setPlanItems([
       ...planItems,
-      {
-        itemType: "MEAL",
-        name: "New Meal / Snack",
-        timeOfDay: "Mid-Afternoon",
-        quantity: 1,
-        unit: "serving",
-        withMeal: false,
-      },
+      { itemType: "MEAL", name: "New Meal / Snack", timeOfDay: "Afternoon", quantity: 1, unit: "portion", withMeal: false },
     ]);
   }
 
-  function handleRemoveItem(index: number) {
-    setPlanItems(planItems.filter((_, idx) => idx !== index));
+  function handleRemovePlanItem(index: number) {
+    setPlanItems(planItems.filter((_, i) => i !== index));
   }
 
-  function handleUpdateItem(index: number, updates: Partial<CreateNutritionPlanItemInput>) {
-    setPlanItems(
-      planItems.map((item, idx) => {
-        if (idx !== index) return item;
-        const updated = { ...item, ...updates };
-
-        // PERT CLINICAL ENFORCEMENT: Creon must always be withMeal = true
-        if (
-          updated.itemType === "ENZYME" ||
-          /creon|pancreatin|enzyme|pert/i.test(updated.name)
-        ) {
-          updated.withMeal = true;
-        }
-        return updated;
-      }),
-    );
+  function handleUpdatePlanItem(index: number, updates: Partial<CreateNutritionPlanItemInput>) {
+    setPlanItems(planItems.map((item, i) => (i === index ? { ...item, ...updates } : item)));
   }
+
+  const patientName = selectedReferral?.patient
+    ? `${selectedReferral.patient.givenName} ${selectedReferral.patient.familyName}`
+    : selectedReferral ? `Patient #${selectedReferral.patientId.slice(0, 8)}` : "";
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 p-6 rounded-2xl text-white shadow-xl">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="px-2.5 py-0.5 text-[11px] font-semibold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-full">
-              Clinical Dietetics & Nutrition
-            </span>
-            <span className="text-xs text-slate-400">Referral-Scoped Access</span>
+    <div style={{ minHeight: "100vh", background: "linear-gradient(135deg, #091319 0%, #0d1e1f 40%, #0a1f26 100%)" }} className="p-6 space-y-6">
+
+      {/* ── HERO HEADER ── */}
+      <div style={{
+        background: "linear-gradient(135deg, rgba(16,185,129,0.15) 0%, rgba(6,182,212,0.1) 50%, rgba(245,158,11,0.08) 100%)",
+        border: "1px solid rgba(16,185,129,0.25)",
+        backdropFilter: "blur(20px)",
+      }} className="rounded-3xl p-8 relative overflow-hidden">
+        {/* Decorative glow orbs */}
+        <div style={{ position: "absolute", top: -60, right: -60, width: 220, height: 220, borderRadius: "50%", background: "rgba(16,185,129,0.12)", filter: "blur(45px)", pointerEvents: "none" }} />
+        <div style={{ position: "absolute", bottom: -40, left: "25%", width: 160, height: 160, borderRadius: "50%", background: "rgba(6,182,212,0.1)", filter: "blur(40px)", pointerEvents: "none" }} />
+
+        <div className="relative z-10 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+          <div>
+            <div className="flex items-center gap-3 mb-3">
+              <div style={{ background: "linear-gradient(135deg, #10b981, #06b6d4)", borderRadius: 12, padding: "10px 14px", fontSize: 22 }}>🥗</div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.3)", color: "#6ee7b7", fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", padding: "3px 10px", borderRadius: 20 }} className="uppercase">
+                    Allied Health · Clinical Nutrition
+                  </span>
+                  <span style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)", fontSize: 10, padding: "3px 8px", borderRadius: 20 }}>PERT / Pancreatic Diet</span>
+                </div>
+                <h1 style={{ fontSize: 26, fontWeight: 800, background: "linear-gradient(135deg, #fff 0%, #a7f3d0 100%)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", marginTop: 4 }}>
+                  Clinical Nutrition & Dietetics Workspace
+                </h1>
+              </div>
+            </div>
+            <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 13, maxWidth: 540 }}>
+              Manage post-resection pancreatic diet progression, compute caloric & protein targets, titrate PERT (Creon) enzymes, and publish structured meal plans.
+            </p>
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Pancreatic Nutrition & Dietetics Workspace</h1>
-          <p className="text-xs text-slate-300 mt-1 max-w-xl">
-            Design staged recovery diets, manage Pancreatic Enzyme Replacement Therapy (PERT / Creon) timing, and synchronize nutrition tasks to the patient Daily Action Centre.
-          </p>
+
+          {/* Live Stats */}
+          <div className="flex gap-4">
+            {[
+              { label: "Active Referrals", value: referrals.length, color: "#10b981" },
+              { label: "Plans Active", value: activePlan ? 1 : 0, color: "#06b6d4" },
+              { label: "PERT Enforced", value: enzymeRequirement ? "YES" : "NO", color: "#f59e0b" },
+            ].map((stat) => (
+              <div key={stat.label} style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: "14px 18px", textAlign: "center", minWidth: 85 }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: stat.color }}>{stat.value}</div>
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 2, whiteSpace: "nowrap" }}>{stat.label}</div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
+      {/* ── TOAST FEEDBACK ── */}
       {feedback && (
-        <div
-          className={`p-4 rounded-xl text-xs font-medium flex items-center justify-between border ${
-            feedback.type === "success"
-              ? "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300"
-              : "bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-300"
-          }`}
-        >
-          <span>{feedback.message}</span>
-          <button
-            onClick={() => setFeedback(null)}
-            className="text-xs opacity-70 hover:opacity-100 font-bold ml-2"
-          >
-            ✕
-          </button>
+        <div style={{
+          background: feedback.type === "success" ? "rgba(16,185,129,0.12)" : "rgba(239,68,68,0.12)",
+          border: `1px solid ${feedback.type === "success" ? "rgba(16,185,129,0.3)" : "rgba(239,68,68,0.3)"}`,
+          borderRadius: 14, padding: "14px 18px",
+          color: feedback.type === "success" ? "#6ee7b7" : "#fca5a5",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          backdropFilter: "blur(12px)",
+        }}>
+          <div className="flex items-center gap-2">
+            <span style={{ fontSize: 16 }}>{feedback.type === "success" ? "✓" : "⚠"}</span>
+            <span style={{ fontSize: 13, fontWeight: 600 }}>{feedback.message}</span>
+          </div>
+          <button onClick={() => setFeedback(null)} style={{ color: "rgba(255,255,255,0.4)", fontSize: 18, cursor: "pointer", background: "none", border: "none", lineHeight: 1 }}>✕</button>
         </div>
       )}
 
+      {/* ── MAIN GRID ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Referral Inbox */}
-        <div className="lg:col-span-4 space-y-4">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4 shadow-sm">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                Nutrition Referrals
-                <span className="px-2 py-0.5 text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 rounded-full font-medium">
-                  {referrals.length}
-                </span>
-              </h2>
+
+        {/* ── LEFT: REFERRAL INBOX ── */}
+        <div className="lg:col-span-4">
+          <div style={{
+            background: "rgba(255,255,255,0.03)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 24, overflow: "hidden",
+            backdropFilter: "blur(20px)",
+          }}>
+            <div style={{ background: "rgba(255,255,255,0.04)", borderBottom: "1px solid rgba(255,255,255,0.07)", padding: "16px 20px" }} className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div style={{ background: "rgba(16,185,129,0.15)", borderRadius: 10, padding: "6px 8px", fontSize: 14 }}>📋</div>
+                <div>
+                  <h2 style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Dietetics Referrals</h2>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>Clinical nutrition queue</p>
+                </div>
+                {referrals.length > 0 && (
+                  <div style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.4)", color: "#6ee7b7", borderRadius: 20, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>
+                    {referrals.length}
+                  </div>
+                )}
+              </div>
               <button
                 onClick={loadReferrals}
-                className="text-xs text-emerald-600 hover:text-emerald-500 font-medium"
+                style={{ background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.2)", color: "#6ee7b7", borderRadius: 10, padding: "6px 12px", fontSize: 11, fontWeight: 600, cursor: "pointer", transition: "all 0.2s" }}
+                onMouseEnter={e => (e.currentTarget.style.background = "rgba(16,185,129,0.2)")}
+                onMouseLeave={e => (e.currentTarget.style.background = "rgba(16,185,129,0.1)")}
               >
-                Refresh
+                ↻ Refresh
               </button>
             </div>
 
-            {isLoading ? (
-              <div className="py-8 text-center text-xs text-slate-400">Loading referrals...</div>
-            ) : referrals.length === 0 ? (
-              <div className="py-8 text-center text-xs text-slate-400">
-                No active nutrition referrals found.
-              </div>
-            ) : (
-              <div className="space-y-2.5 max-h-[600px] overflow-y-auto pr-1">
-                {referrals.map((ref) => {
-                  const isSelected = selectedReferral?.id === ref.id;
-                  const patientName = ref.patient
-                    ? `${ref.patient.givenName} ${ref.patient.familyName}`
-                    : `Patient #${ref.patientId.slice(0, 6)}`;
-
-                  return (
-                    <div
-                      key={ref.id}
-                      onClick={() => setSelectedReferral(ref)}
-                      className={`p-3.5 rounded-xl border transition cursor-pointer ${
-                        isSelected
-                          ? "bg-emerald-50/80 dark:bg-emerald-950/40 border-emerald-300 dark:border-emerald-700 shadow-sm"
-                          : "bg-slate-50/50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div>
-                          <div className="text-xs font-semibold text-slate-900 dark:text-white">
-                            {patientName}
-                          </div>
-                          <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                            {ref.reason}
-                          </div>
-                        </div>
-                        <span
-                          className={`px-2 py-0.5 text-[10px] font-semibold rounded-full uppercase ${
-                            ref.priority === "EMERGENCY"
-                              ? "bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300"
-                              : ref.priority === "URGENT"
-                                ? "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300"
-                                : "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                          }`}
-                        >
-                          {ref.priority}
-                        </span>
-                      </div>
-
-                      {ref.surgicalSummary && (
-                        <div className="mt-2 text-[11px] bg-white/60 dark:bg-slate-900/60 p-2 rounded-lg text-slate-600 dark:text-slate-300 border border-slate-200/60 dark:border-slate-700/60">
-                          <span className="font-semibold text-slate-700 dark:text-slate-200">Surg:</span> {ref.surgicalSummary}
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-between mt-3 pt-2 border-t border-slate-200/60 dark:border-slate-700/60 text-[11px]">
-                        <span className="text-slate-400">Status: <strong className="text-slate-700 dark:text-slate-200">{ref.status}</strong></span>
-
-                        <div className="flex items-center gap-1.5">
-                          {ref.status === "PENDING" && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleReferralAction(ref.id, "ACCEPT");
-                              }}
-                              className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-semibold shadow-xs"
-                            >
-                              Accept
-                            </button>
-                          )}
-                          {(ref.status === "ACCEPTED" || ref.status === "IN_PROGRESS") && (
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleReferralAction(ref.id, "COMPLETE");
-                              }}
-                              className="px-2 py-1 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-[10px] font-semibold shadow-xs"
-                            >
-                              Complete
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Selected Patient Studio */}
-        <div className="lg:col-span-8 space-y-4">
-          {selectedReferral ? (
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-sm">
-              {/* Header & Tabs */}
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 gap-2">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-                      {selectedReferral.patient
-                        ? `${selectedReferral.patient.givenName} ${selectedReferral.patient.familyName}`
-                        : `Patient #${selectedReferral.patientId.slice(0, 8)}`}
-                    </h2>
-                    <span className="px-2.5 py-0.5 text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 font-semibold rounded-full">
-                      Referral #{selectedReferral.id.slice(0, 6)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Referred by: {selectedReferral.referringDoctor?.staffProfile?.membership?.displayName || "Surgical Team"}
-                  </p>
+            <div style={{ padding: "12px", maxHeight: 640, overflowY: "auto" }}>
+              {isLoading ? (
+                <div className="space-y-3">
+                  {[1, 2, 3].map(i => (
+                    <div key={i} style={{ background: "rgba(255,255,255,0.04)", borderRadius: 16, height: 90, animation: "pulse 1.5s ease-in-out infinite" }} />
+                  ))}
                 </div>
-
-                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
-                  <button
-                    onClick={() => setActiveTab("assessment")}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
-                      activeTab === "assessment"
-                        ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs"
-                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-                    }`}
-                  >
-                    Nutritional Assessment
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("plan")}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
-                      activeTab === "plan"
-                        ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs"
-                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-                    }`}
-                  >
-                    Diet Plan & PERT
-                  </button>
-                  <button
-                    onClick={() => setActiveTab("history")}
-                    className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
-                      activeTab === "history"
-                        ? "bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs"
-                        : "text-slate-600 dark:text-slate-400 hover:text-slate-900"
-                    }`}
-                  >
-                    Active Plan View
-                  </button>
+              ) : referrals.length === 0 ? (
+                <div style={{ padding: "48px 20px", textAlign: "center" }}>
+                  <div style={{ fontSize: 40, marginBottom: 12 }}>🥗</div>
+                  <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13, fontWeight: 600 }}>No active referrals</div>
+                  <div style={{ color: "rgba(255,255,255,0.2)", fontSize: 11, marginTop: 4 }}>New nutrition referrals will appear here</div>
                 </div>
-              </div>
-
-              {/* Tab 1: Nutritional Assessment */}
-              {activeTab === "assessment" && (
-                <form onSubmit={handleSaveAssessment} className="mt-5 space-y-5">
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Weight (kg)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={weightKg}
-                        onChange={(e) => setWeightKg(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Height (cm)
-                      </label>
-                      <input
-                        type="number"
-                        value={heightCm}
-                        onChange={(e) => setHeightCm(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                      />
-                    </div>
-                    <div className="bg-slate-50 dark:bg-slate-800/60 p-3 rounded-xl border border-slate-200 dark:border-slate-700 flex flex-col justify-center">
-                      <span className="text-[11px] font-medium text-slate-500">Calculated BMI</span>
-                      <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">
-                        {bmi ? `${bmi} kg/m²` : "—"}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Weight Change Since Surgery (kg)
-                      </label>
-                      <input
-                        type="number"
-                        step="0.1"
-                        value={weightChangeKg}
-                        onChange={(e) => setWeightChangeKg(e.target.value)}
-                        placeholder="e.g. -2.5"
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                      />
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between items-center mb-1">
-                        <label className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                          Appetite Score (1 - 10)
-                        </label>
-                        <span className="text-xs font-bold text-emerald-600">{appetiteScore}/10</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="1"
-                        max="10"
-                        value={appetiteScore}
-                        onChange={(e) => setAppetiteScore(parseInt(e.target.value, 10))}
-                        className="w-full accent-emerald-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                      GI Symptoms (Steatorrhoea, Diarrhea, Nausea, Bloating)
-                    </label>
-                    <input
-                      type="text"
-                      value={giSymptoms}
-                      onChange={(e) => setGiSymptoms(e.target.value)}
-                      placeholder="e.g. Pale oily stool noted on POD 3; early satiety"
-                      className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                    />
-                  </div>
-
-                  <div className="p-4 bg-amber-50 dark:bg-amber-950/40 rounded-xl border border-amber-200 dark:border-amber-800 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                        Pancreatic Enzyme Replacement Therapy (PERT) Required
-                      </span>
-                      <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-0.5">
-                        Indicated for pancreatic head resection, total pancreatectomy, or steatorrhoea.
-                      </p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={enzymeRequirement}
-                      onChange={(e) => setEnzymeRequirement(e.target.checked)}
-                      className="w-5 h-5 accent-amber-600 rounded cursor-pointer"
-                    />
-                  </div>
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      type="submit"
-                      className="px-5 py-2.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-sm transition"
-                    >
-                      Save Nutritional Assessment
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* Tab 2: Diet Plan & PERT Builder */}
-              {activeTab === "plan" && (
-                <form onSubmit={handleSavePlan} className="mt-5 space-y-5">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Dietary Recovery Phase
-                      </label>
-                      <select
-                        value={dietPhase}
-                        onChange={(e) => setDietPhase(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
+              ) : (
+                <div className="space-y-2">
+                  {referrals.map((ref) => {
+                    const isSelected = selectedReferral?.id === ref.id;
+                    const name = ref.patient ? `${ref.patient.givenName} ${ref.patient.familyName}` : `Patient #${ref.patientId.slice(0, 6)}`;
+                    return (
+                      <div
+                        key={ref.id}
+                        onClick={() => setSelectedReferral(ref)}
+                        style={{
+                          background: isSelected ? "rgba(16,185,129,0.12)" : "rgba(255,255,255,0.03)",
+                          border: `1px solid ${isSelected ? "rgba(16,185,129,0.4)" : "rgba(255,255,255,0.07)"}`,
+                          borderRadius: 16, padding: "14px 16px", cursor: "pointer",
+                          transition: "all 0.2s",
+                          boxShadow: isSelected ? "0 0 0 1px rgba(16,185,129,0.2), inset 0 1px 0 rgba(255,255,255,0.06)" : "none",
+                        }}
                       >
-                        {DIET_PHASES.map((p, idx) => (
-                          <option key={idx} value={p}>{p}</option>
-                        ))}
-                      </select>
-                    </div>
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <div>
+                            <div style={{ fontSize: 13, fontWeight: 700, color: isSelected ? "#a7f3d0" : "#fff" }}>{name}</div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>{ref.reason}</div>
+                          </div>
+                          <span style={{ background: "rgba(16,185,129,0.15)", color: "#6ee7b7", borderRadius: 8, padding: "3px 8px", fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>
+                            {ref.priority}
+                          </span>
+                        </div>
 
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                        Plan Title
-                      </label>
-                      <input
-                        type="text"
-                        value={planTitle}
-                        onChange={(e) => setPlanTitle(e.target.value)}
-                        className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl"
-                      />
-                    </div>
-                  </div>
+                        {ref.surgicalSummary && (
+                          <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "6px 10px", fontSize: 11, color: "rgba(255,255,255,0.45)", marginBottom: 10 }}>
+                            <span style={{ color: "rgba(255,255,255,0.6)", fontWeight: 600 }}>Surg: </span>{ref.surgicalSummary}
+                          </div>
+                        )}
 
-                  <div className="grid grid-cols-3 gap-3 text-xs">
-                    <div>
-                      <label className="block text-slate-500 mb-1">Caloric Target (kcal)</label>
-                      <input
-                        type="number"
-                        value={caloricTarget}
-                        onChange={(e) => setCaloricTarget(parseInt(e.target.value, 10) || 0)}
-                        step="50"
-                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-500 mb-1">Protein Target (g)</label>
-                      <input
-                        type="number"
-                        value={proteinTarget}
-                        onChange={(e) => setProteinTarget(parseInt(e.target.value, 10) || 0)}
-                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-slate-500 mb-1">Fluid Target (mL)</label>
-                      <input
-                        type="number"
-                        value={fluidTarget}
-                        onChange={(e) => setFluidTarget(parseInt(e.target.value, 10) || 0)}
-                        step="100"
-                        className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Pancreatic Safety Callout */}
-                  <div className="bg-amber-50 dark:bg-amber-950/40 p-4 rounded-xl border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 flex items-start gap-2">
-                    <span className="text-base">⚠️</span>
-                    <div>
-                      <strong>Clinical Dosing Rule (PERT / Creon):</strong> Pancreatic enzymes are locked to <em>Take With Meal</em>. They must be ingested with the first bite of each meal or snack to prevent acid inactivation and optimize lipid absorption.
-                    </div>
-                  </div>
-
-                  {/* Meal & Enzyme Schedule Items */}
-                  <div className="space-y-3">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xs font-semibold text-slate-900 dark:text-white uppercase tracking-wider">
-                        Structured Meals & Enzyme Schedule
-                      </h3>
-                      <button
-                        type="button"
-                        onClick={handleAddItem}
-                        className="px-2.5 py-1 text-xs font-semibold text-emerald-600 hover:text-emerald-500 bg-emerald-50 dark:bg-emerald-950/60 rounded-lg border border-emerald-200 dark:border-emerald-800"
-                      >
-                        + Add Meal / Enzyme
-                      </button>
-                    </div>
-
-                    <div className="space-y-2 max-h-[350px] overflow-y-auto pr-1">
-                      {planItems.map((item, idx) => {
-                        const isEnzyme = item.itemType === "ENZYME" || /creon/i.test(item.name);
-                        return (
-                          <div
-                            key={idx}
-                            className={`p-3 rounded-xl border flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs ${
-                              isEnzyme
-                                ? "bg-amber-50/60 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800"
-                                : "bg-slate-50 dark:bg-slate-800/40 border-slate-200 dark:border-slate-700"
-                            }`}
-                          >
-                            <div className="flex-1 grid grid-cols-1 sm:grid-cols-4 gap-2 w-full">
-                              <select
-                                value={item.itemType}
-                                onChange={(e) => handleUpdateItem(idx, { itemType: e.target.value as NutritionItemType })}
-                                className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
-                              >
-                                <option value="MEAL">Meal</option>
-                                <option value="SNACK">Snack</option>
-                                <option value="SUPPLEMENT">Supplement</option>
-                                <option value="ENZYME">PERT / Enzyme</option>
-                              </select>
-
-                              <input
-                                type="text"
-                                value={item.timeOfDay}
-                                onChange={(e) => handleUpdateItem(idx, { timeOfDay: e.target.value })}
-                                placeholder="Time / Meal Slot"
-                                className="px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs"
-                              />
-
-                              <input
-                                type="text"
-                                value={item.name}
-                                onChange={(e) => handleUpdateItem(idx, { name: e.target.value })}
-                                placeholder="Item / Food Name"
-                                className="sm:col-span-2 px-2 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-xs font-medium"
-                              />
-                            </div>
-
-                            <div className="flex items-center gap-3 self-end sm:self-center">
-                              <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 font-medium">
-                                <input
-                                  type="checkbox"
-                                  checked={item.withMeal}
-                                  disabled={isEnzyme}
-                                  onChange={(e) => handleUpdateItem(idx, { withMeal: e.target.checked })}
-                                  className="accent-amber-600"
-                                />
-                                With Meal
-                              </label>
-
+                        <div className="flex items-center justify-between pt-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.35)" }}>
+                            Status: <strong style={{ color: ref.status === "IN_PROGRESS" ? "#34d399" : "#60a5fa" }}>{ref.status}</strong>
+                          </span>
+                          <div className="flex gap-1.5">
+                            {ref.status === "PENDING" && (
                               <button
-                                type="button"
-                                onClick={() => handleRemoveItem(idx)}
-                                className="text-rose-500 hover:text-rose-600 p-1"
-                              >
-                                ✕
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/40 rounded-xl border border-emerald-200 dark:border-emerald-800 flex items-center justify-between">
-                    <div>
-                      <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
-                        Synchronize Plan into Patient Daily Action Centre
-                      </span>
-                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5">
-                        Creates daily meal, snack, and Creon schedule tasks directly in the patient portal.
-                      </p>
-                    </div>
-                    <input
-                      type="checkbox"
-                      checked={syncToCarePlan}
-                      onChange={(e) => setSyncToCarePlan(e.target.checked)}
-                      className="w-5 h-5 accent-emerald-600 rounded cursor-pointer"
-                    />
-                  </div>
-
-                  <div className="flex justify-end pt-2">
-                    <button
-                      type="submit"
-                      className="px-5 py-2.5 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-xl shadow-sm transition"
-                    >
-                      Publish & Synchronize Nutrition Plan
-                    </button>
-                  </div>
-                </form>
-              )}
-
-              {/* Tab 3: Active Plan View */}
-              {activeTab === "history" && (
-                <div className="mt-5 space-y-4">
-                  {activePlan ? (
-                    <div className="p-5 bg-slate-50 dark:bg-slate-800/40 rounded-2xl border border-slate-200 dark:border-slate-800 space-y-4">
-                      <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-slate-700">
-                        <div>
-                          <h3 className="text-sm font-bold text-slate-900 dark:text-white">{activePlan.title}</h3>
-                          <span className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold">{activePlan.phase}</span>
-                        </div>
-                        <span className="px-2.5 py-1 text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 font-bold rounded-full">
-                          Active Plan
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-3 gap-4 text-xs">
-                        <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                          <span className="text-slate-400 block text-[10px]">Calories</span>
-                          <span className="font-bold text-sm text-slate-900 dark:text-white">{activePlan.caloricTargetKcal ?? "—"} kcal</span>
-                        </div>
-                        <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                          <span className="text-slate-400 block text-[10px]">Protein</span>
-                          <span className="font-bold text-sm text-slate-900 dark:text-white">{activePlan.proteinTargetGrams ?? "—"} g</span>
-                        </div>
-                        <div className="p-3 bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
-                          <span className="text-slate-400 block text-[10px]">Fluids</span>
-                          <span className="font-bold text-sm text-slate-900 dark:text-white">{activePlan.fluidTargetMl ?? "—"} mL</span>
-                        </div>
-                      </div>
-
-                      {activePlan.items && (
-                        <div className="space-y-2 pt-2">
-                          <h4 className="text-xs font-semibold text-slate-700 dark:text-slate-300">Prescribed Daily Schedule</h4>
-                          <div className="space-y-1.5">
-                            {activePlan.items.map((item, i) => (
-                              <div
-                                key={i}
-                                className="p-2.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 text-xs flex justify-between items-center"
-                              >
-                                <div>
-                                  <span className="font-semibold text-slate-900 dark:text-white">[{item.timeOfDay}]</span> {item.name}
-                                </div>
-                                {item.withMeal && (
-                                  <span className="px-2 py-0.5 text-[10px] bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 rounded font-semibold">
-                                    With Meal
-                                  </span>
-                                )}
-                              </div>
-                            ))}
+                                onClick={e => { e.stopPropagation(); handleReferralAction(ref.id, "ACCEPT"); }}
+                                style={{ background: "rgba(16,185,129,0.2)", border: "1px solid rgba(16,185,129,0.4)", color: "#6ee7b7", borderRadius: 8, padding: "4px 10px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+                              >Accept</button>
+                            )}
+                            {(ref.status === "ACCEPTED" || ref.status === "IN_PROGRESS") && (
+                              <button
+                                onClick={e => { e.stopPropagation(); handleReferralAction(ref.id, "COMPLETE"); }}
+                                style={{ background: "rgba(6,182,212,0.2)", border: "1px solid rgba(6,182,212,0.4)", color: "#67e8f9", borderRadius: 8, padding: "4px 10px", fontSize: 10, fontWeight: 700, cursor: "pointer" }}
+                              >Complete</button>
+                            )}
                           </div>
                         </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="py-8 text-center text-xs text-slate-400">
-                      No active nutrition plan currently found for this patient. Author one using the &quot;Diet Plan &amp; PERT&quot; tab.
-                    </div>
-                  )}
-
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
+          </div>
+        </div>
+
+        {/* ── RIGHT: PATIENT NUTRITION STUDIO ── */}
+        <div className="lg:col-span-8">
+          {selectedReferral ? (
+            <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 24, backdropFilter: "blur(20px)", overflow: "hidden" }}>
+
+              {/* Patient Banner */}
+              <div style={{ background: "linear-gradient(135deg, rgba(16,185,129,0.12), rgba(6,182,212,0.08))", borderBottom: "1px solid rgba(255,255,255,0.08)", padding: "20px 24px" }}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="flex items-center gap-4">
+                    <div style={{ width: 52, height: 52, borderRadius: 16, background: "linear-gradient(135deg, #10b981, #06b6d4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, fontWeight: 800, color: "#fff", flexShrink: 0 }}>
+                      {patientName.charAt(0)}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h2 style={{ fontSize: 18, fontWeight: 800, color: "#fff" }}>{patientName}</h2>
+                        <span style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.3)", color: "#6ee7b7", borderRadius: 8, padding: "2px 8px", fontSize: 10, fontWeight: 700 }}>
+                          REF #{selectedReferral.id.slice(0, 6).toUpperCase()}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", marginTop: 2 }}>
+                        Referred by: {selectedReferral.referringDoctor?.staffProfile?.membership?.displayName || "Surgical Team"}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Tabs Switcher */}
+                  <div style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: 4, display: "flex", gap: 2 }}>
+                    {(["assessment", "plan", "history"] as const).map((tab) => {
+                      const tabLabels = { assessment: "Assessment", plan: "Dietary Plan", history: `History (${assessments.length})` };
+                      const tabIcons  = { assessment: "⚖️", plan: "🍱", history: "📜" };
+                      return (
+                        <button
+                          key={tab}
+                          onClick={() => setActiveTab(tab)}
+                          style={{
+                            background: activeTab === tab ? "rgba(16,185,129,0.2)" : "transparent",
+                            border: `1px solid ${activeTab === tab ? "rgba(16,185,129,0.4)" : "transparent"}`,
+                            color: activeTab === tab ? "#6ee7b7" : "rgba(255,255,255,0.4)",
+                            borderRadius: 10, padding: "7px 14px", fontSize: 12, fontWeight: 600,
+                            cursor: "pointer", transition: "all 0.2s", whiteSpace: "nowrap",
+                          }}
+                        >
+                          {tabIcons[tab]} {tabLabels[tab]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── TAB CONTENT ── */}
+              <div style={{ padding: 24 }}>
+
+                {/* ── TAB 1: ASSESSMENT ── */}
+                {activeTab === "assessment" && (
+                  <div className="space-y-6">
+                    {/* Metric Quick Stats */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 20, padding: "18px 16px", textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>Computed BMI</div>
+                        <div style={{ fontSize: 26, fontWeight: 800, color: "#10b981", marginTop: 4 }}>{bmi ?? "--"}</div>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>
+                          {bmi ? (parseFloat(bmi) < 18.5 ? "Underweight" : parseFloat(bmi) < 25 ? "Normal Range" : "Elevated") : "Enter H/W"}
+                        </div>
+                      </div>
+                      <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 20, padding: "18px 16px", textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>Weight Delta</div>
+                        <div style={{ fontSize: 26, fontWeight: 800, color: parseFloat(weightChangeKg) < 0 ? "#f59e0b" : "#10b981", marginTop: 4 }}>{weightChangeKg} kg</div>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>Post-operative trend</div>
+                      </div>
+                      <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 20, padding: "18px 16px", textAlign: "center" }}>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", textTransform: "uppercase", letterSpacing: "0.08em", fontWeight: 700 }}>Appetite Score</div>
+                        <div style={{ fontSize: 26, fontWeight: 800, color: appetiteScore >= 7 ? "#10b981" : appetiteScore >= 4 ? "#f59e0b" : "#ef4444", marginTop: 4 }}>{appetiteScore}/10</div>
+                        <div style={{ fontSize: 10, color: "rgba(255,255,255,0.3)", marginTop: 2 }}>Oral intake readiness</div>
+                      </div>
+                    </div>
+
+                    <form onSubmit={handleSaveAssessment} className="space-y-5">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6 }}>Current Weight (kg)</label>
+                          <input type="number" step="0.1" value={weightKg} onChange={e => setWeightKg(e.target.value)}
+                            style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: "10px 14px", color: "#fff", fontSize: 13 }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6 }}>Height (cm)</label>
+                          <input type="number" value={heightCm} onChange={e => setHeightCm(e.target.value)}
+                            style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: "10px 14px", color: "#fff", fontSize: 13 }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6 }}>Weight Change (kg)</label>
+                          <input type="text" value={weightChangeKg} onChange={e => setWeightChangeKg(e.target.value)}
+                            style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: "10px 14px", color: "#fff", fontSize: 13 }} />
+                        </div>
+                      </div>
+
+                      {/* Appetite Slider */}
+                      <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: 18 }}>
+                        <div className="flex items-center justify-between mb-3">
+                          <label style={{ fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.7)" }}>Appetite & Intake Level (0 - 10)</label>
+                          <span style={{ fontSize: 18, fontWeight: 800, color: "#10b981" }}>{appetiteScore}<span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>/10</span></span>
+                        </div>
+                        <input type="range" min="0" max="10" value={appetiteScore} onChange={e => setAppetiteScore(parseInt(e.target.value, 10))}
+                          style={{ width: "100%", accentColor: "#10b981" }} />
+                        <div className="flex justify-between" style={{ fontSize: 10, color: "rgba(255,255,255,0.25)", marginTop: 6 }}>
+                          <span>0: Anorexic / Nil by Mouth</span><span>5: Moderate Intake</span><span>10: Full Normal Appetite</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6 }}>Gastrointestinal Symptoms</label>
+                        <input type="text" value={giSymptoms} onChange={e => setGiSymptoms(e.target.value)}
+                          placeholder="e.g. Steatorrhea, early satiety, postprandial nausea"
+                          style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: "10px 14px", color: "#fff", fontSize: 13 }} />
+                      </div>
+
+                      {/* PERT Toggle */}
+                      <div style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.2)", borderRadius: 16, padding: "14px 18px" }} className="flex items-center justify-between">
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#6ee7b7" }}>PERT Enzyme Replacement Required</div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Pancreatic exocrine insufficiency titration (e.g. Creon with all meals/snacks)</div>
+                        </div>
+                        <input type="checkbox" checked={enzymeRequirement} onChange={e => setEnzymeRequirement(e.target.checked)}
+                          style={{ width: 20, height: 20, accentColor: "#10b981", cursor: "pointer" }} />
+                      </div>
+
+                      <div>
+                        <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6 }}>Clinical Dietetics Notes</label>
+                        <textarea value={assessmentNotes} onChange={e => setAssessmentNotes(e.target.value)}
+                          placeholder="Document dietary tolerance, enzyme compliance, bowel habit notes..."
+                          rows={2}
+                          style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: "10px 14px", color: "#fff", fontSize: 13 }} />
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button type="submit"
+                          style={{ background: "linear-gradient(135deg, #10b981, #06b6d4)", borderRadius: 14, padding: "12px 28px", fontSize: 13, fontWeight: 700, color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 4px 24px rgba(16,185,129,0.3)" }}>
+                          Save Nutritional Assessment
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+
+                {/* ── TAB 2: DIETARY PLAN ── */}
+                {activeTab === "plan" && (
+                  <div className="space-y-6">
+                    {/* Target Gauges */}
+                    <div className="grid grid-cols-3 gap-4">
+                      <GaugeBar value={caloricTarget} max={2500} color="linear-gradient(90deg, #10b981, #06b6d4)" label="Caloric Target" unit="kcal" />
+                      <GaugeBar value={proteinTarget} max={120} color="linear-gradient(90deg, #06b6d4, #8b5cf6)" label="Protein Target" unit="grams" />
+                      <GaugeBar value={fluidTarget} max={3000} color="linear-gradient(90deg, #3b82f6, #06b6d4)" label="Fluid Target" unit="mL" />
+                    </div>
+
+                    <form onSubmit={handleSavePlan} className="space-y-5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6 }}>Dietary Plan Title</label>
+                          <input type="text" value={planTitle} onChange={e => setPlanTitle(e.target.value)}
+                            style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: "10px 14px", color: "#fff", fontSize: 13 }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, fontWeight: 600, color: "rgba(255,255,255,0.5)", textTransform: "uppercase", letterSpacing: "0.08em", display: "block", marginBottom: 6 }}>Recovery Phase</label>
+                          <select value={dietPhase} onChange={e => setDietPhase(e.target.value)}
+                            style={{ width: "100%", background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 12, padding: "10px 14px", color: "#fff", fontSize: 13 }}>
+                            {DIET_PHASES.map(phase => <option key={phase} value={phase}>{phase}</option>)}
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Nutrient Sliders */}
+                      <div className="grid grid-cols-3 gap-4">
+                        <div>
+                          <label style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", display: "block", marginBottom: 6 }}>Calories: {caloricTarget} kcal</label>
+                          <input type="range" min="1000" max="3000" step="50" value={caloricTarget} onChange={e => setCaloricTarget(parseInt(e.target.value, 10))} style={{ width: "100%", accentColor: "#10b981" }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", display: "block", marginBottom: 6 }}>Protein: {proteinTarget} g</label>
+                          <input type="range" min="40" max="150" step="5" value={proteinTarget} onChange={e => setProteinTarget(parseInt(e.target.value, 10))} style={{ width: "100%", accentColor: "#06b6d4" }} />
+                        </div>
+                        <div>
+                          <label style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", display: "block", marginBottom: 6 }}>Fluids: {fluidTarget} mL</label>
+                          <input type="range" min="1000" max="3500" step="100" value={fluidTarget} onChange={e => setFluidTarget(parseInt(e.target.value, 10))} style={{ width: "100%", accentColor: "#3b82f6" }} />
+                        </div>
+                      </div>
+
+                      {/* Meals & PERT Items */}
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <label style={{ fontSize: 12, fontWeight: 700, color: "#fff" }}>Structured Meal Schedule & PERT Enzyme Titration</label>
+                          <button type="button" onClick={handleAddPlanItem}
+                            style={{ background: "rgba(16,185,129,0.15)", border: "1px solid rgba(16,185,129,0.3)", color: "#6ee7b7", borderRadius: 10, padding: "5px 12px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                            + Add Item
+                          </button>
+                        </div>
+
+                        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                          {planItems.map((item, idx) => (
+                            <div key={idx} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 14, padding: "10px 14px" }} className="flex items-center gap-3">
+                              <span style={{ fontSize: 16 }}>{item.itemType === "ENZYME" ? "💊" : item.itemType === "SNACK" ? "🍎" : "🍲"}</span>
+                              <select value={item.itemType} onChange={e => handleUpdatePlanItem(idx, { itemType: e.target.value as NutritionItemType })}
+                                style={{ background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 8px", color: "#fff", fontSize: 11 }}>
+                                <option value="MEAL">Meal</option>
+                                <option value="ENZYME">PERT Enzyme</option>
+                                <option value="SNACK">Snack</option>
+                                <option value="SUPPLEMENT">Supplement</option>
+                              </select>
+                              <input type="text" value={item.timeOfDay} onChange={e => handleUpdatePlanItem(idx, { timeOfDay: e.target.value })}
+                                placeholder="Time" style={{ width: 90, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 8px", color: "#fff", fontSize: 11 }} />
+                              <input type="text" value={item.name} onChange={e => handleUpdatePlanItem(idx, { name: e.target.value })}
+                                placeholder="Description" style={{ flex: 1, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, padding: "6px 8px", color: "#fff", fontSize: 11 }} />
+                              <button type="button" onClick={() => handleRemovePlanItem(idx)} style={{ color: "rgba(255,255,255,0.3)", background: "none", border: "none", cursor: "pointer", fontSize: 14 }}>✕</button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* CarePlan Sync */}
+                      <div style={{ background: "rgba(6,182,212,0.08)", border: "1px solid rgba(6,182,212,0.2)", borderRadius: 16, padding: "14px 18px" }} className="flex items-center justify-between">
+                        <div>
+                          <div style={{ fontSize: 13, fontWeight: 700, color: "#67e8f9" }}>Publish to Patient Daily Action Centre</div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 2 }}>Interactive meal checklists and enzyme dose timers appear in the patient portal</div>
+                        </div>
+                        <input type="checkbox" checked={syncToCarePlan} onChange={e => setSyncToCarePlan(e.target.checked)}
+                          style={{ width: 20, height: 20, accentColor: "#06b6d4", cursor: "pointer" }} />
+                      </div>
+
+                      <div className="flex justify-end">
+                        <button type="submit"
+                          style={{ background: "linear-gradient(135deg, #10b981, #06b6d4)", borderRadius: 14, padding: "12px 28px", fontSize: 13, fontWeight: 700, color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 4px 24px rgba(16,185,129,0.3)" }}>
+                          🚀 Publish & Sync Nutrition Plan
+                        </button>
+                      </div>
+                    </form>
+                  </div>
+                )}
+
+                {/* ── TAB 3: HISTORY ── */}
+                {activeTab === "history" && (
+                  <div className="space-y-4">
+                    {assessments.length === 0 ? (
+                      <div style={{ padding: "40px", textAlign: "center", color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No past assessments found</div>
+                    ) : (
+                      assessments.map(a => (
+                        <div key={a.id} style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "16px 18px" }} className="flex items-center justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span style={{ fontSize: 14, fontWeight: 700, color: "#fff" }}>Weight: {a.weightKg ? `${a.weightKg} kg` : "N/A"}</span>
+                              <span style={{ fontSize: 12, color: "#10b981", fontWeight: 700 }}>· Appetite: {a.appetiteScore}/10</span>
+                              {a.enzymeRequirement && (
+                                <span style={{ background: "rgba(245,158,11,0.15)", color: "#fcd34d", borderRadius: 6, padding: "2px 6px", fontSize: 10, fontWeight: 700 }}>PERT ACTIVE</span>
+                              )}
+                            </div>
+                            {a.giSymptoms && <div style={{ fontSize: 11, color: "rgba(255,255,255,0.4)", marginTop: 4 }}>GI: {a.giSymptoms}</div>}
+                          </div>
+                          <span style={{ fontSize: 11, color: "rgba(255,255,255,0.3)" }}>{new Date(a.assessedAt).toLocaleDateString()}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           ) : (
-            <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-12 text-center text-slate-400 text-xs">
-              Select a patient referral from the inbox to open their clinical nutrition studio.
+            <div style={{
+              background: "rgba(255,255,255,0.02)",
+              border: "1px dashed rgba(255,255,255,0.1)",
+              borderRadius: 24, padding: "80px 40px", textAlign: "center",
+              backdropFilter: "blur(10px)",
+            }}>
+              <div style={{ fontSize: 64, marginBottom: 20 }}>🥗</div>
+              <h3 style={{ fontSize: 20, fontWeight: 700, color: "rgba(255,255,255,0.6)", marginBottom: 8 }}>Select a Patient Referral</h3>
+              <p style={{ fontSize: 14, color: "rgba(255,255,255,0.3)", maxWidth: 340, margin: "0 auto" }}>
+                Choose a clinical dietetics referral from the inbox to open their nutritional assessment and PERT titration studio.
+              </p>
             </div>
           )}
         </div>

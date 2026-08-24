@@ -935,6 +935,54 @@ const platformNavigationGroups:
     },
   ];
 
+const physiotherapyNavigationGroups:
+  readonly NavigationGroup[] = [
+    {
+      label: "Physiotherapy & Mobility",
+      items: [
+        {
+          label: "Mobility Studio",
+          href: "/operations/physiotherapy",
+          icon: Activity,
+          description:
+            "Post-operative mobility milestones, spirometry and exercise plans",
+        },
+      ],
+    },
+  ];
+
+const nutritionNavigationGroups:
+  readonly NavigationGroup[] = [
+    {
+      label: "Clinical Nutrition",
+      items: [
+        {
+          label: "Dietetics Studio",
+          href: "/operations/nutrition",
+          icon: HeartPulse,
+          description:
+            "Post-resection nutrition assessment, PERT enzyme titration and meal planning",
+        },
+      ],
+    },
+  ];
+
+const alertNavigationGroups:
+  readonly NavigationGroup[] = [
+    {
+      label: "Clinical Alerting",
+      items: [
+        {
+          label: "Alert Console",
+          href: "/operations/alerts",
+          icon: HeartPulse,
+          description:
+            "Emergency clinical alerts, ISGPS fistula monitors & escalation rota",
+        },
+      ],
+    },
+  ];
+
 /**
  * Department workspaces all live under `/operations`, so the path alone cannot
  * identify them. Keying on the signed-in workspace first stops a laboratory,
@@ -953,12 +1001,38 @@ const workspaceNavigationGroups:
     PHARMACY: pharmacyNavigationGroups,
     BILLING: billingNavigationGroups,
     MANAGEMENT: managementNavigationGroups,
+    PHYSIOTHERAPIST: physiotherapyNavigationGroups,
+    NUTRITIONIST: nutritionNavigationGroups,
   };
 
 function getNavigationGroupsForPath(
   pathname: string,
   workspace?: WorkspaceCode | null,
 ): readonly NavigationGroup[] {
+  if (
+    pathname.startsWith(
+      "/operations/physiotherapy",
+    )
+  ) {
+    return physiotherapyNavigationGroups;
+  }
+
+  if (
+    pathname.startsWith(
+      "/operations/nutrition",
+    )
+  ) {
+    return nutritionNavigationGroups;
+  }
+
+  if (
+    pathname.startsWith(
+      "/operations/alerts",
+    )
+  ) {
+    return alertNavigationGroups;
+  }
+
   if (
     pathname.startsWith(
       "/operations",

@@ -469,6 +469,58 @@ if (developmentDoctor && developmentPatient && doctorMembership) {
       });
     }
   }
+
+  /**
+   * Seed active clinical referrals for Allied Health Workspaces
+   * (Physiotherapy & Mobility, Clinical Nutrition & Dietetics)
+   */
+  const physioReferral = await database.clinicalReferral.findFirst({
+    where: { tenantId: tenant.id, patientId: developmentPatient.id, specialty: "PHYSIOTHERAPY" },
+    select: { id: true },
+  });
+
+  if (!physioReferral) {
+    await database.clinicalReferral.create({
+      data: {
+        tenantId: tenant.id,
+        patientId: developmentPatient.id,
+        referringDoctorId: developmentDoctor.id,
+        specialty: "PHYSIOTHERAPY",
+        discipline: "PHYSIOTHERAPY",
+        status: "ACCEPTED",
+        priority: "URGENT",
+        reason: "Post-operative Whipple mobility & respiratory rehabilitation",
+        goal: "Independent corridor ambulation (100m) and incentive spirometry > 1500mL by POD 5",
+        surgicalSummary: "Pancreaticoduodenectomy (Whirique), midline laparotomy, subhepatic JP drain in situ",
+        precautions: "Maintain abdominal binder; check drain line tension before transfers",
+        validFrom: new Date(),
+      },
+    });
+  }
+
+  const nutritionReferral = await database.clinicalReferral.findFirst({
+    where: { tenantId: tenant.id, patientId: developmentPatient.id, specialty: "NUTRITION" },
+    select: { id: true },
+  });
+
+  if (!nutritionReferral) {
+    await database.clinicalReferral.create({
+      data: {
+        tenantId: tenant.id,
+        patientId: developmentPatient.id,
+        referringDoctorId: developmentDoctor.id,
+        specialty: "NUTRITION",
+        discipline: "NUTRITION",
+        status: "ACCEPTED",
+        priority: "URGENT",
+        reason: "Post-pancreatectomy dietary progression and PERT (Creon) enzyme titration",
+        goal: "Tolerate Phase 3 soft diet with optimized pancreatic enzyme replacement (PERT)",
+        surgicalSummary: "Pancreaticoduodenectomy POD 2, transitioning to oral nutrition",
+        precautions: "Low-fat restriction (< 20g/day); Creon 25,000 IU with all meals and snacks",
+        validFrom: new Date(),
+      },
+    });
+  }
 }
 
 const platformEmail = "platform@wonflow.local";
