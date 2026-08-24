@@ -29,6 +29,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WONFLOW_AVATAR_CHANGED_EVENT } from "@/components/shell";
 import { OfflineStatusBar } from "./offline-status-bar";
+import { PwaInstallPrompt } from "./pwa-install-prompt";
+
 
 type Section = "home" | "care" | "reports" | "billing";
 
@@ -474,7 +476,11 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
       {/* ── Offline Status Bar ─────────────────────────────────────────── */}
       <OfflineStatusBar />
 
+      {/* ── PWA Mobile Install Banner ─────────────────────────────────── */}
+      <PwaInstallPrompt />
+
       {/* ── Hero Welcome Banner ────────────────────────────────────────── */}
+
       <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-700 via-indigo-700 to-violet-800 p-6 text-white shadow-xl sm:p-8">
         <div className="absolute -top-24 -right-24 size-96 rounded-full bg-white/10 blur-3xl" />
         <div className="absolute -bottom-24 -left-24 size-96 rounded-full bg-cyan-500/15 blur-3xl" />

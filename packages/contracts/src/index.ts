@@ -54,7 +54,9 @@ export * from "./clinical/symptom";
 export * from "./clinical/education";
 export * from "./clinical/physiotherapy";
 export * from "./clinical/nutrition";
+export * from "./clinical/alerting";
 export * from "./offline/sync";
+
 
 
 

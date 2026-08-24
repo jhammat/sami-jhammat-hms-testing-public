@@ -9,3 +9,4 @@ export * from "./patient-symptom-logger";
 export * from "./patient-lab-results-view";
 export * from "./patient-education-library";
 export * from "./offline-status-bar";
+export * from "./pwa-install-prompt";

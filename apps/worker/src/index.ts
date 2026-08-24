@@ -64,7 +64,100 @@ async function sweepExpiredReferrals() {
   }
 }
 
+/**
+ * Periodic sweep for unacknowledged clinical alert escalations.
+ * Dispatches Step 1/2/3 multi-channel notifications (Push -> SMS -> Escalation target).
+ */
+const alertEscalationInterval = Number(process.env.WORKER_ALERT_ESCALATION_INTERVAL_MS ?? 15_000);
+async function sweepAlertEscalations() {
+  const now = new Date();
+  try {
+    const due = await database.alertEscalation.findMany({
+      where: {
+        scheduledFor: { lte: now },
+        sentAt: null,
+        failedAt: null,
+      },
+      include: {
+        AlertEvent: {
+          include: { Patient: true },
+        },
+      },
+      take: 25,
+    });
+
+    for (const esc of due) {
+      if (!esc.AlertEvent) continue;
+      if (["ACKNOWLEDGED", "RESOLVED"].includes(esc.AlertEvent.status)) {
+        await database.alertEscalation.update({
+          where: { id: esc.id },
+          data: { failedAt: now, failureReason: "Alert resolved or acknowledged" },
+        });
+        continue;
+      }
+
+      const patient = esc.AlertEvent.Patient;
+      const patientName = `${patient.givenName} ${patient.familyName}`;
+      const alert = esc.AlertEvent;
+      const message = `[WonFlow Clinical Alert - ${alert.severity}] Patient ${patientName} (${patient.patientNumber}) has an active alert: ${alert.title}. Review in portal.`;
+
+      await database.notification.create({
+        data: {
+          tenantId: esc.tenantId,
+          patientId: alert.patientId,
+          channel: esc.channel === "SMS" ? "SMS" : "IN_APP",
+          templateCode: "CLINICAL_ALERT_ESCALATION",
+          status: "DELIVERED",
+          sentAt: now,
+          destination: esc.targetMembershipId,
+          payload: {
+            alertEventId: alert.id,
+            severity: alert.severity,
+            step: esc.step,
+            message,
+            link: `/operations/alerts?alertId=${alert.id}`,
+          },
+        },
+      });
+
+
+      await database.alertEscalation.update({
+        where: { id: esc.id },
+        data: {
+          sentAt: now,
+          deliveredAt: now,
+        },
+      });
+
+      if (esc.step === 2) {
+        const rota = await database.alertRota.findFirst({
+          where: {
+            tenantId: esc.tenantId,
+            severity: alert.severity,
+          },
+        });
+        if (rota) {
+          const step3Interval = alert.severity === "CRITICAL" ? 15 : 45;
+          await database.alertEscalation.create({
+            data: {
+              tenantId: esc.tenantId,
+              alertEventId: alert.id,
+              step: 3,
+              channel: "SMS",
+              targetMembershipId: rota.escalationMembershipId,
+              scheduledFor: new Date(now.getTime() + step3Interval * 60 * 1000),
+            },
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error("Alert escalation sweep failed", error instanceof Error ? error.message : error);
+  }
+}
+
 console.log("WonFlow worker started");
 setInterval(()=>void poll(),interval);void poll();
 setInterval(()=>void sweepVideoConsultations(),retentionInterval);void sweepVideoConsultations();
 setInterval(()=>void sweepExpiredReferrals(),referralSweepInterval);void sweepExpiredReferrals();
+setInterval(()=>void sweepAlertEscalations(),alertEscalationInterval);void sweepAlertEscalations();

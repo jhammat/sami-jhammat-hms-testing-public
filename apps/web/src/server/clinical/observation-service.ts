@@ -7,6 +7,8 @@ import {
   SUPPORTED_VITALS,
 } from "@wonflow/contracts";
 import { WonFlowApiError } from "@/server/http/route-handler";
+import { AlertEvaluationService } from "./alert-evaluation-service";
+
 
 export interface RecordObservationInput {
   patientId: string;
@@ -100,8 +102,27 @@ export class ObservationService {
       },
     });
 
+    // Evaluate alert rules for incoming observation
+    const alertService = new AlertEvaluationService();
+    await alertService
+      .evaluateMetric({
+        tenantId: rc.tenantId,
+        patientId: input.patientId,
+        metricType: "OBSERVATION",
+        metricCode: input.code.trim(),
+        metricValue:
+          input.valueNumber !== undefined && input.valueNumber !== null
+            ? input.valueNumber
+            : input.valueText || "",
+        sourceRecordType: "clinical-observation",
+        sourceRecordId: observation.id,
+        deviceRecordedAt: input.deviceRecordedAt ? new Date(input.deviceRecordedAt) : null,
+      })
+      .catch((err) => console.error("Alert evaluation failed on observation", err));
+
     return observation;
   }
+
 
   /**
    * Promotes a preliminary observation to FINAL. Only clinicians/staff may confirm an observation.

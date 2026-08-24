@@ -1,5 +1,7 @@
 import { database } from "@wonflow/database";
 import { WonFlowApiError } from "@/server/http/route-handler";
+import { AlertEvaluationService } from "./alert-evaluation-service";
+
 import type {
   CombinedRecoveryTimelineItem,
   ObservationSource,
@@ -122,7 +124,23 @@ export class SymptomService {
       },
     });
 
+    // Evaluate Stage E Symptom Alert Rules
+    const alertService = new AlertEvaluationService();
+    await alertService
+      .evaluateMetric({
+        tenantId: rc.tenantId,
+        patientId,
+        metricType: "SYMPTOM",
+        metricCode: created.symptomCode,
+        metricValue: created.severityScore,
+        sourceRecordType: "symptom-log",
+        sourceRecordId: created.id,
+        deviceRecordedAt: created.deviceRecordedAt,
+      })
+      .catch((err) => console.error("Alert evaluation failed on symptom log", err));
+
     return {
+
       id: created.id,
       patientId: created.patientId,
       recordedAt: created.recordedAt.toISOString(),

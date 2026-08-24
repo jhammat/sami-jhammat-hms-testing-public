@@ -1,5 +1,7 @@
 import { database } from "@wonflow/database";
 import { WonFlowApiError } from "@/server/http/route-handler";
+import { AlertEvaluationService } from "./alert-evaluation-service";
+
 import type {
   DrainDailyTrendPoint,
   DrainTrendSeries,
@@ -424,7 +426,53 @@ export class DrainService {
         },
       });
     }
+
+    // Evaluate Stage E Alert Rules
+    const alertService = new AlertEvaluationService();
+    // 1. Amylase
+    if (amylaseNum > 0) {
+      await alertService
+        .evaluateMetric({
+          tenantId: rc.tenantId,
+          patientId: drain.patientId,
+          metricType: "DRAIN",
+          metricCode: "amylase",
+          metricValue: amylaseNum,
+          sourceRecordType: "drain-log",
+          sourceRecordId: currentLog.id,
+        })
+        .catch((err) => console.error("Alert evaluation failed on drain amylase", err));
+    }
+    // 2. Volume
+    if (currentLog.volumeMl > 0) {
+      await alertService
+        .evaluateMetric({
+          tenantId: rc.tenantId,
+          patientId: drain.patientId,
+          metricType: "DRAIN",
+          metricCode: "volume",
+          metricValue: currentLog.volumeMl,
+          sourceRecordType: "drain-log",
+          sourceRecordId: currentLog.id,
+        })
+        .catch((err) => console.error("Alert evaluation failed on drain volume", err));
+    }
+    // 3. Colour
+    if (currentLog.colour) {
+      await alertService
+        .evaluateMetric({
+          tenantId: rc.tenantId,
+          patientId: drain.patientId,
+          metricType: "DRAIN",
+          metricCode: "colour",
+          metricValue: currentLog.colour,
+          sourceRecordType: "drain-log",
+          sourceRecordId: currentLog.id,
+        })
+        .catch((err) => console.error("Alert evaluation failed on drain colour", err));
+    }
   }
+
 
   /**
    * Retrieves 24h volume aggregation, colour progression, and amylase markers for a specific drain.
