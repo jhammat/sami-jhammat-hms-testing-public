@@ -11,7 +11,8 @@
   "scripts": {
     "dev": "pnpm --filter web dev",
     "dev:web": "pnpm --filter web dev",
-    "build": "pnpm demo:strings:check && pnpm --filter web build",
+    "build": "pnpm db:client && pnpm demo:strings:check && pnpm --filter web build",
+    "db:client": "pnpm --filter @wonflow/database db:generate",
     "start": "pnpm --filter web start",
     "lint": "pnpm --filter web lint",
     "lint:fix": "pnpm --filter web lint:fix",

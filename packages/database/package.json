@@ -16,6 +16,7 @@
     "typescript": "^5"
   },
   "scripts": {
+    "postinstall": "prisma generate",
     "typecheck": "tsc --noEmit",
     "db:format": "prisma format",
     "db:generate": "prisma generate",
