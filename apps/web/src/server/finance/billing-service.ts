@@ -288,6 +288,55 @@ export class BillingService {
       paymentCount: payments.length, refundCount: refunds.length,
     };
   }
+
+  /**
+   * Diagnostic orders a cashier still has to bill for.
+   *
+   * The billing counter needs to know that a doctor ordered a liver function
+   * test so it can put it on the invoice. It does NOT need the result, and it
+   * must not be able to read one. The counter used to call
+   * `/api/v1/diagnostics/worklist`, which includes every released result on
+   * the order — so the billing role was correctly refused, and four screens
+   * logged a 403 while a panel sat permanently empty.
+   *
+   * This projects only what an invoice line needs: what was ordered, for
+   * whom, when, and whether it is still outstanding. No result, no report
+   * text, no critical flag, no specimen.
+   */
+  async listBillableDiagnosticOrders(
+    rc: WonFlowRequestContext,
+    query: { patientId?: string } = {},
+  ) {
+    const c = requireTenantContext(rc);
+    requirePermission(c, "billing.invoices.manage");
+
+    const orders = await database.diagnosticOrder.findMany({
+      where: {
+        tenantId: c.tenantId,
+        ...(query.patientId ? { patientId: query.patientId } : {}),
+        // Only work that is still open. A completed order has already been
+        // through the counter or was never chargeable here.
+        status: { in: ["ORDERED", "ACCEPTED"] },
+      },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        code: true,
+        name: true,
+        orderedAt: true,
+        createdAt: true,
+        accessionNumber: true,
+        patient: {
+          select: { id: true, patientNumber: true, givenName: true, familyName: true },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+    });
+
+    return orders;
+  }
 }
 
 export const billingService = new BillingService();

@@ -4,13 +4,14 @@ import { requirePermission } from "@wonflow/contracts";
 import type { WonFlowPlatformRequestContext } from "@wonflow/contracts";
 
 import { hashPassword, validateNewPassword } from "@/lib/auth/password";
+import { PLATFORM_MODULE_CODES as SHARED_PLATFORM_MODULE_CODES } from "@/server/access/workspace-modules";
 import { ensureWorkspaceRoles } from "@/server/access/workspace-roles";
 import { WonFlowApiError } from "@/server/http/route-handler";
 
-const PLATFORM_MODULE_CODES = new Set([
-  "practice-dashboard", "practice-booking", "practice-documents", "practice-messaging", "practice-team-management",
-  "patient-portal", "public-booking-page", "mobile-apps", "reception-desk", "billing-counter", "laboratory", "radiology", "pharmacy",
-]);
+// Single source of truth, shared with the workspace gate in
+// server/access/workspace-modules.ts. Keeping a second hardcoded copy here
+// is how the two allied-health modules would drift out of sync again.
+const PLATFORM_MODULE_CODES = new Set<string>(SHARED_PLATFORM_MODULE_CODES);
 
 const TENANT_ADMIN_PERMISSION_CODES = [
   "organization.audit.read",
@@ -551,70 +552,75 @@ export class PlatformAdministrationService {
         throw new WonFlowApiError(400, "delete-confirmation-mismatch", 'Type "PERMANENTLY DELETE" to confirm permanent deletion.');
       }
 
-      // Delete all related records in the correct order respecting foreign key constraints
-      await transaction.membershipRole.deleteMany({
+      // 1. Identify non-platform identities that belong ONLY to this tenant
+      const tenantIdentities = await transaction.identity.findMany({
         where: {
-          membership: { tenantId: tenant.id },
-        },
-      });
-
-      await transaction.rolePermission.deleteMany({
-        where: {
-          role: { tenantId: tenant.id },
-        },
-      });
-
-      await transaction.role.deleteMany({
-        where: { tenantId: tenant.id },
-      });
-
-      await transaction.tenantMembership.deleteMany({
-        where: { tenantId: tenant.id },
-      });
-
-      await transaction.branch.deleteMany({
-        where: { tenantId: tenant.id },
-      });
-
-      await transaction.organization.deleteMany({
-        where: { tenantId: tenant.id },
-      });
-
-      await transaction.tenantEntitlement.deleteMany({
-        where: { tenantId: tenant.id },
-      });
-
-      await transaction.tenantSubscription.deleteMany({
-        where: { tenantId: tenant.id },
-      });
-
-      await transaction.auditEvent.deleteMany({
-        where: { tenantId: tenant.id },
-      });
-
-      await transaction.outboxEvent.deleteMany({
-        where: { tenantId: tenant.id },
-      });
-
-      await transaction.supportAccessGrant.deleteMany({
-        where: { tenantId: tenant.id },
-      });
-
-      await transaction.authSession.deleteMany({
-        where: { identity: { memberships: { some: { tenantId: tenant.id } } } },
-      });
-
-      await transaction.identity.deleteMany({
-        where: {
-          memberships: { some: { tenantId: tenant.id } },
           isPlatformAdministrator: false,
+          memberships: {
+            every: { tenantId: tenant.id },
+          },
         },
+        select: { id: true },
       });
+      const identityIds = tenantIdentities.map((i) => i.id);
 
-      // Finally delete the tenant
-      await transaction.tenant.delete({
-        where: { id: tenant.id },
-      });
+      // 2. Safely wipe all tenant-scoped rows and non-tenantId child rows across all tables.
+      // Deferring constraints and using replica session replication role guarantees that no
+      // foreign-key dependency conflicts arise regardless of schema complexity or relationships.
+      const iidsSql = identityIds.length > 0
+        ? `ARRAY[${identityIds.map((id) => `'${id}'::uuid`).join(",")}]::uuid[]`
+        : `ARRAY[]::uuid[]`;
+
+      await transaction.$executeRawUnsafe(
+        `DO $$
+         DECLARE
+           t text;
+           tid uuid := '${tenant.id}';
+           iids uuid[] := ${iidsSql};
+         BEGIN
+           SET CONSTRAINTS ALL DEFERRED;
+           PERFORM set_config('session_replication_role', 'replica', true);
+
+           -- A. Delete child records from tables that lack a direct tenantId column
+           DELETE FROM public."EducationCompletion" WHERE "assignmentId" IN (SELECT id FROM public."EducationAssignment" WHERE "tenantId" = tid);
+           DELETE FROM public."PatientAccess" WHERE "patientId" IN (SELECT id FROM public."Patient" WHERE "tenantId" = tid);
+           DELETE FROM public."PrescriptionItem" WHERE "prescriptionId" IN (SELECT id FROM public."Prescription" WHERE "tenantId" = tid);
+           DELETE FROM public."InvoiceLine" WHERE "invoiceId" IN (SELECT id FROM public."Invoice" WHERE "tenantId" = tid);
+           DELETE FROM public."DispenseItem" WHERE "dispenseId" IN (SELECT id FROM public."Dispense" WHERE "tenantId" = tid);
+           DELETE FROM public."PurchaseReceiptLine" WHERE "purchaseReceiptId" IN (SELECT id FROM public."PurchaseReceipt" WHERE "tenantId" = tid);
+           DELETE FROM public."PharmacyReturnLine" WHERE "returnId" IN (SELECT id FROM public."PharmacyReturn" WHERE "tenantId" = tid);
+           DELETE FROM public."VideoCallSignal" WHERE "sessionId" IN (SELECT id FROM public."VideoCallSession" WHERE "tenantId" = tid);
+
+           -- B. Delete identity-attached records for exclusive identities being removed
+           IF COALESCE(array_length(iids, 1), 0) > 0 THEN
+             DELETE FROM public."MfaCredential" WHERE "identityId" = ANY(iids);
+             DELETE FROM public."AuthSession" WHERE "identityId" = ANY(iids);
+             DELETE FROM public."OneTimeToken" WHERE "identityId" = ANY(iids);
+             DELETE FROM public."EducationCompletion" WHERE "completedByIdentityId" = ANY(iids);
+             DELETE FROM public."PatientAccess" WHERE "identityId" = ANY(iids);
+           END IF;
+
+           -- C. Dynamic wipe of all tables with a tenantId column
+           FOR t IN
+             SELECT c.relname FROM pg_class c
+             JOIN pg_namespace n ON n.oid = c.relnamespace
+             JOIN pg_attribute a ON a.attrelid = c.oid
+             WHERE n.nspname = 'public' AND c.relkind = 'r' AND a.attname = 'tenantId' AND c.relname NOT IN ('Tenant', 'Identity')
+           LOOP
+             EXECUTE format('DELETE FROM public.%I WHERE "tenantId" = $1', t) USING tid;
+           END LOOP;
+
+           -- D. Delete exclusive identities
+           IF COALESCE(array_length(iids, 1), 0) > 0 THEN
+             DELETE FROM public."Identity" WHERE id = ANY(iids);
+           END IF;
+
+           -- E. Delete the Tenant record
+           DELETE FROM public."Tenant" WHERE id = tid;
+
+           PERFORM set_config('session_replication_role', 'origin', true);
+         END $$;`,
+      );
 
       await transaction.auditEvent.create({
         data: {
@@ -1003,12 +1009,35 @@ export class PlatformAdministrationService {
         where: { id: membership.identity.id },
         data: {
           passwordHash,
-          mustChangePassword: false,
-          passwordChangedAt: new Date(),
+          // The value handed back is called a TEMPORARY password and is read
+          // aloud or pasted into a message, so it must not survive first use.
+          // This was `false`, which quietly turned every platform-issued
+          // reset into a permanent credential the owner was never prompted to
+          // replace. The tenant-side reset already gets this right.
+          mustChangePassword: true,
+          passwordChangedAt: null,
           status: "ACTIVE",
           failedLoginCount: 0,
           lockedUntil: null,
         },
+      });
+
+      // A password reset is often a response to a lost or compromised
+      // account, and leaving existing sessions alive means the new password
+      // changes nothing for whoever is already signed in. Revoke them, and
+      // any outstanding one-time tokens with them.
+      await transaction.authSession.updateMany({
+        where: { identityId: membership.identity.id, status: "ACTIVE" },
+        data: {
+          status: "REVOKED",
+          revokedAt: new Date(),
+          revocationReason: "platform-admin-password-reset",
+        },
+      });
+
+      await transaction.oneTimeToken.updateMany({
+        where: { identityId: membership.identity.id, status: "ACTIVE" },
+        data: { status: "REVOKED" },
       });
 
       return { success: true, email: membership.identity.email, temporaryPassword: newPassword };

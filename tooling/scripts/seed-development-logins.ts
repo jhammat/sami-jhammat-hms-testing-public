@@ -200,6 +200,42 @@ if (supervisingDoctor) {
 // appointment below sometimes belonged to a doctor nobody was logged in as —
 // an intermittent failure in the video-consultation e2e spec that had nothing
 // to do with the code under test.
+/**
+ * At least one department must exist.
+ *
+ * Inviting a doctor requires picking one, so the admin team screen renders a
+ * required Department select for the DOCTOR workspace. This seed never
+ * created a department, which meant a genuinely fresh database produced an
+ * unusable invite form with nothing to choose — the e2e spec that covers it
+ * only passed on databases that happened to carry a department from earlier
+ * manual use, and started failing the moment the data was rebuilt.
+ */
+const developmentDepartment = await database.department.upsert({
+  where: { tenantId_code: { tenantId: tenant.id, code: "GENERAL" } },
+  create: {
+    tenantId: tenant.id,
+    organizationId: organization.id,
+    code: "GENERAL",
+    name: "General Medicine",
+    isActive: true,
+  },
+  update: { organizationId: organization.id, name: "General Medicine", isActive: true, archivedAt: null },
+});
+
+await database.department.upsert({
+  where: { tenantId_code: { tenantId: tenant.id, code: "HPB" } },
+  create: {
+    tenantId: tenant.id,
+    organizationId: organization.id,
+    code: "HPB",
+    name: "Hepato-Pancreato-Biliary Surgery",
+    isActive: true,
+  },
+  update: { organizationId: organization.id, name: "Hepato-Pancreato-Biliary Surgery", isActive: true, archivedAt: null },
+});
+
+void developmentDepartment;
+
 const developmentDoctor = await database.doctorProfile.findFirst({
   where: { tenantId: tenant.id, staffProfile: { membership: { identity: { normalizedEmail: "doctor@wonflow.local" } } } },
   select: { id: true },

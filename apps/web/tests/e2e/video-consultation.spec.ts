@@ -15,17 +15,34 @@ async function bookOnlineAppointment(request: APIRequestContext): Promise<string
   for (let dayOffset = 1; dayOffset <= 7; dayOffset += 1) {
     const date = new Date(Date.now() + dayOffset * 86_400_000).toISOString().slice(0, 10);
     const catalog = await (await request.get(`/api/v1/patient/booking?date=${date}`)).json();
-    const online = (catalog.catalog?.options ?? []).find((option: { consultationMode: string }) => option.consultationMode === "ONLINE");
+    // The catalog exposes `consultationModes` as an ARRAY -- a service can
+    // be offered both in person and by video, so booking asks which. This
+    // used to read a singular `consultationMode`, which no endpoint returns,
+    // so the find always missed and every video test failed at setup with
+    // "no online consultation slot was available to book".
+    const online = (catalog.catalog?.options ?? []).find(
+      (option: { consultationModes?: string[] }) =>
+        option.consultationModes?.includes("ONLINE") ?? false,
+    );
     if (!online) continue;
 
-    const slot = (catalog.catalog.slots ?? []).find((item: { ruleId: string }) => item.ruleId === online.ruleId);
-    if (!slot) continue;
+    // Try EVERY free slot on the rule, not just the first.
+    //
+    // These tests book real appointments that persist, so on a database
+    // that has run the suite before, the earliest slot of each day is
+    // already taken and answers 409. Taking only `.find(...)` meant the
+    // helper gave up after seven collisions and reported "no online
+    // consultation slot was available" when hundreds were free.
+    const slots = (catalog.catalog.slots ?? []).filter(
+      (item: { ruleId: string }) => item.ruleId === online.ruleId,
+    );
 
-    const booked = await request.post("/api/v1/patient/booking", {
-      data: { slotId: slot.id, reason: `Video consultation check ${Date.now()}`, idempotencyKey: crypto.randomUUID() },
-    });
-    if (booked.status() !== 201) continue;
-    return (await booked.json()).appointment.id as string;
+    for (const slot of slots) {
+      const booked = await request.post("/api/v1/patient/booking", {
+        data: { slotId: slot.id, reason: `Video consultation check ${Date.now()}`, idempotencyKey: crypto.randomUUID() },
+      });
+      if (booked.status() === 201) return (await booked.json()).appointment.id as string;
+    }
   }
 
   throw new Error("no online consultation slot was available to book");
@@ -91,14 +108,24 @@ test("an in-person appointment has no video room", async ({ page }) => {
   for (let dayOffset = 1; dayOffset <= 7 && !inPersonId; dayOffset += 1) {
     const date = new Date(Date.now() + dayOffset * 86_400_000).toISOString().slice(0, 10);
     const catalog = await (await page.request.get(`/api/v1/patient/booking?date=${date}`)).json();
-    const inPerson = (catalog.catalog?.options ?? []).find((option: { consultationMode: string }) => option.consultationMode === "IN_PERSON");
+    const inPerson = (catalog.catalog?.options ?? []).find(
+      (option: { consultationModes?: string[] }) =>
+        option.consultationModes?.includes("IN_PERSON") ?? false,
+    );
     if (!inPerson) continue;
-    const slot = (catalog.catalog.slots ?? []).find((item: { ruleId: string }) => item.ruleId === inPerson.ruleId);
-    if (!slot) continue;
-    const booked = await page.request.post("/api/v1/patient/booking", {
-      data: { slotId: slot.id, reason: "In-person check", idempotencyKey: crypto.randomUUID() },
-    });
-    if (booked.status() === 201) inPersonId = (await booked.json()).appointment.id;
+    const slots = (catalog.catalog.slots ?? []).filter(
+      (item: { ruleId: string }) => item.ruleId === inPerson.ruleId,
+    );
+
+    for (const slot of slots) {
+      const booked = await page.request.post("/api/v1/patient/booking", {
+        data: { slotId: slot.id, reason: "In-person check", idempotencyKey: crypto.randomUUID() },
+      });
+      if (booked.status() === 201) {
+        inPersonId = (await booked.json()).appointment.id;
+        break;
+      }
+    }
   }
 
   expect(inPersonId, "no in-person slot was available to book").toBeTruthy();
@@ -124,8 +151,11 @@ test("the consultation room page renders for its patient", async ({ page }) => {
   expect(response?.status()).toBeLessThan(400);
   await expect(page.getByRole("heading", { level: 1, name: /Online Video Consultation/i })).toBeVisible({ timeout: 20_000 });
   await expect(page.locator("body")).not.toContainText("Application error");
-  // Media capture must not start before the user opts in.
-  await expect(page.getByRole("button", { name: /Join consultation/i })).toBeVisible();
+  // Media capture must not start before the user opts in, so the join
+  // affordance has to be present and unpressed. The button reads "Join Video
+  // Consultation"; this matched on /Join consultation/i, which the word
+  // "Video" sitting between the two halves stops from ever matching.
+  await expect(page.getByRole("button", { name: /Join .*consultation/i })).toBeVisible();
 });
 
 /** The seed keeps one online appointment live so the room is joinable. */

@@ -95,6 +95,7 @@ export interface InstantiateCarePlanInput {
   templateId?: string;
   patientId: string;
   startDate?: string; // ISO date string, defaults to now
+  durationDays?: number; // Custom recovery duration in days
   category?: string;
   title?: string;
   managingDoctorId?: string;

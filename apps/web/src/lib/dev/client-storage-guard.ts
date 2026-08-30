@@ -22,6 +22,22 @@ const ALLOW_LISTED_STORAGE_KEYS = [
   "wonflow-data-cleanup-v1",
 ];
 
+/**
+ * Keys written by the dev toolchain rather than by this application.
+ *
+ * Next.js opens a debug channel in sessionStorage under a per-tab random
+ * suffix. The guard has no way to allow-list that by exact key, and flagging
+ * it fired a console error on a large share of pages in development — which
+ * is exactly how a backstop stops being read. Prefixes are matched rather
+ * than exact keys so the noise goes without weakening the check on anything
+ * the product itself writes.
+ */
+const IGNORED_STORAGE_KEY_PREFIXES = [
+  "__next_debug_channel",
+  "__next",
+  "__nextjs",
+];
+
 function extractCallerFile(
   stack: string | undefined,
 ): string {
@@ -75,6 +91,7 @@ export function installClientStorageGuard(): void {
 
     const isAllowListed =
       ALLOW_LISTED_STORAGE_KEYS.includes(key) ||
+      IGNORED_STORAGE_KEY_PREFIXES.some((prefix) => key.startsWith(prefix)) ||
       ALLOW_LISTED_STORAGE_FILES.some(
         (name) =>
           callerFile.includes(name) || rawStack.includes(name),

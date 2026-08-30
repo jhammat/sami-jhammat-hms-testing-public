@@ -2,13 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { toLocalDate } from "@/lib/time/local-date";
 
 function minorToPkr(minor: number): string {
   return (minor / 100).toLocaleString("en-PK", { style: "currency", currency: "PKR" });
 }
 
 function isoDate(date: Date): string {
-  return date.toISOString().slice(0, 10);
+  return toLocalDate(date);
 }
 
 interface DashboardData {
@@ -34,11 +35,31 @@ interface DashboardData {
   branchTable: { branchId: string; branchName: string; branchCode: string; appointmentTotal: number; appointmentCompleted: number; invoiceCount: number; billedMinor: number; collectedMinor: number; outstandingMinor: number }[];
 }
 
-function KpiTile({ label, value, href }: { label: string; value: string; href: string }) {
-  return (
-    <Link className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md" href={href}>
+/**
+ * `href` is optional, and deliberately so.
+ *
+ * Every tile used to be a link. Two of them pointed somewhere a management
+ * user cannot go: `/operations/team` is not a route at all (it 404s), and the
+ * reception desk needs `patients.manage`, which this role does not hold. A
+ * tile that looks clickable and answers with a 404 or a forbidden page is
+ * worse than a tile that is plainly just a number, so the ones without a
+ * reachable destination no longer pretend to have one.
+ */
+function KpiTile({ label, value, href }: { label: string; value: string; href?: string }) {
+  const body = (
+    <>
       <p className="text-xs font-black uppercase tracking-wide text-slate-500">{label}</p>
       <p className="mt-2 text-3xl font-black text-slate-900">{value}</p>
+    </>
+  );
+
+  if (!href) {
+    return <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">{body}</div>;
+  }
+
+  return (
+    <Link className="block rounded-2xl border border-slate-200 bg-white p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md" href={href}>
+      {body}
     </Link>
   );
 }
@@ -109,12 +130,12 @@ export function ManagementPortalDashboard() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
             <KpiTile href={`/operations/patients`} label="Patients" value={String(data.summary.patientCount)} />
             <KpiTile href={`/operations/appointments?${rangeParams}`} label="Appointments" value={`${data.summary.appointmentCompleted}/${data.summary.appointmentTotal} (${data.summary.appointmentCompletionRate}%)`} />
-            <KpiTile href={`/operations/reception`} label="Queue completion" value={`${data.summary.queueCompleted}/${data.summary.queueTotal} (${data.summary.queueCompletionRate}%)`} />
+            <KpiTile label="Queue completion" value={`${data.summary.queueCompleted}/${data.summary.queueTotal} (${data.summary.queueCompletionRate}%)`} />
             <KpiTile href={`/operations/billing?${rangeParams}`} label="Billed" value={minorToPkr(data.summary.billedMinor)} />
             <KpiTile href={`/operations/billing?${rangeParams}`} label="Collected" value={minorToPkr(data.summary.collectedMinor)} />
             <KpiTile href={`/operations/billing?${rangeParams}`} label="Outstanding" value={minorToPkr(data.summary.outstandingMinor)} />
             <KpiTile href={`/operations/billing?${rangeParams}`} label="Collection rate" value={`${data.summary.collectionRate}%`} />
-            <KpiTile href={`/operations/team`} label="Practitioners" value={String(data.summary.practitionerCount)} />
+            <KpiTile label="Practitioners" value={String(data.summary.practitionerCount)} />
           </div>
 
           <section className="rounded-3xl border border-slate-200 bg-white p-5">

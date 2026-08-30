@@ -1,4 +1,5 @@
 @import "@wonflow/ui/globals.css";
+@import "./surfaces.css";
 
 /* =========================================================
    WonFlow Glass — frosted surface system
@@ -232,7 +233,12 @@ html.dark .wfg-tile:hover {
 /* Luminous accent ring used on hero and focal numbers ---- */
 
 .wfg-aurora {
-  background:
+  /* An opaque base under the gradient. The stops are 0.88-0.92 alpha, so
+     without this the light page canvas bleeds through and the white heading
+     on top loses contrast against it — invisible in review, and exactly the
+     class of failure the allied-portal contrast test exists to catch. */
+  background-color: #1f2c7a;
+  background-image:
     linear-gradient(
       130deg,
       rgb(31 44 122 / 0.92) 0%,
@@ -249,13 +255,35 @@ html.dark .wfg-tile:hover {
 }
 
 html.dark .wfg-aurora {
-  background:
+  background-color: #0e183e;
+  background-image:
     linear-gradient(
       130deg,
       rgb(14 24 62 / 0.94) 0%,
       rgb(31 26 96 / 0.92) 44%,
       rgb(60 25 96 / 0.90) 100%
     );
+}
+
+/* The aurora hero's own type colours.
+
+   These are plain hex rather than Tailwind colour utilities on purpose. The
+   utility palette is defined in oklch, and a computed `oklch(...)` cannot be
+   measured by the contrast check in the allied-portal e2e suite — the check
+   that exists because a hero once shipped with white text on a white
+   surface. Colour that has to be verifiable is declared in a space the
+   verifier can read. */
+
+.wfg-aurora-title {
+  color: #ffffff;
+}
+
+.wfg-aurora-body {
+  color: #d9dffa;
+}
+
+.wfg-aurora-eyebrow {
+  color: #a5eef5;
 }
 
 .wfg-aurora-blob {
@@ -390,9 +418,23 @@ html.dark .wfg-nav-item[aria-current="page"] {
 }
 
 /* Dark-mode reconciliation.
-   This project has no `.dark` custom variant, so Tailwind `dark:`
-   utilities never fire on the class toggle — every dark correction
-   has to be written out here. */
+
+   CORRECTION: this block used to claim the project has no `.dark` custom
+   variant and that `dark:` utilities never fire. That is not true.
+   `packages/ui/src/styles/globals.css` declares
+   `@custom-variant dark (&:where(.dark, .dark *))`, and a `dark:` utility
+   resolves correctly against the class toggle — verified in the browser,
+   where `dark:text-emerald-300` resolves to emerald, not to its light
+   counterpart.
+
+   The note mattered because it pushed every dark fix into the blanket
+   `[class*="…"]` overrides below, and those cannot express the one case
+   that actually breaks: an accent-tinted background paired with neutral
+   text. They flip the text and leave the surface, which is how the hero
+   heading ended up white on white. Prefer a `dark:` utility, or the token
+   layer in `surfaces.css`, over adding more attribute-substring rules
+   here. The rules below stay because a great deal of existing markup
+   depends on them. */
 
 html.dark .wfg-panel,
 html.dark .wfg-tile,
@@ -885,5 +927,336 @@ html.dark .wf-admin-refresh {
     animation: none;
     opacity: 1;
     transform: none;
+  }
+}
+
+/* =========================================================
+   WonFlow Viz — the chart token layer
+   ---------------------------------------------------------
+   Every chart in the product renders inside `.wf-viz`, and is
+   written against these ROLES, never against raw hex. The
+   categorical order is the colour-blind-safety mechanism, not
+   a palette of pretty colours: the eight slots were validated
+   with the six checks (lightness band, chroma floor, CVD
+   separation, normal-vision floor, contrast) against this
+   product's real surfaces — #ffffff light, #0d1b2d dark — and
+   only orderings that clear every adjacent gate in BOTH modes
+   were kept. Re-order or re-step a slot and that guarantee is
+   gone, so do not hand-edit a single value: re-run the
+   validator on the candidate ordering first.
+
+   Slot 1 is the WonFlow brand blue; slots 2-8 come from the
+   validated reference ramp. Three light slots (aqua, yellow,
+   magenta) sit below 3:1 on white by design — every chart that
+   uses them ships a legend with visible value labels, which is
+   the documented relief, so hue never carries meaning alone.
+   ========================================================= */
+
+.wf-viz {
+  --viz-surface: #ffffff;
+  --viz-plane: #f7f8fc;
+
+  --viz-ink: #0b1220;
+  --viz-ink-2: #475569;
+  --viz-muted: #8a93a6;
+
+  --viz-grid: #e6e9f0;
+  --viz-axis: #d4dae6;
+  --viz-ring: rgb(11 18 32 / 0.10);
+
+  --viz-1: #2e5bff;
+  --viz-2: #eb6834;
+  --viz-3: #1baf7a;
+  --viz-4: #eda100;
+  --viz-5: #e87ba4;
+  --viz-6: #008300;
+  --viz-7: #4a3aa7;
+  --viz-8: #e34948;
+
+  /* Sequential ramp — one hue, light to dark. Ordinal marks
+     start no lighter than step 250, which is the lightest step
+     still clearing 2:1 on the light surface. */
+  --viz-seq-100: #cde2fb;
+  --viz-seq-250: #86b6ef;
+  --viz-seq-400: #3987e5;
+  --viz-seq-550: #1c5cab;
+  --viz-seq-700: #0d366b;
+
+  /* Status is reserved. It never doubles as "series 5", and it
+     never ships without an icon and a label beside it. */
+  --viz-good: #0ca30c;
+  --viz-warning: #fab219;
+  --viz-serious: #ec835a;
+  --viz-critical: #d03b3b;
+
+  --viz-good-ink: #006300;
+  --viz-critical-ink: #b02525;
+
+  /* The de-emphasis grey, for the "one series is the point,
+     the rest are context" case. */
+  --viz-mute-mark: #c8cedb;
+}
+
+html.dark .wf-viz {
+  --viz-surface: #0d1b2d;
+  --viz-plane: #091321;
+
+  --viz-ink: #e8eefb;
+  --viz-ink-2: #a8b8cd;
+  --viz-muted: #7f8fa5;
+
+  --viz-grid: rgb(148 163 184 / 0.18);
+  --viz-axis: rgb(148 163 184 / 0.30);
+  --viz-ring: rgb(255 255 255 / 0.10);
+
+  --viz-1: #5b86ff;
+  --viz-2: #d95926;
+  --viz-3: #199e70;
+  --viz-4: #c98500;
+  --viz-5: #d55181;
+  --viz-6: #008300;
+  --viz-7: #9085e9;
+  --viz-8: #e66767;
+
+  --viz-seq-100: #0d366b;
+  --viz-seq-250: #184f95;
+  --viz-seq-400: #256abf;
+  --viz-seq-550: #5598e7;
+  --viz-seq-700: #9ec5f4;
+
+  --viz-good-ink: #0ca30c;
+  --viz-critical-ink: #e66767;
+
+  --viz-mute-mark: #33445c;
+}
+
+/* Marks animate in once, then hold. Reduced motion skips it
+   entirely rather than shortening it. */
+@keyframes wf-viz-arc {
+  from { stroke-dashoffset: var(--wf-viz-arc-len); }
+  to { stroke-dashoffset: var(--wf-viz-arc-off); }
+}
+
+@keyframes wf-viz-grow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+@keyframes wf-viz-draw {
+  from { stroke-dashoffset: var(--wf-viz-draw-len); }
+  to { stroke-dashoffset: 0; }
+}
+
+.wf-viz-arc {
+  animation: wf-viz-arc 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.wf-viz-bar {
+  animation: wf-viz-grow 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  transform-box: fill-box;
+  transform-origin: bottom;
+}
+
+.wf-viz-line {
+  animation: wf-viz-draw 900ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wf-viz-arc,
+  .wf-viz-bar,
+  .wf-viz-line {
+    animation: none;
+  }
+}
+
+/* The hover layer. A chart in a browser is interactive by
+   default; the tooltip is chrome, so it wears text tokens and
+   never a series colour. */
+.wf-viz-tip {
+  background: var(--viz-surface);
+  border: 1px solid var(--viz-ring);
+  border-radius: 10px;
+  box-shadow: 0 12px 30px -12px rgb(11 18 32 / 0.28);
+  color: var(--viz-ink);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 8px 10px;
+  pointer-events: none;
+  position: absolute;
+  white-space: nowrap;
+  z-index: 30;
+}
+
+html.dark .wf-viz-tip {
+  box-shadow: 0 12px 30px -12px rgb(0 0 0 / 0.7);
+}
+
+.wf-viz-hit {
+  cursor: default;
+  fill: transparent;
+  outline: none;
+}
+
+.wf-viz-seg {
+  transition: opacity 160ms ease;
+}
+
+.wf-viz-seg[data-dim="true"] {
+  opacity: 0.32;
+}
+
+/* =========================================================
+   Physiotherapy workspace — scoped presentation
+   ---------------------------------------------------------
+   Everything here is namespaced to `.wfg-pt`, the wrapper the
+   physiotherapy portal renders inside. The portal is built on
+   frosted glass, and the shared chart frame paints an opaque
+   card; rather than fork the charts, the scope re-points the
+   two surface tokens they read so the same validated
+   components render transparently on glass. Nothing outside
+   the physiotherapy portal is affected.
+   ========================================================= */
+
+.wfg-pt .wf-surface {
+  --wf-panel: transparent;
+  --wf-panel-border: transparent;
+  --wf-shadow: none;
+}
+
+.wfg-pt .wf-viz {
+  --viz-grid: rgb(148 163 184 / 0.20);
+  --viz-axis: rgb(148 163 184 / 0.34);
+}
+
+/* The chart tooltip still needs an opaque plate to stay legible
+   over a blurred surface, so it keeps its own background. */
+.wfg-pt .wf-viz-tip {
+  backdrop-filter: blur(18px) saturate(180%);
+  background: var(--wfg-surface-strong);
+  -webkit-backdrop-filter: blur(18px) saturate(180%);
+}
+
+/* Range input used by GradientSlider. The track is painted by an
+   element behind the input, so the input itself contributes only
+   a thumb.
+
+   The `html.dark input { background-color: #122238 !important }` rule
+   further up applies to every input on the page, this one included, and
+   an opaque plate over the gradient hid the whole scale — the slider
+   read as a plain grey bar in dark mode. The range input is chrome-free
+   by construction, so it opts out of the blanket input styling entirely
+   rather than trying to out-specify it per property. */
+.wfg-pt input.physio-range,
+html.dark .wfg-pt input.physio-range,
+html.dark input.physio-range:hover,
+html.dark input.physio-range:focus {
+  background-color: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+}
+
+.physio-range {
+  height: 22px;
+  margin: 0;
+  width: 100%;
+}
+
+.physio-range:focus-visible {
+  outline: none;
+}
+
+.physio-range::-webkit-slider-runnable-track {
+  background: transparent;
+  height: 22px;
+}
+
+.physio-range::-moz-range-track {
+  background: transparent;
+  height: 22px;
+}
+
+.physio-range::-webkit-slider-thumb {
+  appearance: none;
+  background: #ffffff;
+  border: 3px solid var(--physio-thumb, #0891b2);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px -2px rgb(15 23 42 / 0.45);
+  cursor: grab;
+  height: 20px;
+  margin-top: 1px;
+  transition:
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 160ms ease;
+  width: 20px;
+}
+
+.physio-range::-moz-range-thumb {
+  background: #ffffff;
+  border: 3px solid var(--physio-thumb, #0891b2);
+  border-radius: 999px;
+  box-shadow: 0 2px 8px -2px rgb(15 23 42 / 0.45);
+  cursor: grab;
+  height: 20px;
+  transition:
+    transform 160ms cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 160ms ease;
+  width: 20px;
+}
+
+.physio-range:hover::-webkit-slider-thumb,
+.physio-range:focus-visible::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+
+.physio-range:hover::-moz-range-thumb,
+.physio-range:focus-visible::-moz-range-thumb {
+  transform: scale(1.12);
+}
+
+.physio-range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 5px rgb(34 211 238 / 0.30);
+}
+
+.physio-range:focus-visible::-moz-range-thumb {
+  box-shadow: 0 0 0 5px rgb(34 211 238 / 0.30);
+}
+
+/* Number inputs inside the stepper are chromeless: the plus and
+   minus buttons are the affordance, and the spinners crowd them. */
+.wfg-pt input[type="number"]::-webkit-outer-spin-button,
+.wfg-pt input[type="number"]::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.wfg-pt input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+/* Cards enter once on mount, staggered by an inline delay. */
+@keyframes wfg-pt-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wfg-pt-rise {
+  animation: wfg-pt-rise 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wfg-pt-rise {
+    animation: none;
+  }
+
+  .physio-range::-webkit-slider-thumb,
+  .physio-range::-moz-range-thumb {
+    transition: none;
   }
 }

@@ -6,8 +6,8 @@ import { hospitalAdministrationService } from "@/server/admin/hospital-administr
 
 export async function PATCH(request: Request): Promise<NextResponse> {
   try {
-    const body = await request.json() as { authority?: "DOCTOR" | "HOSPITAL" };
-    if (body.authority !== "DOCTOR" && body.authority !== "HOSPITAL") {
+    const body = await request.json() as { authority?: "DOCTOR" | "HOSPITAL" | "APPROVAL_REQUIRED" };
+    if (body.authority !== "DOCTOR" && body.authority !== "HOSPITAL" && body.authority !== "APPROVAL_REQUIRED") {
       return NextResponse.json({ error: "Select who controls doctor fees." }, { status: 400 });
     }
     const organization = await hospitalAdministrationService.updateDoctorFeeAuthority(
@@ -19,3 +19,4 @@ export async function PATCH(request: Request): Promise<NextResponse> {
     return safeApiError(error);
   }
 }
+

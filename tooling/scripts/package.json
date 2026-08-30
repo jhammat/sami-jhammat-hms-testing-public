@@ -1,0 +1,19 @@
+{
+  "name": "@wonflow/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Operational and seeding scripts for the WonFlow platform",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@wonflow/contracts": "workspace:*",
+    "@wonflow/database": "workspace:*",
+    "@wonflow/typescript-config": "workspace:*",
+    "dotenv": "^17.2.3",
+    "playwright": "^1.54.0",
+    "typescript": "^5"
+  }
+}

@@ -249,7 +249,7 @@ export class CarePlanService {
 
     const title = input.title?.trim() || template?.title || "Personalized Clinical Care Plan";
     const category = input.category || template?.category || "GENERAL";
-    const durationDays = template?.durationDays || 14;
+    const durationDays = typeof input.durationDays === "number" && input.durationDays > 0 ? Math.floor(input.durationDays) : (template?.durationDays || 14);
 
     const startDate = input.startDate ? new Date(input.startDate) : new Date();
     startDate.setHours(0, 0, 0, 0);

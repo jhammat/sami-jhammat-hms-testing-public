@@ -18,6 +18,7 @@ import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { WonFlowPageHeader } from "@/components/workspace";
+import { todayLocalDate } from "@/lib/time/local-date";
 
 export type DiagnosticType = "LABORATORY" | "RADIOLOGY";
 export type DiagnosticView = "all" | "collection" | "processing" | "release" | "released" | "critical";
@@ -295,7 +296,7 @@ function matchesView(order: DiagnosticOrder, view: DiagnosticView, config: Depar
 
 export function DiagnosticsWorkspace({ type, view = "all" }: { type: DiagnosticType; view?: DiagnosticView }) {
   const config = DEPARTMENTS[type];
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayLocalDate());
   const [orders, setOrders] = useState<DiagnosticOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -452,7 +453,15 @@ export function DiagnosticsWorkspace({ type, view = "all" }: { type: DiagnosticT
                 </div>
 
                 <div className="flex flex-wrap gap-2 lg:justify-end">
-                  {config.usesSpecimens && order.specimens.length === 0 ? (
+                  {/* Specimen collection is only offered while the order is
+                      still open. It used to be offered whenever no specimen
+                      row existed — which meant a COMPLETED order with a
+                      released critical result still showed "Collect specimen"
+                      as its primary blue action, ahead of viewing the result
+                      that had already been telephoned to the ward. */}
+                  {config.usesSpecimens &&
+                  order.specimens.length === 0 &&
+                  ["ORDERED", "ACCEPTED"].includes(order.status) ? (
                     <button
                       className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-black text-white transition hover:bg-blue-700 disabled:opacity-50"
                       disabled={busy}
@@ -478,7 +487,11 @@ export function DiagnosticsWorkspace({ type, view = "all" }: { type: DiagnosticT
 
                   <Link
                     className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-black transition ${
-                      preliminary ? "bg-blue-600 text-white hover:bg-blue-700" : "border border-slate-200 bg-white text-blue-700 hover:bg-blue-50"
+                      // The result is the primary action once there is one to
+                      // read, and while one is waiting to be released.
+                      preliminary || order.results.length
+                        ? "bg-blue-600 text-white hover:bg-blue-700"
+                        : "border border-slate-200 bg-white text-blue-700 hover:bg-blue-50"
                     }`}
                     href={`${config.basePath}/results/${order.id}`}
                   >

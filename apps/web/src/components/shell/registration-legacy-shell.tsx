@@ -15,6 +15,13 @@ import type {
 import {
   Activity,
   BadgeDollarSign,
+  Calculator,
+  CalendarClock,
+  ClipboardCheck,
+  Dumbbell,
+  Gauge,
+  Inbox,
+  Route,
   ArrowRight,
   BarChart3,
   Building2,
@@ -43,12 +50,15 @@ import {
   ScanLine,
   Search,
   Settings,
+  ShieldAlert,
   ShieldCheck,
   Stethoscope,
   Syringe,
   UserPlus,
   UserRound,
   Users,
+  Utensils,
+  Video,
   X,
 } from "lucide-react";
 
@@ -63,6 +73,7 @@ import type {
 import {
   usePathname,
   useRouter,
+  useSearchParams,
 } from "next/navigation";
 
 import {
@@ -70,6 +81,9 @@ import {
 } from "@/components/brand/wonflow-logo";
 
 import { WonFlowConfirmHost } from "@/components/feedback";
+
+import { useActivePatient } from "./active-patient-signal";
+import { InstallAppToggle } from "./install-app-toggle";
 
 import { ThemeToggle } from "./theme-toggle";
 
@@ -85,7 +99,25 @@ interface NavigationItem {
 
   description: string;
 
+  badge?: string;
+
   activePrefixes?: readonly string[];
+
+  /**
+   * The `?view=` value this item opens.
+   *
+   * The allied workspaces are one page holding six sections. Giving each
+   * section a sidebar entry means the sidebar has to match on the query
+   * string as well as the path, which is what this and `viewIsDefault` are
+   * for. `viewIsDefault` marks the section shown when the URL carries no
+   * `?view=` at all, so landing on the bare path still highlights something.
+   */
+  view?: string;
+
+  viewIsDefault?: boolean;
+
+  /** Reads as secondary in the sidebar until a patient has been chosen. */
+  needsPatient?: boolean;
 }
 
 interface NavigationGroup {
@@ -585,6 +617,17 @@ const doctorNavigationGroups:
             "Today’s queue, appointments and clinical activity",
         },
         {
+          label: "Live Video Room",
+          href: "/doctor/video-room",
+          icon: Video,
+          badge: "LIVE",
+          description:
+            "Live video consultations with real-time charting & prescriptions",
+          activePrefixes: [
+            "/doctor/video-room",
+          ],
+        },
+        {
           label: "My Patients",
           href: "/doctor/patients",
           icon: Users,
@@ -629,6 +672,28 @@ const doctorNavigationGroups:
             "/doctor/encounters",
           ],
         },
+        /**
+         * Care Plans and Drains were both built and both unreachable: the
+         * route existed, the component rendered, and nothing linked to
+         * either. That mattered more than it sounds — the care plan is where
+         * allied referrals are raised, so with no way in, a surgeon could not
+         * refer a patient to physiotherapy at all without hand-calling the
+         * API.
+         */
+        {
+          label: "Care Plans",
+          href: "/doctor/careplans",
+          icon: ListOrdered,
+          description:
+            "Recovery plans, task adherence and allied health referrals",
+        },
+        {
+          label: "Drains",
+          href: "/doctor/drains",
+          icon: FlaskConical,
+          description:
+            "Surgical drains, output trends and removal",
+        },
         {
           label: "Results",
           href: "/doctor/results",
@@ -661,10 +726,11 @@ const doctorNavigationGroups:
           description:
             "Past consultation and encounter history",
         },
-        // Messaging (/doctor/messages, /patient/messages) is deliberately not
-        // linked: it has no database tables and no API routes, so both screens
-        // render a "no identity was inferred" notice even to a signed-in user.
-        // Link them once messaging is actually implemented server-side.
+        // Messaging (/doctor/messages, /patient/messages) stays unlinked: it
+        // has no database tables and no API routes. Both routes now say so
+        // plainly and point at what does carry clinical correspondence today,
+        // rather than the old "no identity was inferred" notice that read as a
+        // broken session. Link them once messaging exists server-side.
       ],
     },
     {
@@ -750,6 +816,80 @@ const patientNavigationGroups:
           icon: UserRound,
           description:
             "Personal information and account settings",
+        },
+      ],
+    },
+
+    /**
+     * The home-monitoring layer.
+     *
+     * Every screen below already existed and worked, and not one of them was
+     * reachable: nothing in this file linked to them, and `/patient/vitals`
+     * was referenced nowhere in the entire codebase. A post-operative patient
+     * could open the portal and had no route to the daily task list they are
+     * meant to work through, let alone to logging a drain. Recording at home
+     * is the whole point of this product for them, so it gets its own group
+     * rather than being buried inside "Care".
+     */
+    {
+      label: "My Recovery",
+
+      items: [
+        {
+          label: "Daily Tasks",
+          href: "/patient/recovery",
+          icon: ListOrdered,
+          description:
+            "Everything your care team has asked you to do today",
+        },
+        {
+          label: "Vitals",
+          href: "/patient/vitals",
+          icon: Activity,
+          description:
+            "Record blood pressure, temperature, pulse and oxygen",
+        },
+        {
+          label: "Drains",
+          href: "/patient/drains",
+          icon: FlaskConical,
+          description:
+            "Record surgical drain volume, colour and appearance",
+        },
+        {
+          label: "Medicines",
+          href: "/patient/medications",
+          icon: Pill,
+          description:
+            "Today's doses, including enzymes taken with food",
+        },
+        {
+          label: "Symptoms",
+          href: "/patient/symptoms",
+          icon: HeartPulse,
+          description:
+            "Tell your team how you are feeling",
+        },
+        {
+          label: "Lab Results",
+          href: "/patient/labs",
+          icon: ScanLine,
+          description:
+            "Your results over time, with the normal range shown",
+        },
+        {
+          label: "Learning",
+          href: "/patient/education",
+          icon: FileText,
+          description:
+            "Videos and guides your care team assigned to you",
+        },
+        {
+          label: "Caregivers",
+          href: "/patient/caregivers",
+          icon: Users,
+          description:
+            "Let a family member log on your behalf",
         },
       ],
     },
@@ -935,17 +1075,117 @@ const platformNavigationGroups:
     },
   ];
 
+/*
+ * The allied sidebars carry the workspace sections themselves.
+ *
+ * Both workspaces used to sit under a horizontal tab rail, which meant every
+ * allied screen had two navigations stacked on each other - a sidebar naming
+ * the portal and a rail naming the section inside it. The rail is gone and its
+ * six sections are sidebar entries, so there is one place to look for "where
+ * am I" and one place to click to move.
+ *
+ * Each section is a `?view=` on the same page rather than its own route. That
+ * is deliberate: the workspaces hold unsaved work - a chosen patient, a
+ * half-built exercise prescription, a dietary plan in progress - and changing
+ * only the query keeps the component mounted, so moving between sections
+ * cannot throw that away.
+ */
+
 const physiotherapyNavigationGroups:
   readonly NavigationGroup[] = [
     {
-      label: "Physiotherapy & Mobility",
+      label: "Physiotherapy Workspace",
       items: [
         {
-          label: "Mobility Studio",
-          href: "/operations/physiotherapy",
-          icon: Activity,
+          label: "Caseload",
+          href: "/operations/physiotherapy?view=caseload",
+          icon: Inbox,
+          view: "caseload",
+          viewIsDefault: true,
           description:
-            "Post-operative mobility milestones, spirometry and exercise plans",
+            "Referrals waiting, accepted and in progress",
+        },
+        {
+          label: "Recovery Deck",
+          href: "/operations/physiotherapy?view=overview",
+          icon: LayoutDashboard,
+          view: "overview",
+          needsPatient: true,
+          description:
+            "One patient's whole rehabilitation picture",
+        },
+        {
+          label: "Exercise Studio",
+          href: "/operations/physiotherapy?view=studio",
+          icon: Dumbbell,
+          view: "studio",
+          needsPatient: true,
+          description:
+            "Build, dose and prescribe to the patient's app",
+        },
+        {
+          label: "Assess & Measure",
+          href: "/operations/physiotherapy?view=assessment",
+          icon: Gauge,
+          view: "assessment",
+          needsPatient: true,
+          description:
+            "Evaluation, session logs, Berg, TUG and range of motion",
+        },
+        {
+          label: "Recovery Pathways",
+          href: "/operations/physiotherapy?view=pathways",
+          icon: Route,
+          view: "pathways",
+          description:
+            "HPB surgical tracks and general physiotherapy protocols",
+        },
+        {
+          label: "Precaution Orders",
+          href: "/operations/physiotherapy?view=orders",
+          icon: ShieldAlert,
+          view: "orders",
+          needsPatient: true,
+          description:
+            "Weight bearing, precautions and discharge clearance",
+        },
+      ],
+    },
+    {
+      label: "Across the Recovery",
+      items: [
+        {
+          label: "Surgical Care Plans",
+          href: "/doctor/careplans",
+          icon: HeartPulse,
+          description:
+            "The managing surgeon's view of the recoveries you are working on",
+        },
+        {
+          label: "Clinical Alerts",
+          href: "/operations/alerts",
+          icon: ShieldAlert,
+          description:
+            "Escalations raised on the patients in your caseload",
+        },
+        {
+          label: "Dietetics Workspace",
+          href: "/operations/nutrition",
+          icon: Utensils,
+          description:
+            "The nutrition side of the same recovery",
+        },
+      ],
+    },
+    {
+      label: "Account & Privileges",
+      items: [
+        {
+          label: "My Profile & Privileges",
+          href: "/operations/physiotherapy/profile",
+          icon: UserRound,
+          description:
+            "Your clinical credentials, discipline settings, and practice preferences",
         },
       ],
     },
@@ -954,14 +1194,98 @@ const physiotherapyNavigationGroups:
 const nutritionNavigationGroups:
   readonly NavigationGroup[] = [
     {
-      label: "Clinical Nutrition",
+      label: "Dietetics Workspace",
       items: [
         {
-          label: "Dietetics Studio",
-          href: "/operations/nutrition",
+          label: "Caseload",
+          href: "/operations/nutrition?view=caseload",
+          icon: Inbox,
+          view: "caseload",
+          viewIsDefault: true,
+          description:
+            "Referrals waiting, accepted and in progress",
+        },
+        {
+          label: "Nutrition Deck",
+          href: "/operations/nutrition?view=overview",
+          icon: LayoutDashboard,
+          view: "overview",
+          needsPatient: true,
+          description:
+            "One patient's whole nutritional picture",
+        },
+        {
+          label: "Assess & Screen",
+          href: "/operations/nutrition?view=assessment",
+          icon: ClipboardCheck,
+          view: "assessment",
+          needsPatient: true,
+          description:
+            "Anthropometry, appetite, MUST and targets",
+        },
+        {
+          label: "Dietary Plan",
+          href: "/operations/nutrition?view=plan",
+          icon: Utensils,
+          view: "plan",
+          needsPatient: true,
+          description:
+            "Build the plan and publish it to the patient's app",
+        },
+        {
+          label: "PERT & Feeding",
+          href: "/operations/nutrition?view=calculators",
+          icon: Calculator,
+          view: "calculators",
+          description:
+            "Enzyme dosing, tube feeding and parenteral support",
+        },
+        {
+          label: "History",
+          href: "/operations/nutrition?view=history",
+          icon: CalendarClock,
+          view: "history",
+          needsPatient: true,
+          description:
+            "Every assessment and plan on record",
+        },
+      ],
+    },
+    {
+      label: "Across the Recovery",
+      items: [
+        {
+          label: "Surgical Care Plans",
+          href: "/doctor/careplans",
           icon: HeartPulse,
           description:
-            "Post-resection nutrition assessment, PERT enzyme titration and meal planning",
+            "The managing surgeon's view of the recoveries you are working on",
+        },
+        {
+          label: "Clinical Alerts",
+          href: "/operations/alerts",
+          icon: ShieldAlert,
+          description:
+            "Escalations raised on the patients in your caseload",
+        },
+        {
+          label: "Physiotherapy Workspace",
+          href: "/operations/physiotherapy",
+          icon: Activity,
+          description:
+            "The mobility side of the same recovery",
+        },
+      ],
+    },
+    {
+      label: "Account & Privileges",
+      items: [
+        {
+          label: "My Profile & Privileges",
+          href: "/operations/nutrition/profile",
+          icon: UserRound,
+          description:
+            "Your clinical credentials, discipline settings, and practice preferences",
         },
       ],
     },
@@ -1187,7 +1511,32 @@ function isNavigationItemActive(
     NavigationItem,
 
   pathname: string,
+
+  view: string | null,
 ): boolean {
+  // A section item lives on the same path as its five siblings, so the path
+  // alone cannot tell them apart - the `?view=` decides. A bare path with no
+  // query highlights whichever section the workspace opens on.
+  if (item.view) {
+    const base =
+      item.href.split(
+        "?",
+      )[0];
+
+    if (
+      pathname !== base
+    ) {
+      return false;
+    }
+
+    return (
+      view === item.view ||
+      (view === null &&
+        item.viewIsDefault ===
+          true)
+    );
+  }
+
   if (
     pathname === item.href
   ) {
@@ -1273,6 +1622,14 @@ function SidebarNavigation({
 }: SidebarNavigationProps) {
   const pathname =
     usePathname();
+
+  const viewParam =
+    useSearchParams()?.get(
+      "view",
+    ) ?? null;
+
+  const activePatient =
+    useActivePatient();
 
   const session =
     useWonFlowSession();
@@ -1369,10 +1726,29 @@ function SidebarNavigation({
                 key={group.label}
               >
                 {!compact ? (
-                  <div className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.18em] text-indigo-500/90">
-                    {
-                      group.label
-                    }
+                  <div className="mb-2 px-3">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-indigo-500/90">
+                      {
+                        group.label
+                      }
+                    </div>
+
+                    {/*
+                      * Four of the six allied sections only mean anything
+                      * against a named patient, so the sidebar says who that
+                      * is rather than leaving the reader to infer it from the
+                      * page. Only the group that owns those sections shows it.
+                      */}
+                    {group.items.some(
+                      (item) =>
+                        item.needsPatient,
+                    ) ? (
+                      <div className="mt-1 truncate text-[10.5px] font-medium text-slate-500 dark:text-slate-400">
+                        {activePatient
+                          ? activePatient
+                          : "No patient chosen"}
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="mx-auto mb-2 h-px w-8 bg-indigo-300/50" />
@@ -1388,7 +1764,17 @@ function SidebarNavigation({
                         isNavigationItemActive(
                           item,
                           pathname,
+                          viewParam,
                         );
+
+                      // Still a link - the section explains what it needs
+                      // when you get there. Dimming only says "this will be
+                      // empty until you choose someone".
+                      const awaitingPatient =
+                        item.needsPatient ===
+                          true &&
+                        activePatient ===
+                          null;
 
                       return (
                         <Link
@@ -1407,7 +1793,9 @@ function SidebarNavigation({
                               : "gap-3 px-3",
                             active
                               ? "text-indigo-900"
-                              : "text-slate-600 hover:text-indigo-900",
+                              : awaitingPatient
+                                ? "text-slate-400 hover:text-indigo-700 dark:text-slate-500"
+                                : "text-slate-600 hover:text-indigo-900",
                           ].join(" ")}
                           href={
                             item.href
@@ -1421,7 +1809,9 @@ function SidebarNavigation({
                           title={
                             compact
                               ? item.label
-                              : undefined
+                              : awaitingPatient
+                                ? `${item.label} - choose a patient first`
+                                : undefined
                           }
                         >
                           {active ? (
@@ -1444,10 +1834,14 @@ function SidebarNavigation({
                           />
 
                           {!compact ? (
-                            <span className="min-w-0 flex-1 truncate">
-                              {
-                                item.label
-                              }
+                            <span className="flex min-w-0 flex-1 items-center justify-between gap-1.5 truncate">
+                              <span className="truncate">{item.label}</span>
+                              {item.badge ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xs animate-pulse">
+                                  <span className="size-1 rounded-full bg-white animate-ping" />
+                                  {item.badge}
+                                </span>
+                              ) : null}
                             </span>
                           ) : null}
                         </Link>
@@ -1461,7 +1855,18 @@ function SidebarNavigation({
         </div>
       </nav>
 
-      <div className="wfg-divide h-3 border-t" />
+      {/*
+        * The sidebar foot is where the app itself is configured rather than
+        * navigated, so the install control lives here - in every portal, on
+        * every page, and never in the way of the work.
+        */}
+      <div className="wfg-divide border-t px-3 py-3">
+        <InstallAppToggle
+          compact={
+            compact
+          }
+        />
+      </div>
     </div>
   );
 }
@@ -1644,10 +2049,14 @@ function CommandPalette({
                       </div>
 
                       <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-black text-slate-900">
-                          {
-                            item.label
-                          }
+                        <div className="flex items-center gap-2 truncate text-sm font-black text-slate-900">
+                          <span>{item.label}</span>
+                          {item.badge ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-gradient-to-r from-emerald-500 to-teal-600 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-xs animate-pulse">
+                              <span className="size-1 rounded-full bg-white animate-ping" />
+                              {item.badge}
+                            </span>
+                          ) : null}
                         </div>
 
                         <div className="mt-1 truncate text-xs text-slate-500">
@@ -1709,29 +2118,30 @@ function useSignedInAvatar(identityId: string | undefined): string | null {
       if (isCancelled || controller.signal.aborted) return;
       try {
         const response = await fetch("/api/v1/me/avatar", { cache: "no-store", signal: controller.signal });
-        if (!response.ok || isCancelled) return;
+        if (!response.ok || isCancelled || controller.signal.aborted) return;
         const body = (await response.json()) as { avatarUrl?: string | null };
-        if (!isCancelled) {
+        if (!isCancelled && !controller.signal.aborted) {
           setAvatarUrl(body.avatarUrl ?? null);
         }
       } catch (error: unknown) {
-        // Silently swallow any fetch abort / cancellation error
+        // An abort is normal lifecycle cleanup on unmount, so silence it
         if (
           isCancelled ||
           controller.signal.aborted ||
-          (typeof error === "object" && error !== null && "name" in error && (error as { name: string }).name === "AbortError") ||
           (error instanceof Error && (error.name === "AbortError" || error.message.toLowerCase().includes("abort"))) ||
           (typeof DOMException !== "undefined" && error instanceof DOMException && error.name === "AbortError")
         ) {
           return;
         }
+
+        console.warn("The signed-in avatar could not be loaded.", error);
       }
     };
 
     void load().catch(() => {});
 
     const onAvatarChanged = () => {
-      if (!isCancelled) {
+      if (!isCancelled && !controller.signal.aborted) {
         void load().catch(() => {});
       }
     };
@@ -1757,6 +2167,11 @@ export function PremiumApplicationShell({
 }: PremiumApplicationShellProps) {
   const pathname =
     usePathname();
+
+  const viewParam =
+    useSearchParams()?.get(
+      "view",
+    ) ?? null;
 
   const router =
     useRouter();
@@ -1809,6 +2224,7 @@ export function PremiumApplicationShell({
         isNavigationItemActive(
           item,
           pathname,
+          viewParam,
         ),
     );
 
@@ -1820,6 +2236,7 @@ export function PremiumApplicationShell({
             isNavigationItemActive(
               item,
               pathname,
+              viewParam,
             ),
         ),
     );

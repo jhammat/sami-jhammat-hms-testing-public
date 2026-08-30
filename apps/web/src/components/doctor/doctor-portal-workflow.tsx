@@ -38,6 +38,12 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 
 import {
+  DonutChart,
+  StackedBar,
+  type DonutSlice,
+} from "@/components/charts";
+
+import {
   persistDoctorSitting,
   persistDoctorSittingStatus,
   useSittingBranch,
@@ -398,7 +404,15 @@ interface SittingStatusLine {
 /** Built from model.sitting only — the same server-fetched value the rest of the portal reads, so this line and the badge can never disagree. */
 function describeSittingStatus(sitting: DemoDoctorSitting | undefined, waiting: number, inProgress: number, seen: number): SittingStatusLine {
   if (!sitting || sitting.status === "not-started") {
-    return { badgeLabel: "NOT STARTED", tone: "neutral", detail: "Not started — patients cannot be called" };
+    // Says what to do, not just what is wrong. This is the first thing a
+    // doctor sees each morning, and "patients cannot be called" on its own
+    // leaves them hunting for the reason.
+    return {
+      badgeLabel: "NOT STARTED",
+      tone: "neutral",
+      detail:
+        "Not started — set your room and hours below, then Start Sitting to begin calling patients",
+    };
   }
   if (sitting.status === "available") {
     const since = formatClockTime(sitting.actualStartedAt);
@@ -1064,12 +1078,35 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
         </div>
 
         {model.sitting?.status === "available" || model.sitting?.status === "on-break" ? (
-          <div className="flex items-center gap-3 border-t border-slate-100 pt-3 text-[10px] font-bold text-slate-600">
-            <span className="flex items-center gap-1"><Users size={12} /> {waitingCount} waiting</span>
-            <span>·</span>
-            <span>{inProgressCount} in progress</span>
-            <span>·</span>
-            <span>{seenCount} seen</span>
+          <div className="wf-viz flex flex-wrap items-center gap-4 border-t border-slate-100 pt-3">
+            {/* The clinic list, as one bar. Three states of one queue is a
+                genuine part-to-whole, and it reads at a glance from across
+                a consulting room in a way three numbers do not. */}
+            <div className="min-w-[220px] flex-1">
+              <StackedBar
+                segments={[
+                  { id: "seen", label: "Seen", value: seenCount, color: "var(--viz-good)" },
+                  {
+                    id: "serving",
+                    label: "In progress",
+                    value: inProgressCount,
+                    color: "var(--viz-1)",
+                  },
+                  {
+                    id: "waiting",
+                    label: "Waiting",
+                    value: waitingCount,
+                    color: "var(--viz-mute-mark)",
+                  },
+                ]}
+                valueFormatter={(value) => String(value)}
+              />
+            </div>
+
+            <span className="flex items-center gap-1 text-[10px] font-bold text-slate-600">
+              <Users size={12} />
+              {waitingCount + inProgressCount + seenCount} on today&apos;s list
+            </span>
           </div>
         ) : null}
       </div>
@@ -1253,7 +1290,72 @@ function MetricCard({
 }
 
 function QueueMetrics({ entries }: { entries: readonly DemoQueueEntry[] }) {
+  /**
+   * The clinic day as two part-to-whole questions: where every patient on
+   * the list currently is, and how the list breaks down by urgency.
+   *
+   * Queue state wears the status palette because "urgent" and "completed"
+   * MEAN something — they are not five interchangeable series. Anything
+   * with zero patients is dropped rather than drawn as an empty slice.
+   */
+  const flowMix: DonutSlice[] = [
+    {
+      id: "completed",
+      label: "Seen",
+      value: entries.filter((entry) => entry.status === "completed").length,
+      color: "var(--viz-good)",
+    },
+    {
+      id: "serving",
+      label: "In consultation",
+      value: entries.filter((entry) => entry.status === "serving").length,
+      color: "var(--viz-1)",
+    },
+    {
+      id: "called",
+      label: "Called",
+      value: entries.filter((entry) => entry.status === "called").length,
+      color: "var(--viz-4)",
+    },
+    {
+      id: "waiting",
+      label: "Waiting",
+      value: entries.filter((entry) => entry.status === "waiting").length,
+      color: "var(--viz-mute-mark)",
+    },
+  ].filter((slice) => slice.value > 0);
+
+  const openEntries = entries.filter(
+    (entry) => !["completed", "cancelled"].includes(entry.status),
+  );
+
+  const priorityMix: DonutSlice[] = [
+    {
+      id: "emergency",
+      label: "Emergency",
+      value: openEntries.filter((entry) => entry.priority === "emergency").length,
+      color: "var(--viz-critical)",
+    },
+    {
+      id: "urgent",
+      label: "Urgent",
+      value: openEntries.filter((entry) => entry.priority === "urgent").length,
+      color: "var(--viz-warning)",
+    },
+    {
+      id: "routine",
+      label: "Routine",
+      value: openEntries.filter(
+        (entry) => entry.priority !== "urgent" && entry.priority !== "emergency",
+      ).length,
+      color: "var(--viz-mute-mark)",
+    },
+  ].filter((slice) => slice.value > 0);
+
+  const seenCount = entries.filter((entry) => entry.status === "completed").length;
+
   return (
+    <>
     <section className="grid grid-cols-2 gap-2 sm:grid-cols-5">
       <MetricCard
         icon={Clock3}
@@ -1289,9 +1391,42 @@ function QueueMetrics({ entries }: { entries: readonly DemoQueueEntry[] }) {
         icon={CheckCircle2}
         label="Completed Today"
         tone="emerald"
-        value={entries.filter((entry) => entry.status === "completed").length}
+        value={seenCount}
       />
     </section>
+
+    {entries.length > 0 ? (
+      <section className="mt-3 grid gap-3 lg:grid-cols-2">
+        <DonutChart
+          title="Where today's list stands"
+          subtitle="Every patient booked for this sitting"
+          slices={flowMix}
+          centerValue={`${seenCount}/${entries.length}`}
+          centerLabel="Seen"
+          size={168}
+          thickness={20}
+          emptyMessage="No patients on today's list"
+        />
+
+        <DonutChart
+          title="Still to see, by priority"
+          subtitle="Excludes patients already seen"
+          slices={priorityMix}
+          centerLabel="Remaining"
+          size={168}
+          thickness={20}
+          emptyMessage="Nobody left waiting"
+          emptyHint="Every patient on the list has been seen."
+          footnote="Emergency and urgent are status colours, never series colours."
+        />
+
+        {/* A third card here used to render a RadialMeter of seenCount over
+            entries.length — the same figure the first donut already shows in
+            its centre, in a different shape. Two charts side by side saying
+            "1 of 4" taught the reader nothing the first one had not. */}
+      </section>
+    ) : null}
+    </>
   );
 }
 

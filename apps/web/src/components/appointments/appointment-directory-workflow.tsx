@@ -77,6 +77,7 @@ import {
   formatWonFlowDashboardMoney,
   formatWonFlowDashboardTime,
 } from "@/lib/dashboard";
+import { toLocalDate } from "@/lib/time/local-date";
 
 const INPUT_CLASS_NAME = [
   "h-11 w-full",
@@ -392,7 +393,10 @@ function AppointmentDirectoryContent({
     try {
       const result = await checkInAppointmentMutation({
         appointmentId: booking.id,
-        input: { queueDate: booking.startsAt.slice(0, 10) },
+        // The LOCAL date of the appointment, not the UTC one. Slicing the
+        // ISO string put a 01:43 local appointment at a UTC+5 site into
+        // the previous day's queue, where reception would never find it.
+        input: { queueDate: toLocalDate(new Date(booking.startsAt)) },
       });
       const queueEntry = result.queueEntry as { tokenNumber?: number } | undefined;
       setActionMessage(

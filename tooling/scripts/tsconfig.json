@@ -1,0 +1,12 @@
+{
+  "extends": "@wonflow/typescript-config/base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "paths": {
+      "@/*": ["../../apps/web/src/*"]
+    }
+  },
+  "include": ["**/*.ts", "**/*.mts"],
+  "exclude": ["node_modules"]
+}

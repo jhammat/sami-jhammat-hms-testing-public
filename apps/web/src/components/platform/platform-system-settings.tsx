@@ -246,19 +246,6 @@ export function PlatformSystemSettingsPanel() {
         </div>
       </PlatformPanel>
 
-      <PlatformPanel
-        description="This frontend batch deliberately does not claim production persistence."
-        title="Data connection"
-      >
-        <div className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-5 py-8">
-          <h3 className="text-sm font-semibold text-slate-950">
-            Production platform service not connected
-          </h3>
-          <p className="mt-2 max-w-3xl text-xs leading-6 text-slate-600">
-            Tenant configuration entered in this frontend workspace is stored in the current browser only. A production database, authenticated platform API, immutable audit store and authorization checks must replace this adapter without changing the screen contracts.
-          </p>
-        </div>
-      </PlatformPanel>
     </div>
   );
 }

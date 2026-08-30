@@ -7,6 +7,14 @@ interface AuthFrameProps {
   title: string;
   description: string;
   children: ReactNode;
+  /**
+   * Widen the card. A single credential form reads best in one narrow column;
+   * a grid of portals to choose between does not, and squeezing it into 520px
+   * turned nine readable cards into a scrolling list of slivers.
+   */
+  width?: "narrow" | "wide";
+  /** Rendered above the heading — a back link on the multi-step sign-in. */
+  eyebrow?: ReactNode;
 }
 
 export function AuthFrame({
@@ -14,6 +22,8 @@ export function AuthFrame({
   title,
   description,
   children,
+  width = "narrow",
+  eyebrow,
 }: AuthFrameProps) {
   return (
     <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_18%_12%,rgba(37,99,235,0.14),transparent_29%),radial-gradient(circle_at_84%_18%,rgba(124,58,237,0.13),transparent_27%),linear-gradient(180deg,#fbfdff,#f4f7ff)] transition-colors duration-300 dark:bg-[radial-gradient(circle_at_18%_12%,rgba(37,99,235,0.18),transparent_35%),radial-gradient(circle_at_84%_18%,rgba(124,58,237,0.18),transparent_35%),linear-gradient(180deg,#0a0f1d,#030712)]">
@@ -52,7 +62,7 @@ export function AuthFrame({
           <path d="M-40 315 C245 440 430 85 705 255 C930 395 1145 405 1640 205" fill="none" stroke="url(#wonflow-ribbon-light)" strokeLinecap="round" strokeWidth="31" />
         </svg>
 
-        <section className="relative z-[1] w-full max-w-[520px] rounded-[30px] border border-white/90 bg-white/95 p-5 shadow-[0_38px_110px_rgba(30,64,175,0.24)] ring-1 ring-blue-100/80 backdrop-blur-xl transition dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-[0_38px_110px_rgba(0,0,0,0.75)] dark:ring-slate-800 sm:p-7 lg:p-8">
+        <section className={`relative z-[1] w-full ${width === "wide" ? "max-w-[840px]" : "max-w-[520px]"} rounded-[30px] border border-white/90 bg-white/95 p-5 shadow-[0_38px_110px_rgba(30,64,175,0.24)] ring-1 ring-blue-100/80 backdrop-blur-xl transition dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-[0_38px_110px_rgba(0,0,0,0.75)] dark:ring-slate-800 sm:p-7 lg:p-8`}>
           <div
             aria-hidden="true"
             className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-blue-400 to-transparent dark:via-blue-600"
@@ -68,6 +78,8 @@ export function AuthFrame({
           </div>
 
           <header className="mt-6">
+            {eyebrow ? <div className="mb-3">{eyebrow}</div> : null}
+
             <h1 className="text-2xl font-semibold tracking-[-0.03em] text-slate-950 sm:text-[28px] dark:text-white">
               {title}
             </h1>

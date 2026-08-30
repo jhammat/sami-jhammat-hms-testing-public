@@ -139,7 +139,7 @@ test.describe("FIX-20 multi-user verification", () => {
 
     await page.context().addCookies(await request.storageState().then((s) => s.cookies));
     await page.goto("/operations/patients", { waitUntil: "networkidle" });
-    await page.getByPlaceholder("Name, MR, CNIC, father name or phone").fill(patientName);
+    await page.getByPlaceholder(/Patient Name, MR Number/i).fill(patientName);
     await expect(page.getByText(patientName, { exact: false }).first()).toBeVisible({ timeout: 15_000 });
     await shot(page, "01-reception-patient-registered");
 

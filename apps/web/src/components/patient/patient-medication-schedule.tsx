@@ -17,6 +17,14 @@ import {
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { MedicationDoseItem, MedicationScheduleSummary } from "@wonflow/contracts";
 
+import {
+  BarChart,
+  DonutChart,
+  Meter,
+  type BarDatum,
+  type DonutSlice,
+} from "@/components/charts";
+
 export function PatientMedicationScheduleView() {
   const [schedule, setSchedule] = useState<MedicationScheduleSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -131,6 +139,55 @@ export function PatientMedicationScheduleView() {
   const completedDoses = doses.filter((d) => d.status === "COMPLETED");
   const skippedOrMissedDoses = doses.filter((d) => d.status === "SKIPPED" || d.status === "MISSED");
 
+  // Dose state is a state, so it wears the status palette rather than
+  // categorical hues — "missed" must never look like "just another series".
+  const doseMix: DonutSlice[] = [
+    {
+      id: "COMPLETED",
+      label: "Taken",
+      value: completedDoses.length,
+      color: "var(--viz-good)",
+    },
+    {
+      id: "PENDING",
+      label: "Still due",
+      value: pendingDoses.length,
+      color: "var(--viz-mute-mark)",
+    },
+    {
+      id: "SKIPPED",
+      label: "Skipped",
+      value: doses.filter((dose) => dose.status === "SKIPPED").length,
+      color: "var(--viz-warning)",
+    },
+    {
+      id: "MISSED",
+      label: "Missed",
+      value: doses.filter((dose) => dose.status === "MISSED").length,
+      color: "var(--viz-critical)",
+    },
+  ];
+
+  const dosesByTimeOfDay: BarDatum[] = (() => {
+    const buckets = new Map<string, number>();
+
+    doses.forEach((dose) => {
+      const hour = new Date(dose.scheduledFor).getHours();
+      const bucket =
+        hour < 11 ? "Morning" : hour < 15 ? "Midday" : hour < 19 ? "Evening" : "Night";
+      buckets.set(bucket, (buckets.get(bucket) ?? 0) + 1);
+    });
+
+    // Fixed clock order, not whatever order the doses happened to arrive in.
+    return ["Morning", "Midday", "Evening", "Night"]
+      .filter((bucket) => buckets.has(bucket))
+      .map((bucket) => ({
+        id: bucket,
+        label: bucket,
+        value: buckets.get(bucket) ?? 0,
+      }));
+  })();
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -156,26 +213,44 @@ export function PatientMedicationScheduleView() {
           </button>
         </div>
 
-        {/* Adherence Progress Bar */}
+        {/* Adherence is one ratio against one limit, so it is a meter —
+            not a two-slice pie. The donut beside it does a different job:
+            it breaks the day into taken, still due, and missed. */}
         {doses.length > 0 && (
           <div className="mt-6 rounded-2xl bg-slate-50 p-4 dark:bg-slate-800/60">
-            <div className="flex items-center justify-between text-xs font-bold">
-              <span className="text-slate-700 dark:text-slate-300">Today&apos;s Adherence</span>
-              <span className="text-indigo-600 dark:text-indigo-400">
-                {schedule?.adherencePercentage ?? 100}% ({completedDoses.length} of {doses.length} taken)
-              </span>
-            </div>
-            <div className="mt-2 h-2.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-              <div
-                className="h-full bg-gradient-to-r from-indigo-500 to-teal-500 transition-all duration-500"
-                style={{
-                  width: `${doses.length > 0 ? (completedDoses.length / doses.length) * 100 : 0}%`,
-                }}
-              />
-            </div>
+            <Meter
+              label="Today's adherence"
+              value={completedDoses.length}
+              target={doses.length}
+              unit="doses"
+              caption={`${schedule?.adherencePercentage ?? 100}% of today's doses taken`}
+            />
           </div>
         )}
       </div>
+
+      {doses.length > 0 ? (
+        <div className="grid gap-5 sm:grid-cols-2">
+          <DonutChart
+            title="Today's doses"
+            subtitle="Where you are up to"
+            slices={doseMix}
+            centerValue={`${completedDoses.length}/${doses.length}`}
+            centerLabel="Taken"
+            size={186}
+            emptyMessage="No doses scheduled today"
+          />
+
+          <BarChart
+            title="Doses by time of day"
+            subtitle="When your medicines are due"
+            data={dosesByTimeOfDay}
+            valueFormatter={(value) => `${value}`}
+            emptyMessage="No doses scheduled today"
+            footnote="Spacing doses evenly matters most for enzyme replacement — each dose goes with food."
+          />
+        </div>
+      ) : null}
 
       {/* Success Notification */}
       {successMessage && (
@@ -205,7 +280,9 @@ export function PatientMedicationScheduleView() {
         <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
           {pendingDoses.length === 0 ? (
             <p className="py-6 text-center text-xs text-slate-400">
-              All caught up! No pending medication doses for today.
+              {doses.length === 0
+                ? "No medicines are scheduled for you today. Doses appear here automatically once a doctor prescribes them — you do not need to add anything yourself."
+                : "All caught up. No pending medication doses for today."}
             </p>
           ) : (
             pendingDoses.map((dose) => (

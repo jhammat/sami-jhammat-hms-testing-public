@@ -13,13 +13,21 @@ import {
   Sparkles,
   TestTube2,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   type DrainCharacter,
   type DrainColour,
   type PatientDrainSummary,
   DRAIN_COLOUR_SWATCHES,
 } from "@wonflow/contracts";
+
+import {
+  BarChart,
+  DonutChart,
+  StatTile,
+  type BarDatum,
+  type DonutSlice,
+} from "@/components/charts";
 
 export function PatientDrainLogger() {
   const [drains, setDrains] = useState<PatientDrainSummary[]>([]);
@@ -38,6 +46,40 @@ export function PatientDrainLogger() {
   const [amylaseSource, setAmylaseSource] = useState<"PATIENT_REPORTED" | "LAB_CONFIRMED">("PATIENT_REPORTED");
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [notes, setNotes] = useState<string>("");
+
+  /**
+   * Last-24-hour output, per drain and as a share of the whole.
+   *
+   * The share donut is a genuine part-to-whole: each drain contributes to
+   * one total, and there are never more than a handful. The bar beside it
+   * answers the different question of which drain is highest.
+   */
+  const total24h = useMemo(
+    () => drains.reduce((sum, drain) => sum + (drain.last24hVolumeMl ?? 0), 0),
+    [drains],
+  );
+
+  const outputShare = useMemo<DonutSlice[]>(
+    () =>
+      drains
+        .filter((drain) => (drain.last24hVolumeMl ?? 0) > 0)
+        .map((drain) => ({
+          id: drain.id,
+          label: `${drain.label} (${drain.site})`,
+          value: drain.last24hVolumeMl ?? 0,
+        })),
+    [drains],
+  );
+
+  const outputPerDrain = useMemo<BarDatum[]>(
+    () =>
+      drains.map((drain) => ({
+        id: drain.id,
+        label: `${drain.label} · ${drain.site}`,
+        value: drain.last24hVolumeMl ?? 0,
+      })),
+    [drains],
+  );
 
   const loadDrains = useCallback(async () => {
     try {
@@ -147,8 +189,15 @@ export function PatientDrainLogger() {
       <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
         <Droplets className="mx-auto h-12 w-12 text-slate-300 dark:text-slate-600" />
         <h3 className="mt-3 text-lg font-black text-slate-900 dark:text-white">No Active Drains</h3>
-        <p className="mt-1 text-xs text-slate-500">
+        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
           You currently do not have any active surgical drains registered in your care plan.
+        </p>
+        <p className="mx-auto mt-3 max-w-[46ch] text-xs leading-5 text-slate-500 dark:text-slate-400">
+          Drains are added by your surgical team when one is placed, and
+          removed here once it comes out. If you have a drain at home and this
+          page is empty, message your care team through the portal rather than
+          recording it somewhere else — nothing you write outside this page
+          reaches your chart.
         </p>
       </div>
     );
@@ -192,6 +241,61 @@ export function PatientDrainLogger() {
           </div>
         )}
       </div>
+
+      {/* What the drains are doing, from the summary the API returns. There
+          is no history endpoint for patient drain logs yet, so this shows
+          the last 24 hours rather than a trend line — an honest chart of
+          the data that exists beats a trend built from one point. */}
+      {drains.length > 0 ? (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <StatTile
+            label="Output in the last 24 hours"
+            value={total24h}
+            unit="mL"
+            icon={<Droplets aria-hidden size={16} />}
+            status={total24h > 500 ? "warning" : "good"}
+            hint={`Across ${drains.length} drain${drains.length === 1 ? "" : "s"}`}
+          />
+
+          <StatTile
+            label="Active drains"
+            value={drains.filter((drain) => drain.isActive).length}
+            icon={<Droplets aria-hidden size={16} />}
+            hint={`${drains.length} in total`}
+          />
+
+          <StatTile
+            label="Logs recorded"
+            value={drains.reduce((sum, drain) => sum + (drain.totalLogsCount ?? 0), 0)}
+            icon={<Droplets aria-hidden size={16} />}
+            hint="Every entry is seen by your care team"
+          />
+        </div>
+      ) : null}
+
+      {drains.length > 1 && total24h > 0 ? (
+        <div className="grid gap-5 sm:grid-cols-2">
+          <DonutChart
+            title="Share of output by drain"
+            subtitle="Last 24 hours"
+            slices={outputShare}
+            centerValue={`${total24h}`}
+            centerLabel="mL in 24h"
+            size={186}
+            valueFormatter={(value) => `${value} mL`}
+            emptyMessage="No output recorded in the last 24 hours"
+          />
+
+          <BarChart
+            title="Output per drain"
+            subtitle="Last 24 hours, millilitres"
+            data={outputPerDrain}
+            valueFormatter={(value) => `${value} mL`}
+            emptyMessage="No output recorded in the last 24 hours"
+            footnote="A sudden rise in one drain is what your surgical team watches for."
+          />
+        </div>
+      ) : null}
 
       {activeDrain && (
         <form onSubmit={(e) => void handleSubmit(e)} className="space-y-6">

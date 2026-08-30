@@ -69,8 +69,14 @@ export function ClinicianCarePlanDetail({
       if (!res.ok) {
         throw new Error("Failed to load care plan details.");
       }
-      const data = (await res.json()) as CarePlanSummary;
-      setPlan(data);
+      // The endpoint answers { carePlan: {...} }, not the plan itself. This
+      // assigned the whole envelope, so every field read off `plan` was
+      // undefined and the screen crashed on `plan.category.replace(...)`
+      // before rendering a single row. It went unnoticed because nothing
+      // linked to this screen -- opening a care plan was impossible until
+      // the roster gained a way in.
+      const data = (await res.json()) as { carePlan: CarePlanSummary } | CarePlanSummary;
+      setPlan("carePlan" in data ? data.carePlan : data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Error loading plan");
     } finally {
@@ -84,9 +90,10 @@ export function ClinicianCarePlanDetail({
       try {
         const res = await fetch(`/api/v1/clinical/careplans/${carePlanId}`, { credentials: "include" });
         if (!res.ok) throw new Error("Failed to load plan.");
-        const data = (await res.json()) as CarePlanSummary;
+        // Same envelope as loadPlan above.
+        const data = (await res.json()) as { carePlan: CarePlanSummary } | CarePlanSummary;
         if (mounted) {
-          setPlan(data);
+          setPlan("carePlan" in data ? data.carePlan : data);
           setLoading(false);
         }
       } catch (err: unknown) {

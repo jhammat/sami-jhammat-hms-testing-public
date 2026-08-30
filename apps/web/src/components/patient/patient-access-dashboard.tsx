@@ -27,9 +27,10 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { DonutChart, StackedBar, type DonutSlice } from "@/components/charts";
+
 import { WONFLOW_AVATAR_CHANGED_EVENT } from "@/components/shell";
 import { OfflineStatusBar } from "./offline-status-bar";
-import { PwaInstallPrompt } from "./pwa-install-prompt";
 
 
 type Section = "home" | "care" | "reports" | "billing";
@@ -50,6 +51,8 @@ interface PatientHome {
     id: string;
     startsAt: string;
     status: string;
+    /** IN_PERSON or ONLINE. Decides whether a video room exists at all. */
+    consultationMode?: string | null;
     service: { name: string };
     branch: { name: string };
   }>;
@@ -272,7 +275,36 @@ function DiagnosticAttachments({
 function PatientAvatarUpload({ givenName, version, onChanged }: { givenName: string; version: number; onChanged: () => void }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
-  const [hasPhoto, setHasPhoto] = useState(true);
+
+  /*
+   * Whether a photo exists is ASKED, not assumed.
+   *
+   * This used to start as `true`, so every patient who had never uploaded a
+   * photo — which is most of them, on first sign-in — fired a request for an
+   * avatar file that did not exist, logged a 404 in the console, and only
+   * then fell back to their initial. `/api/v1/me/avatar` answers the question
+   * directly and costs one cheap request instead of one guaranteed failure.
+   */
+  const [hasPhoto, setHasPhoto] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/v1/me/avatar", { credentials: "same-origin" });
+        if (!response.ok) return;
+        const body = (await response.json()) as { avatarUrl?: string | null };
+        if (active) setHasPhoto(Boolean(body.avatarUrl));
+      } catch {
+        // No photo shown; the initial is a complete fallback, not a degraded one.
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [version]);
 
   const handleFile = useCallback(
     async (file: File) => {
@@ -418,6 +450,54 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
   const nextAppointment = upcoming[0];
   const outstandingInvoices = home.invoices.filter((invoice) => invoice.totalMinor > invoice.paidMinor);
 
+  /**
+   * The three part-to-whole summaries the overview leads with.
+   *
+   * These sit after the loading and error guards on purpose: `home` is
+   * non-null from here down, and hoisting them into `useMemo` at the top
+   * of the component would mean re-deriving them against a null record on
+   * every load. The lists here are a patient's own record — tens of rows,
+   * not thousands — so plain derivation is cheaper than memo bookkeeping.
+   */
+  const statusTone: Record<string, string> = {
+    COMPLETED: "var(--viz-good)",
+    RELEASED: "var(--viz-good)",
+    SCHEDULED: "var(--viz-1)",
+    CONFIRMED: "var(--viz-1)",
+    IN_PROGRESS: "var(--viz-3)",
+    PENDING: "var(--viz-4)",
+    REQUESTED: "var(--viz-4)",
+    CANCELLED: "var(--viz-mute-mark)",
+    NO_SHOW: "var(--viz-critical)",
+  };
+
+  const countByStatus = (rows: { status: string }[]): DonutSlice[] => {
+    const counts = new Map<string, number>();
+
+    rows.forEach((row) => {
+      counts.set(row.status, (counts.get(row.status) ?? 0) + 1);
+    });
+
+    return [...counts.entries()].map(([status, value]) => ({
+      id: status,
+      label: humanize(status).replace(/^./, (character) => character.toUpperCase()),
+      value,
+      color: statusTone[status] ?? "var(--viz-mute-mark)",
+    }));
+  };
+
+  const appointmentMix = countByStatus(home.appointments);
+  const diagnosticMix = countByStatus(home.diagnosticOrders);
+
+  const billing = {
+    paid: home.invoices.reduce((sum, invoice) => sum + invoice.paidMinor, 0),
+    outstanding: home.invoices.reduce(
+      (sum, invoice) => sum + Math.max(0, invoice.totalMinor - invoice.paidMinor),
+      0,
+    ),
+    currency: home.invoices[0]?.currencyCode ?? "",
+  };
+
   const tiles = [
     {
       label: "Appointments",
@@ -475,9 +555,6 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
     <div className="space-y-6">
       {/* ── Offline Status Bar ─────────────────────────────────────────── */}
       <OfflineStatusBar />
-
-      {/* ── PWA Mobile Install Banner ─────────────────────────────────── */}
-      <PwaInstallPrompt />
 
       {/* ── Hero Welcome Banner ────────────────────────────────────────── */}
 
@@ -622,6 +699,69 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
             ))}
           </div>
 
+          {/* Where the patient's record actually stands. Three
+              part-to-whole questions a patient genuinely asks: what is
+              happening with my appointments, my tests, and my bills. */}
+          <div className="grid gap-5 lg:grid-cols-3">
+            <DonutChart
+              title="Your appointments"
+              subtitle="By status"
+              slices={appointmentMix}
+              centerLabel="Appointments"
+              size={168}
+              thickness={20}
+              emptyMessage="No appointments yet"
+              emptyHint="Book one from the quick actions below."
+            />
+
+            {/* The patient portal deliberately loads only results a clinician
+                has RELEASED, so this can never show a test that is merely
+                ordered. It used to say "No tests ordered yet", which told a
+                patient with a pending test that nothing had been ordered. */}
+            <DonutChart
+              title="Your test results"
+              subtitle="Results your clinician has released to you"
+              slices={diagnosticMix}
+              centerLabel="Results"
+              size={168}
+              thickness={20}
+              emptyMessage="No results released yet"
+              emptyHint="A test can be under way without appearing here until it is reported and released."
+            />
+
+            <div className="wf-viz flex flex-col justify-center rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(11,18,32,0.04)]">
+              <p className="text-sm font-semibold tracking-[-0.01em] text-slate-900">
+                Your billing
+              </p>
+
+              <p className="mt-0.5 text-xs leading-5 text-slate-500">
+                Paid against outstanding
+              </p>
+
+              <p className="mt-4 text-[26px] font-semibold leading-none tracking-[-0.03em] text-slate-900">
+                {billing.currency ? formatMoney(billing.outstanding, billing.currency) : "—"}
+              </p>
+
+              <p className="mt-1 text-xs text-slate-500">Outstanding balance</p>
+
+              <StackedBar
+                className="mt-4"
+                segments={[
+                  { id: "paid", label: "Paid", value: billing.paid, color: "var(--viz-good)" },
+                  {
+                    id: "due",
+                    label: "Outstanding",
+                    value: billing.outstanding,
+                    color: "var(--viz-mute-mark)",
+                  },
+                ]}
+                valueFormatter={(value) =>
+                  billing.currency ? formatMoney(value, billing.currency) : String(value)
+                }
+              />
+            </div>
+          </div>
+
           {/* Core Content Grid */}
           <div className="grid gap-6 lg:grid-cols-2">
             {/* Next Appointment Card */}
@@ -666,14 +806,25 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
                       </div>
                     </div>
 
+                    {/* Only an ONLINE appointment has a video room. This used
+                        to render for every appointment, so a patient booked
+                        into the physical clinic was invited to join a call
+                        that does not exist instead of attending in person. */}
                     <div className="mt-3 flex items-center justify-end gap-2 border-t border-blue-200/50 pt-2.5 dark:border-blue-900/40">
-                      <Link
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-3.5 py-1.5 text-xs font-black text-white shadow-sm hover:from-purple-700 hover:to-indigo-700"
-                        href={`/patient/appointments/${nextAppointment.id}/video`}
-                      >
-                        <Video className="size-3.5" />
-                        <span>Join Video Consultation</span>
-                      </Link>
+                      {nextAppointment.consultationMode === "ONLINE" ? (
+                        <Link
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-3.5 py-1.5 text-xs font-black text-white shadow-sm hover:from-purple-700 hover:to-indigo-700"
+                          href={`/patient/appointments/${nextAppointment.id}/video`}
+                        >
+                          <Video className="size-3.5" />
+                          <span>Join Video Consultation</span>
+                        </Link>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                          <MapPin className="size-3.5" />
+                          Attend in person at {nextAppointment.branch.name}
+                        </span>
+                      )}
                     </div>
                   </article>
 

@@ -1,5 +1,5 @@
 import { database } from "@wonflow/database";
-import type { WorkspaceCode } from "@wonflow/database";
+import type { Prisma, WorkspaceCode } from "@wonflow/database";
 import { homePathForRole } from "./accounts";
 import type { WonFlowRole } from "./accounts";
 import { verifyPassword } from "./password";
@@ -28,14 +28,24 @@ const workspaceRoles: Record<WorkspaceCode, WonFlowRole> = {
 };
 
 
-export async function authenticateAccount(email: string, password: string): Promise<AuthenticatedAccount | null> {
-  const identity = await database.identity.findUnique({
-    where: { normalizedEmail: email.trim().toLowerCase() },
+/**
+ * The one query both sign-in paths use, so the context list cannot drift
+ * between "signed in with a password" and "picked a portal afterwards".
+ */
+function findIdentityForLogin(where: Prisma.IdentityWhereUniqueInput) {
+  return database.identity.findUnique({
+    where,
     include: {
       memberships: { where: { status: "ACTIVE" }, include: { organization: true, primaryBranch: true, tenant: true } },
       mfaCredentials: { where: { status: "ACTIVE" }, select: { id: true } },
     },
   });
+}
+
+type IdentityWithContext = NonNullable<Awaited<ReturnType<typeof findIdentityForLogin>>>;
+
+export async function authenticateAccount(email: string, password: string): Promise<AuthenticatedAccount | null> {
+  const identity = await findIdentityForLogin({ normalizedEmail: email.trim().toLowerCase() });
   if (!identity?.passwordHash || identity.status !== "ACTIVE" || (identity.lockedUntil && identity.lockedUntil > new Date())) return null;
   if (!(await verifyPassword(password, identity.passwordHash))) {
     const failures = identity.failedLoginCount + 1;
@@ -46,6 +56,28 @@ export async function authenticateAccount(email: string, password: string): Prom
     return null;
   }
   await database.identity.update({ where: { id: identity.id }, data: { failedLoginCount: 0, lockedUntil: null, lastAuthenticatedAt: new Date() } });
+  return buildAccount(identity);
+}
+
+/**
+ * Rebuilds an account for an identity whose password was already accepted.
+ *
+ * The second step of a multi-workspace sign-in has to know which portals this
+ * person may enter, and it must not take the client's word for it. The
+ * pending-login cookie says WHO; this says what they are allowed to be. The
+ * contexts are re-read from the database every time, so a membership revoked
+ * between the two steps is gone by the time the session is created.
+ */
+export async function loadAccountByIdentityId(identityId: string): Promise<AuthenticatedAccount | null> {
+  const identity = await findIdentityForLogin({ id: identityId });
+
+  if (!identity || identity.status !== "ACTIVE") return null;
+  if (identity.lockedUntil && identity.lockedUntil > new Date()) return null;
+
+  return buildAccount(identity);
+}
+
+async function buildAccount(identity: IdentityWithContext): Promise<AuthenticatedAccount> {
   const contexts: AvailableLoginContext[] = [];
   let suspendedOrganizationLabel: string | null = null;
   if (identity.isPlatformAdministrator) contexts.push({ membershipId: null, tenantId: null, organizationId: null, branchId: null, workspace: null, role: "platform", organizationLabel: "WonFlow Platform", branchLabel: null, homePath: homePathForRole("platform") });
@@ -63,10 +95,28 @@ export async function authenticateAccount(email: string, password: string): Prom
   }
 
   const now = new Date();
+
+  /**
+   * Relationships that are clinical staff access, not a patient-portal seat.
+   *
+   * Accepting a referral writes a PatientAccess row with relationship
+   * "care-team-allied" so the therapist can reach that patient's record. It
+   * is NOT a portal login. Counting it as one gave every physiotherapist a
+   * second context the moment they accepted their first referral, so signing
+   * in stopped going straight to their workspace and instead asked them to
+   * choose between Physiotherapy and "Caregiver for <patient>" — a seat that
+   * would show them the patient's own phone view.
+   *
+   * Family caregivers are a different thing entirely and still belong here;
+   * only staff-side grants are excluded.
+   */
+  const STAFF_ACCESS_RELATIONSHIPS = ["care-team-allied", "care-team"];
+
   const patientAccesses = await database.patientAccess.findMany({
     where: {
       identityId: identity.id,
       isActive: true,
+      relationship: { notIn: STAFF_ACCESS_RELATIONSHIPS },
       OR: [{ expiresAt: null }, { expiresAt: { gte: now } }],
       patient: { status: "ACTIVE", tenant: { status: "ACTIVE" } },
     },

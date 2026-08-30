@@ -1,3 +1,4 @@
+import { todayIn } from "@/server/time/business-day";
 import { NextResponse } from "next/server";
 
 import { requireRequestContext } from "@/lib/auth/permission-service";
@@ -6,10 +7,8 @@ import { handleApiRoute } from "@/server/http/route-handler";
 
 export function GET(request: Request): Promise<NextResponse> {
   return handleApiRoute(async () => {
-    const date = new URL(request.url).searchParams.get("date")
-      ?? new Date().toISOString().slice(0, 10);
-    return NextResponse.json(
-      await doctorSittingService.listSittingsForDate(await requireRequestContext(), date),
-    );
+    const rc = await requireRequestContext();
+    const date = new URL(request.url).searchParams.get("date") ?? todayIn(rc.timezone);
+    return NextResponse.json(await doctorSittingService.listSittingsForDate(rc, date));
   });
 }

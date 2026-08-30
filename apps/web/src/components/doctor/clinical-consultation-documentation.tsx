@@ -1324,13 +1324,23 @@ function GlassmorphicPrescriptionPanel({
   const [stagedItems, setStagedItems] = useState<StagedMedication[]>([]);
   const [trayExpanded, setTrayExpanded] = useState(true);
 
-  // Current item composer form
+  /*
+   * Prescribing fields start unset.
+   *
+   * Frequency, duration, quantity and the patient instruction used to be
+   * pre-filled with "Twice daily (BD)", "5 days", 10 and "Take after meals
+   * with water". A prescriber who filled in only the drug and the dose
+   * signed a prescription carrying three values they never chose. Route
+   * keeps its "Oral" default because the select has no empty option and
+   * oral is a route, not a dose — everything that carries a clinical
+   * quantity is blank until the prescriber sets it.
+   */
   const [dose, setDose] = useState("");
   const [route, setRoute] = useState("Oral");
-  const [frequency, setFrequency] = useState("Twice daily (BD)");
-  const [duration, setDuration] = useState("5 days");
-  const [quantity, setQuantity] = useState<string>("10");
-  const [instructions, setInstructions] = useState("Take after meals with water");
+  const [frequency, setFrequency] = useState("");
+  const [duration, setDuration] = useState("");
+  const [quantity, setQuantity] = useState<string>("");
+  const [instructions, setInstructions] = useState("");
   const [overallInstructions, setOverallInstructions] = useState("");
 
   const { mutate: issuePrescription, saveState: issueState, error: issueError } = useCreatePrescription(encounter.id);
@@ -1416,7 +1426,10 @@ function GlassmorphicPrescriptionPanel({
     setSelectedMedication(null);
     setCustomMedName("");
     setDose("");
-    setInstructions("Take after meals with water");
+    setFrequency("");
+    setDuration("");
+    setQuantity("");
+    setInstructions("");
   }
 
   function handleRemoveStagedItem(index: number) {
@@ -1569,6 +1582,7 @@ function GlassmorphicPrescriptionPanel({
                   onChange={(e) => setFrequency(e.target.value)}
                   className="mt-1.5 h-11 w-full rounded-2xl border border-slate-200/80 bg-white/80 px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 >
+                  <option value="">Choose a frequency</option>
                   {FREQUENCY_OPTIONS.map((f) => (
                     <option key={f.value} value={f.value}>{f.label}</option>
                   ))}
@@ -1700,7 +1714,7 @@ function GlassmorphicPrescriptionPanel({
                           <span className="rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">{item.dose}</span>
                         </div>
                         <p className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-400">
-                          {item.route} • {item.frequency} • {item.duration} {item.quantity ? `• Qty: ${item.quantity}` : ""}
+                          {[item.route, item.frequency, item.duration, item.quantity ? `Qty: ${item.quantity}` : ""].filter(Boolean).join(" • ")}
                         </p>
                         {item.instructions ? <p className="text-[10px] italic text-slate-500">Instructions: {item.instructions}</p> : null}
                       </div>
@@ -1814,7 +1828,7 @@ function GlassmorphicPrescriptionPanel({
                           </span>
                         </div>
                         <p className="text-[11px] text-slate-500">
-                          {item.route ? `${item.route} • ` : ""}{item.frequency} • {item.duration ?? "Standard duration"}
+                          {[item.route, item.frequency, item.duration].filter(Boolean).join(" • ")}
                         </p>
                       </div>
                       {item.instructions ? (
@@ -2631,20 +2645,35 @@ function ConsultationReportModal({
   const [format, setFormat] = useState<ReportFormatType>("comprehensive_summary");
   const [signatureUrl, setSignatureUrl] = useState<string | null>(null);
 
-  // Hospital & Sitting Chamber Information
-  const [hospitalName, setHospitalName] = useState(session?.orgLabel || "WONFLOW MEMORIAL HOSPITAL");
-  const [branchLocation, setBranchLocation] = useState(session?.branchLabel || "Main Medical Complex");
-  const [chamberRoom, setChamberRoom] = useState("Room 104 - Consultant OPD Chamber");
-  const [department, setDepartment] = useState("Department of Internal Medicine & Clinical Care");
-  const [hospitalContact, setHospitalContact] = useState("Tel: +92 (042) 111-966-356 • Emergency: 24/7");
+  /*
+   * Everything printed on these documents starts EMPTY.
+   *
+   * This block used to carry defaults — a room number, a department, a
+   * hospital telephone number, a set of qualifications and a PMDC
+   * registration number. They were not placeholders: they were rendered
+   * straight onto the prescription and the medical certificate, which are
+   * legal documents. Any hospital using this product printed another
+   * hospital's phone number and a registration number belonging to nobody,
+   * under their own letterhead, unless a doctor happened to notice and
+   * retype every field.
+   *
+   * The real values come from the signed-in session and the doctor's own
+   * profile below. Where a value genuinely is not on record the document
+   * omits the line rather than inventing one.
+   */
+  const [hospitalName, setHospitalName] = useState(session?.orgLabel ?? "");
+  const [branchLocation, setBranchLocation] = useState(session?.branchLabel ?? "");
+  const [chamberRoom, setChamberRoom] = useState("");
+  const [department, setDepartment] = useState("");
+  const [hospitalContact, setHospitalContact] = useState("");
 
   // Doctor Details & Credentials
-  const [doctorName, setDoctorName] = useState(session?.name || "Dr. Attending Consultant");
-  const [qualifications, setQualifications] = useState("MBBS, FCPS (Medicine), MRCP");
-  const [specialty, setSpecialty] = useState("Consultant Physician & Specialist");
-  const [licenseNo, setLicenseNo] = useState("PMDC-74892-A");
-  const [certificateReason, setCertificateReason] = useState("Acute illness requiring medical rest and recovery");
-  const [restDays, setRestDays] = useState("3");
+  const [doctorName, setDoctorName] = useState(session?.name ?? "");
+  const [qualifications, setQualifications] = useState("");
+  const [specialty, setSpecialty] = useState("");
+  const [licenseNo, setLicenseNo] = useState("");
+  const [certificateReason, setCertificateReason] = useState("");
+  const [restDays, setRestDays] = useState("");
 
   const [activeConfigTab, setActiveConfigTab] = useState<"doctor" | "hospital" | "signature">("doctor");
 
@@ -2900,6 +2929,26 @@ function ConsultationReportModal({
                 />
               </div>
               <div>
+                <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Department</label>
+                <input
+                  type="text"
+                  value={department}
+                  onChange={(e) => setDepartment(e.target.value)}
+                  placeholder="e.g. Hepato-Pancreato-Biliary Surgery"
+                  className="h-8.5 w-full rounded-xl border border-slate-200 bg-white px-2.5 font-bold text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Certificate Reason (fallback)</label>
+                <input
+                  type="text"
+                  value={certificateReason}
+                  onChange={(e) => setCertificateReason(e.target.value)}
+                  placeholder="Used only when no diagnosis is recorded"
+                  className="h-8.5 w-full rounded-xl border border-slate-200 bg-white px-2.5 font-bold text-slate-900 shadow-sm dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+                />
+              </div>
+              <div>
                 <label className="block text-[10px] font-black uppercase text-slate-500 mb-1">Helpline / Emergency Tel</label>
                 <input
                   type="text"
@@ -2978,12 +3027,16 @@ function ConsultationReportModal({
                   <h1 className="text-xl font-black tracking-tight text-indigo-950">
                     {hospitalName.toUpperCase()}
                   </h1>
-                  <p className="text-xs font-bold text-slate-700">
-                    🏥 Facility: <strong>{branchLocation}</strong> • <strong>{chamberRoom}</strong>
-                  </p>
-                  <p className="text-[11px] text-slate-500">
-                    {department} • {hospitalContact}
-                  </p>
+                  {[branchLocation, chamberRoom].filter(Boolean).length > 0 ? (
+                    <p className="text-xs font-bold text-slate-700">
+                      Facility: {[branchLocation, chamberRoom].filter(Boolean).join(" • ")}
+                    </p>
+                  ) : null}
+                  {[department, hospitalContact].filter(Boolean).length > 0 ? (
+                    <p className="text-[11px] text-slate-500">
+                      {[department, hospitalContact].filter(Boolean).join(" • ")}
+                    </p>
+                  ) : null}
                 </div>
               </div>
 
@@ -3031,18 +3084,24 @@ function ConsultationReportModal({
               <div className="grid grid-cols-3 gap-3 pt-1">
                 <div>
                   <span className="text-[10px] font-black uppercase text-slate-400 block">Consulting Doctor</span>
-                  <span className="text-slate-950 font-black">{doctorName}</span>
-                  <span className="text-[10px] text-slate-500 block font-normal">{qualifications}</span>
+                  <span className="text-slate-950 font-black">{doctorName || "—"}</span>
+                  {qualifications ? (
+                    <span className="text-[10px] text-slate-500 block font-normal">{qualifications}</span>
+                  ) : null}
                 </div>
                 <div>
                   <span className="text-[10px] font-black uppercase text-slate-400 block">Specialty & License</span>
-                  <span className="text-slate-900 font-bold">{specialty}</span>
-                  <span className="text-[10px] font-mono text-indigo-700 block">Reg #: {licenseNo}</span>
+                  <span className="text-slate-900 font-bold">{specialty || "—"}</span>
+                  {licenseNo ? (
+                    <span className="text-[10px] font-mono text-indigo-700 block">Reg #: {licenseNo}</span>
+                  ) : null}
                 </div>
                 <div>
                   <span className="text-[10px] font-black uppercase text-slate-400 block">Clinic Sitting</span>
-                  <span className="text-slate-900 font-bold">{branchLocation}</span>
-                  <span className="text-[10px] text-slate-500 block">{chamberRoom}</span>
+                  <span className="text-slate-900 font-bold">{branchLocation || "—"}</span>
+                  {chamberRoom ? (
+                    <span className="text-[10px] text-slate-500 block">{chamberRoom}</span>
+                  ) : null}
                 </div>
               </div>
             </div>
@@ -3189,7 +3248,7 @@ function ConsultationReportModal({
                   Medical Fitness / Leave Certificate
                 </h3>
                 <p>
-                  This is to certify that <strong>{patientDisplayName(patient)}</strong> (MR#: <strong>{patient.patientNumber}</strong>), aged {patient.dateOfBirth ? `${new Date().getFullYear() - new Date(patient.dateOfBirth).getFullYear()} years` : "—"}, {patient.sex ?? ""}, was clinically examined under my care on <strong>{new Date().toLocaleDateString()}</strong> at <strong>{hospitalName} ({branchLocation}, {chamberRoom})</strong>.
+                  This is to certify that <strong>{patientDisplayName(patient)}</strong> (MR#: <strong>{patient.patientNumber}</strong>), aged {patient.dateOfBirth ? `${new Date().getFullYear() - new Date(patient.dateOfBirth).getFullYear()} years` : "—"}, {patient.sex ?? ""}, was clinically examined under my care on <strong>{new Date().toLocaleDateString()}</strong> at <strong>{[hospitalName, [branchLocation, chamberRoom].filter(Boolean).join(", ")].filter(Boolean).join(" — ")}</strong>.
                 </p>
                 <p>
                   <strong>Clinical Diagnosis / Finding:</strong>{" "}
@@ -3207,8 +3266,12 @@ function ConsultationReportModal({
             {/* Document Footer & Doctor Signature Section */}
             <div className="mt-12 pt-6 border-t-2 border-slate-200 flex items-end justify-between">
               <div className="text-[11px] text-slate-500 space-y-0.5">
-                <p className="font-bold text-slate-700">{hospitalName} — {branchLocation}</p>
-                <p>{department} • {chamberRoom}</p>
+                <p className="font-bold text-slate-700">
+                  {[hospitalName, branchLocation].filter(Boolean).join(" — ")}
+                </p>
+                {[department, chamberRoom].filter(Boolean).length > 0 ? (
+                  <p>{[department, chamberRoom].filter(Boolean).join(" • ")}</p>
+                ) : null}
                 <p>Document Security ID: WF-DOC-{encounter.id.slice(0, 12).toUpperCase()}</p>
                 <p>Printed on: {new Date().toLocaleString()}</p>
               </div>
@@ -3223,11 +3286,19 @@ function ConsultationReportModal({
                     <span className="text-xs italic text-slate-400 font-serif">Signature of Consulting Doctor</span>
                   )}
                 </div>
-                <p className="text-xs font-black text-slate-950">{doctorName}</p>
-                <p className="text-[11px] font-bold text-slate-700">{qualifications}</p>
-                <p className="text-[10px] font-semibold text-slate-600">{specialty}</p>
-                <p className="text-[10px] font-mono text-indigo-900 font-bold">PMDC Reg #: {licenseNo}</p>
-                <p className="text-[9px] text-slate-400 mt-0.5">{hospitalName} • {branchLocation}</p>
+                <p className="text-xs font-black text-slate-950">{doctorName || "—"}</p>
+                {qualifications ? (
+                  <p className="text-[11px] font-bold text-slate-700">{qualifications}</p>
+                ) : null}
+                {specialty ? (
+                  <p className="text-[10px] font-semibold text-slate-600">{specialty}</p>
+                ) : null}
+                {licenseNo ? (
+                  <p className="text-[10px] font-mono text-indigo-900 font-bold">Reg #: {licenseNo}</p>
+                ) : null}
+                <p className="text-[9px] text-slate-400 mt-0.5">
+                  {[hospitalName, branchLocation].filter(Boolean).join(" • ")}
+                </p>
               </div>
             </div>
           </div>

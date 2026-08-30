@@ -3,11 +3,12 @@ import { useCallback, useEffect, useState } from "react";
 import { CalendarDays } from "lucide-react";
 
 import { WonFlowPageHeader } from "@/components/workspace";
+import { todayLocalDate } from "@/lib/time/local-date";
 
 interface Appointment { id: string; startsAt: string; endsAt: string; status: string; reason: string | null; source: string; patient: { patientNumber: string; givenName: string; middleName: string | null; familyName: string; phone: string | null }; branch: { name: string; timezone: string }; service: { name: string } | null; doctor: { staffProfile: { membership: { displayName: string } } } | null; queueEntry: { tokenNumber: number; status: string } | null }
 
 export function ReceptionAppointmentsWorkspace() {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(() => todayLocalDate());
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [error, setError] = useState("");
   const load = useCallback(async () => {

@@ -198,10 +198,15 @@ export function WonFlowRouteTransitionProvider({
         return;
       }
 
-      if (
-        destination.pathname === current.pathname &&
-        destination.search === current.search
-      ) {
+      // Same page, only the query moved. Nothing unmounts and nothing is
+      // fetched that the reader waits on, so there is nothing to announce.
+      //
+      // This also has to be a `return` rather than a shorter overlay: the
+      // transition is ended by the pathname effect below, and on a query-only
+      // navigation the pathname never changes - so an overlay opened here
+      // would hang until the 1.4s fallback swept it away. The allied
+      // workspaces move between their sections exactly this way.
+      if (destination.pathname === current.pathname) {
         return;
       }
 

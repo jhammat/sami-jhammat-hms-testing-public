@@ -26,6 +26,8 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { DonutChart, RadialMeter, type DonutSlice } from "@/components/charts";
+
 export interface CarePlanTaskItem {
   id: string;
   tenantId: string;
@@ -178,6 +180,68 @@ export function CarePlanTaskView() {
 
     return { todayList, upcomingList, historyList };
   }, [tasks]);
+
+  /**
+   * Tasks the patient finished TODAY.
+   *
+   * This cannot come from `todayList`: the loop above sends anything
+   * COMPLETED or SKIPPED to `historyList` before it ever reaches the
+   * today/upcoming split, so filtering `todayList` for COMPLETED matches
+   * nothing and the counter sat at 0 all day no matter how much the
+   * patient did. It has to be read back out of the history list, dated.
+   */
+  const todayCompleted = useMemo(() => {
+    const todayYmd = new Date().toISOString().split("T")[0];
+
+    return categorizedTasks.historyList.filter(
+      (task) => task.status === "COMPLETED" && task.scheduledFor.split("T")[0] === todayYmd,
+    );
+  }, [categorizedTasks.historyList]);
+
+  const todayCompletedCount = todayCompleted.length;
+
+  /** Today's outstanding work, split by state. Status palette, not series. */
+  const todayStatusMix = useMemo<DonutSlice[]>(
+    () => [
+      {
+        id: "COMPLETED",
+        label: "Done",
+        value: todayCompletedCount,
+        color: "var(--viz-good)",
+      },
+      {
+        id: "PENDING",
+        label: "Still to do",
+        value: categorizedTasks.todayList.filter((task) => task.status === "PENDING").length,
+        color: "var(--viz-mute-mark)",
+      },
+      {
+        id: "MISSED",
+        label: "Overdue",
+        value: categorizedTasks.todayList.filter((task) => task.status === "MISSED").length,
+        color: "var(--viz-critical)",
+      },
+    ],
+    [categorizedTasks.todayList, todayCompletedCount],
+  );
+
+  /** What kind of work today is: vitals, drains, exercise, meals. */
+  const todayTypeMix = useMemo<DonutSlice[]>(() => {
+    const counts = new Map<string, number>();
+
+    [...categorizedTasks.todayList, ...todayCompleted].forEach((task) => {
+      counts.set(task.taskType, (counts.get(task.taskType) ?? 0) + 1);
+    });
+
+    return [...counts.entries()].map(([taskType, value]) => ({
+      id: taskType,
+      label: taskType
+        .replace(/_/g, " ")
+        .toLowerCase()
+        .replace(/^./, (character) => character.toUpperCase()),
+      value,
+    }));
+  }, [categorizedTasks.todayList, todayCompleted]);
 
   const handleOpenTask = (task: CarePlanTaskItem) => {
     setSelectedTask(task);
@@ -360,7 +424,7 @@ export function CarePlanTaskView() {
           <div className="flex items-center space-x-3">
             <div className="rounded-xl bg-white/10 p-3 text-center backdrop-blur-md">
               <div className="text-2xl font-extrabold text-white">
-                {categorizedTasks.todayList.filter((t) => t.status === "COMPLETED").length} /{" "}
+                {todayCompletedCount} /{" "}
                 {categorizedTasks.todayList.length}
               </div>
               <div className="text-xs text-emerald-200">Today&apos;s Completed</div>
@@ -368,6 +432,45 @@ export function CarePlanTaskView() {
           </div>
         </div>
       </div>
+
+      {/* The day at a glance. One ring for "how far through am I", one
+          donut for "what is the day actually made of". */}
+      {categorizedTasks.todayList.length > 0 ? (
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="flex items-center justify-center rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(11,18,32,0.04)]">
+            <RadialMeter
+              value={todayCompletedCount}
+              target={categorizedTasks.todayList.length}
+              label="Today's progress"
+              caption={`${todayCompletedCount} of ${categorizedTasks.todayList.length} done`}
+              size={132}
+              thickness={11}
+            />
+          </div>
+
+          <DonutChart
+            title="Today's tasks"
+            subtitle="Where you are up to"
+            slices={todayStatusMix}
+            centerValue={`${todayCompletedCount}/${categorizedTasks.todayList.length}`}
+            centerLabel="Done"
+            size={168}
+            thickness={20}
+            emptyMessage="Nothing scheduled today"
+          />
+
+          <DonutChart
+            title="What today asks of you"
+            subtitle="Tasks by type"
+            slices={todayTypeMix}
+            centerLabel="Tasks"
+            size={168}
+            thickness={20}
+            emptyMessage="Nothing scheduled today"
+            footnote="Each type comes from a different member of your care team."
+          />
+        </div>
+      ) : null}
 
       {/* Active Clinical Alerts if any */}
       {carePlan.alerts.length > 0 && (

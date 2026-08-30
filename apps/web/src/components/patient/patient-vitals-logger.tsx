@@ -25,6 +25,8 @@ import {
   SUPPORTED_VITALS,
 } from "@wonflow/contracts";
 
+import { DonutChart, StatTile, TrendLine, type DonutSlice } from "@/components/charts";
+
 export function PatientVitalsLogger() {
   const [observations, setObservations] = useState<ClinicalObservationSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -81,6 +83,61 @@ export function PatientVitalsLogger() {
   const lastReading = useMemo(() => {
     return observations.find((o) => o.code === selectedVitalKey);
   }, [observations, selectedVitalKey]);
+
+  /**
+   * The trend for whatever vital is selected, oldest first.
+   *
+   * The chart carries the vital's own sensible range as a shaded band, so
+   * a reading being high is something the patient can SEE rather than
+   * something they have to remember a number for. One vital at a time, on
+   * one axis — temperature and blood pressure never share a plot.
+   */
+  const selectedTrend = useMemo(() => {
+    const readings = observations
+      .filter((observation) => observation.code === selectedVitalKey)
+      .filter((observation) => observation.valueNumber != null)
+      .slice(0, 30)
+      .reverse();
+
+    return [
+      {
+        id: selectedVitalKey,
+        label: currentVital.display,
+        color: "var(--viz-1)",
+        band: { low: currentVital.sensibleMin, high: currentVital.sensibleMax },
+        points: readings.map((observation) => ({
+          label: new Date(observation.observedAt).toLocaleDateString("en-GB", {
+            day: "numeric",
+            month: "short",
+          }),
+          value: Number(observation.valueNumber),
+        })),
+      },
+    ];
+  }, [observations, selectedVitalKey, currentVital]);
+
+  /** What the patient has actually been logging, as a share of the whole. */
+  const readingMix = useMemo<DonutSlice[]>(() => {
+    const counts = new Map<string, number>();
+    observations.forEach((observation) => {
+      counts.set(observation.code, (counts.get(observation.code) ?? 0) + 1);
+    });
+
+    return [...counts.entries()].map(([code, value]) => ({
+      id: code,
+      label: SUPPORTED_VITALS[code]?.display ?? code.replace(/_/g, " "),
+      value,
+    }));
+  }, [observations]);
+
+  const selectedReadings = selectedTrend[0]?.points ?? [];
+  const latestValue = selectedReadings.at(-1)?.value ?? null;
+  const previousValue = selectedReadings.at(-2)?.value ?? null;
+
+  const inRange =
+    latestValue === null
+      ? null
+      : latestValue >= currentVital.sensibleMin && latestValue <= currentVital.sensibleMax;
 
   // Plausibility check
   const valNum = Number(numericValue);
@@ -197,6 +254,89 @@ export function PatientVitalsLogger() {
             </button>
           );
         })}
+      </div>
+
+      {/* At-a-glance row — three numbers, then the trend. */}
+      <div className="grid gap-4 sm:grid-cols-3">
+        <StatTile
+          label={`Latest ${currentVital.display.toLowerCase()}`}
+          value={latestValue ?? "—"}
+          unit={currentVital.unit}
+          icon={<HeartPulse aria-hidden size={16} />}
+          status={inRange === null ? "neutral" : inRange ? "good" : "warning"}
+          hint={
+            inRange === null
+              ? "No reading yet"
+              : inRange
+                ? "Inside your usual range"
+                : "Outside your usual range"
+          }
+          delta={
+            latestValue !== null && previousValue !== null
+              ? {
+                  value: `${Math.abs(latestValue - previousValue).toFixed(
+                    currentVital.step < 1 ? 1 : 0,
+                  )} ${currentVital.unit}`,
+                  direction:
+                    latestValue > previousValue
+                      ? "up"
+                      : latestValue < previousValue
+                        ? "down"
+                        : "flat",
+                  // Neither direction is inherently good for a vital — what
+                  // matters is whether the value sits inside the range, which
+                  // the status rail above already carries. So the delta shows
+                  // the arrow but stays neutral rather than painting a fall
+                  // in blood pressure red.
+                  tone: "neutral",
+                  period: "since last reading",
+                }
+              : undefined
+          }
+        />
+
+        <StatTile
+          label="Readings logged"
+          value={observations.length}
+          icon={<History aria-hidden size={16} />}
+          hint={`${selectedReadings.length} for this vital`}
+        />
+
+        <StatTile
+          label="Your usual range"
+          value={`${currentVital.sensibleMin}–${currentVital.sensibleMax}`}
+          unit={currentVital.unit}
+          icon={<Info aria-hidden size={16} />}
+          hint="Shaded on the chart below"
+        />
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-3">
+        <TrendLine
+          className="lg:col-span-2"
+          title={`${currentVital.display} over time`}
+          subtitle="The shaded band is your usual range"
+          series={selectedTrend}
+          unit={currentVital.unit}
+          height={240}
+          emptyMessage="No readings for this vital yet"
+          emptyHint="Record one below and your trend line starts here."
+          valueFormatter={(value) =>
+            currentVital.step < 1 ? value.toFixed(1) : String(Math.round(value))
+          }
+          footnote="Your care team sees this same chart. A gap in the line means no reading was taken that day."
+        />
+
+        <DonutChart
+          title="What you have been logging"
+          subtitle="Share of all your readings"
+          slices={readingMix}
+          centerLabel="Readings"
+          size={168}
+          thickness={20}
+          emptyMessage="Nothing logged yet"
+          emptyHint="Your first reading will appear here."
+        />
       </div>
 
       {/* Main Entry Card */}

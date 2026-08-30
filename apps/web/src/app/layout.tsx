@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
 
 import {
@@ -49,12 +49,33 @@ export const metadata: Metadata = {
   },
   description:
     "WonFlow hospital operations and clinical care platform.",
-  icons: {
-    icon: "/icon.png",
-    shortcut: "/icon.png",
-    apple: "/apple-icon.png",
+  // No `icons` here on purpose. `app/icon.png` and `app/apple-icon.png` are
+  // file conventions and Next serves those in preference to anything declared
+  // in metadata, so declaring both means only one of them is ever true. Both
+  // files used to be the 1080x1350 brand plate - the right artwork at the
+  // wrong shape for a tab or a home screen - and are now square cuts of the
+  // same mark the installed-app manifest uses.
+  manifest: "/manifest.webmanifest",
+
+  // iOS has no manifest support worth relying on; these are what make an
+  // "Add to Home Screen" open without Safari's chrome around it.
+  appleWebApp: {
+    capable: true,
+    title: "WonFlow",
+    statusBarStyle: "black-translucent",
   },
-  manifest: "/manifest.json",
+};
+
+export const viewport: Viewport = {
+  // The installed app fills the whole device, notch included, and the theme
+  // colour follows the theme the viewer chose rather than being pinned light.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#2563eb" },
+    { media: "(prefers-color-scheme: dark)", color: "#0b1220" },
+  ],
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 

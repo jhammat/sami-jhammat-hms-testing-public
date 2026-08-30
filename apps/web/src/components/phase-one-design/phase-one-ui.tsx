@@ -118,18 +118,18 @@ export function PhaseOnePanel({
   children: ReactNode;
 }) {
   return (
-    <section className="overflow-hidden rounded-[22px] border border-slate-200/80 bg-white shadow-[0_16px_42px_rgba(15,23,42,0.055)]">
+    <section className="wf-surface wf-panel overflow-hidden rounded-[22px]">
       {title || description || actions ? (
-        <header className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <header className="wf-panel-divider flex flex-col gap-3 border-b px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             {title ? (
-              <h2 className="text-base font-semibold text-slate-950">
+              <h2 className="wf-ink text-base font-semibold">
                 {title}
               </h2>
             ) : null}
 
             {description ? (
-              <p className="mt-1 text-xs leading-5 text-slate-500">
+              <p className="wf-ink-2 mt-1 text-xs leading-5">
                 {description}
               </p>
             ) : null}
@@ -255,17 +255,21 @@ export function PhaseOneStatusPill({
     | "warning"
     | "critical";
 }) {
+  // Tinted with an alpha of the tone's own hue rather than a fixed light
+  // step, so the same class works on a white card and on a dark one -- a
+  // `bg-emerald-50` pill kept its pale fill in dark mode while the global
+  // overrides lightened its text, and the label vanished.
   const styles = {
     neutral:
-      "bg-slate-100 text-slate-700 ring-slate-200",
+      "bg-slate-500/12 text-slate-600 ring-slate-500/25 dark:text-slate-300",
     information:
-      "bg-blue-50 text-blue-700 ring-blue-200",
+      "bg-blue-500/12 text-blue-700 ring-blue-500/25 dark:text-blue-300",
     success:
-      "bg-emerald-50 text-emerald-700 ring-emerald-200",
+      "bg-emerald-500/14 text-emerald-700 ring-emerald-500/28 dark:text-emerald-300",
     warning:
-      "bg-amber-50 text-amber-800 ring-amber-200",
+      "bg-amber-500/16 text-amber-800 ring-amber-500/30 dark:text-amber-300",
     critical:
-      "bg-red-950 text-red-50 ring-red-900",
+      "bg-red-600/14 text-red-700 ring-red-600/32 dark:text-red-300",
   }[tone];
 
   return (

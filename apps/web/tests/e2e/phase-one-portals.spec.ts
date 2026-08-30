@@ -101,8 +101,12 @@ test("a portal screen resolves its client-loaded data instead of hanging on a lo
   await page.goto("/patient", { waitUntil: "load" });
   await worklistRequest;
 
-  // The medical record number only reaches the DOM once the client fetch resolves.
-  await expect(page.getByText(/Medical record DEV-0001/i)).toBeVisible({ timeout: 20_000 });
+  // The medical record number only reaches the DOM once the client fetch
+  // resolves. The dashboard labels it "MRN: DEV-0001"; this assertion used to
+  // look for "Medical record DEV-0001", which is the wording on the doctor's
+  // registration confirmation, not this screen — so it could never match and
+  // the test failed on copy rather than on behaviour.
+  await expect(page.getByText(/MRN:\s*DEV-0001/i)).toBeVisible({ timeout: 20_000 });
   await expect(page.locator("body")).not.toContainText("Loading your secure care record");
 });
 
@@ -204,7 +208,14 @@ test("a patient books through the portal and reception sees the appointment", as
    * through days (starting from today's default date) until an available
    * time is found rather than assuming tomorrow's first schedule is free.
    */
-  const slotButton = page.getByRole("button", { name: /^\d{1,2}:\d{2}\s?(AM|PM)$/i });
+  // Only ENABLED slots. Taken times are still rendered, as disabled buttons
+  // with a line-through, so `.first()` on an unfiltered match resolved to a
+  // reserved slot on any database that has run this suite before, and the
+  // click then timed out waiting for a button that is never going to enable.
+  const slotButton = page.getByRole("button", {
+    name: /^\d{1,2}:\d{2}\s?(AM|PM)$/i,
+    disabled: false,
+  });
   let bookedTime = "";
   let bookingDate = await dateInput.inputValue();
 

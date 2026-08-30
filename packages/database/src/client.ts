@@ -59,9 +59,7 @@ function createClient(): PrismaClient {
   return client;
 }
 
-export const database =
-  globalThis.wonFlowPrisma ??
-  createClient();
+export const database = createClient();
 
 if (
   process.env.NODE_ENV !==

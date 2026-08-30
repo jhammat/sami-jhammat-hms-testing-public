@@ -99,6 +99,7 @@ model Tenant {
   AlertEvent             AlertEvent[]
   AlertRota              AlertRota[]
   AlertEscalation        AlertEscalation[]
+  doctorFeeRequests      DoctorFeeRequest[]
   entitlements           TenantEntitlement[]
 
   invitations            TenantInvitation[]
@@ -237,6 +238,7 @@ model Branch {
   staffProfiles      StaffProfile[]
   stockMovements     StockMovement[]
   primaryMemberships TenantMembership[]          @relation("MembershipPrimaryBranch")
+  doctorFeeRequests  DoctorFeeRequest[]
 
   @@unique([tenantId, code])
   @@unique([tenantId, organizationId], map: "Branch_single_main_per_organization", where: raw("(\"isMainBranch\" AND (\"archivedAt\" IS NULL))"))
@@ -310,6 +312,8 @@ model TenantMembership {
   AlertRotaEscalation AlertRota[]          @relation("AlertRotaEscalation")
   AlertEscalationsTarget AlertEscalation[]
   handledServices     ServiceDefinition[]         @relation("ServiceHandler")
+  feeRequestsSubmitted DoctorFeeRequest[]         @relation("FeeRequestRequester")
+  feeRequestsReviewed  DoctorFeeRequest[]         @relation("FeeRequestReviewer")
   staffProfile        StaffProfile?
   identity            Identity                    @relation(fields: [identityId], references: [id])
   organization        Organization                @relation(fields: [organizationId], references: [id])
@@ -658,6 +662,7 @@ model DoctorProfile {
   tenant                   Tenant              @relation(fields: [tenantId], references: [id])
   sittings                 DoctorSitting[]
   encounters               Encounter[]
+  feeRequests              DoctorFeeRequest[]
   prescriptions            Prescription[]
   services                 ServiceDefinition[]
 
@@ -776,6 +781,7 @@ model ServiceDefinition {
   handlerMembership   TenantMembership?   @relation("ServiceHandler", fields: [handlerMembershipId], references: [id])
   tenant              Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   feeHistory          ServiceFeeHistory[]
+  feeRequests         DoctorFeeRequest[]
 
   @@unique([tenantId, code])
   @@index([tenantId, branchId, isActive])
@@ -2188,6 +2194,7 @@ enum OrganizationStatus {
 enum DoctorFeeAuthority {
   DOCTOR
   HOSPITAL
+  APPROVAL_REQUIRED
 }
 
 /// Lifecycle of a hospital policy document.
@@ -3043,4 +3050,63 @@ model AlertEscalation {
 
   @@index([tenantId, alertEventId, step])
   @@index([tenantId, scheduledFor, sentAt])
+}
+
+/// A doctor's request to create a new consultation service or change an
+/// existing service fee. Only used when the organization's doctorFeeAuthority
+/// is APPROVAL_REQUIRED. The admin reviews each request and approves or
+/// declines it.
+model DoctorFeeRequest {
+  id                      String                 @id @default(uuid()) @db.Uuid
+  tenantId                String                 @db.Uuid
+  serviceId               String?                @db.Uuid
+  doctorId                String                 @db.Uuid
+  requestedByMembershipId String                 @db.Uuid
+
+  /// CREATE_SERVICE for new services, UPDATE_FEE for price changes.
+  requestType             DoctorFeeRequestType
+  proposedName            String?                @db.VarChar(250)
+  proposedDescription     String?
+  proposedDurationMinutes Int?
+  proposedPriceMinorUnits Int
+  proposedCurrencyCode    String                 @default("PKR") @db.Char(3)
+  proposedBranchId        String?                @db.Uuid
+  proposedPubliclyBookable Boolean               @default(false)
+  proposedConsultationModes ConsultationMode[]   @default([IN_PERSON])
+
+  /// Approval workflow status.
+  status                  DoctorFeeRequestStatus @default(PENDING)
+  reviewedByMembershipId  String?                @db.Uuid
+  reviewNote              String?
+  rejectionReason         String?
+
+  createdAt               DateTime               @default(now()) @db.Timestamptz(6)
+  updatedAt               DateTime               @updatedAt @db.Timestamptz(6)
+  reviewedAt              DateTime?              @db.Timestamptz(6)
+
+  tenant                  Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  doctor                  DoctorProfile          @relation(fields: [doctorId], references: [id])
+  service                 ServiceDefinition?     @relation(fields: [serviceId], references: [id])
+  requestedBy             TenantMembership       @relation("FeeRequestRequester", fields: [requestedByMembershipId], references: [id])
+  reviewedBy              TenantMembership?      @relation("FeeRequestReviewer", fields: [reviewedByMembershipId], references: [id])
+  proposedBranch          Branch?                @relation(fields: [proposedBranchId], references: [id])
+
+  @@index([tenantId, status])
+  @@index([tenantId, doctorId, status])
+  @@index([serviceId])
+  @@index([doctorId])
+  @@index([requestedByMembershipId])
+  @@index([reviewedByMembershipId])
+  @@index([proposedBranchId])
+}
+
+enum DoctorFeeRequestType {
+  CREATE_SERVICE
+  UPDATE_FEE
+}
+
+enum DoctorFeeRequestStatus {
+  PENDING
+  APPROVED
+  DECLINED
 }

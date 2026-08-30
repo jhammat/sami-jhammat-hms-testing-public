@@ -80,21 +80,25 @@ function formatStatus(
 function getStatusStyle(
   value?: string,
 ): string {
+  // Each tone keeps its light steps and gains an explicit dark label
+  // colour. Without it the global overrides lightened the text while the
+  // pale fill stayed put, leaving the sitting status unreadable on a dark
+  // header -- the same failure the hero had.
   switch (value) {
     case "available":
-      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+      return "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-400/30 dark:bg-emerald-500/15 dark:text-emerald-300";
 
     case "on-break":
-      return "border-amber-200 bg-amber-50 text-amber-700";
+      return "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/30 dark:bg-amber-500/15 dark:text-amber-300";
 
     case "finished":
-      return "border-violet-200 bg-violet-50 text-violet-700";
+      return "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-400/30 dark:bg-violet-500/15 dark:text-violet-300";
 
     case "not-started":
-      return "border-blue-200 bg-blue-50 text-blue-700";
+      return "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-300";
 
     default:
-      return "border-slate-200 bg-slate-50 text-slate-600";
+      return "border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-400/25 dark:bg-slate-500/15 dark:text-slate-300";
   }
 }
 
@@ -144,7 +148,7 @@ export function DoctorPageHeader({
       <div className="relative flex flex-col gap-4 px-4 py-4 sm:px-5 sm:py-5 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[9px] font-black uppercase tracking-[0.18em] text-indigo-600">
+            <span className="text-[9px] font-black uppercase tracking-[0.18em] text-indigo-600 dark:text-indigo-300">
               {eyebrow}
             </span>
 
@@ -152,7 +156,7 @@ export function DoctorPageHeader({
               className={[
                 "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[8px] font-black uppercase tracking-[0.08em]",
                 loading
-                  ? "border-blue-200 bg-blue-50 text-blue-700"
+                  ? "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-400/30 dark:bg-blue-500/15 dark:text-blue-300"
                   : getStatusStyle(
                       sitting?.status,
                     ),

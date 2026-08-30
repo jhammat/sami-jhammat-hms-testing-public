@@ -3,6 +3,7 @@ import { requirePermission, requireTenantContext } from "@wonflow/contracts";
 import type { WonFlowRequestContext } from "@wonflow/contracts";
 
 import { WonFlowApiError } from "@/server/http/route-handler";
+import { dayWindowIn, todayIn } from "@/server/time/business-day";
 
 const SITTING_STATUSES = ["PLANNED", "AVAILABLE", "ON_BREAK", "FINISHED"] as const;
 type SittingStatus = (typeof SITTING_STATUSES)[number];
@@ -56,7 +57,10 @@ export class DoctorSittingService {
    */
   async listMySittings(requestContext: WonFlowRequestContext, fromDate?: string) {
     const { context, doctor } = await resolveDoctor(requestContext);
-    const from = fromDate ? parseBusinessDate(fromDate) : new Date(new Date().toISOString().slice(0, 10));
+    // "From today" means the hospital's today. Taken from the UTC date, a
+    // doctor opening this overnight at a UTC+5 site saw yesterday's sitting
+    // still listed as upcoming.
+    const from = parseBusinessDate(fromDate ?? todayIn(context.timezone));
 
     const [sittings, roster, branches] = await Promise.all([
       database.doctorSitting.findMany({
@@ -290,8 +294,10 @@ export class DoctorSittingService {
     startsMinute: number;
     endsMinute: number;
   }): Promise<number> {
-    const dayStart = new Date(`${input.businessDate}T00:00:00.000Z`);
-    const dayEnd = new Date(`${input.businessDate}T23:59:59.999Z`);
+    // The window this function already took a `timezone` for, but drew in
+    // UTC anyway — so at a UTC+5 site it compared appointments against the
+    // wrong five hours at each end of the sitting day.
+    const { start: dayStart, end: dayEnd } = dayWindowIn(input.businessDate, input.timezone);
     const appointments = await database.appointment.findMany({
       where: {
         tenantId: input.tenantId,

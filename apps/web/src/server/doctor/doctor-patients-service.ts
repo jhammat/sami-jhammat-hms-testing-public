@@ -5,12 +5,10 @@ import type { WonFlowRequestContext } from "@wonflow/contracts";
 import { WonFlowApiError } from "@/server/http/route-handler";
 
 /**
- * Every patient this doctor has a real appointment with — the doctor's "My
- * Patients" list, previously an entirely local/demo data source that never
- * reflected a real registration, appointment or diagnosis. referralSource is
- * surfaced here so the doctor can see how each patient reached the hospital
- * (website, reception walk-in, their own referral), tagged consistently at
- * registration time across all three intake paths.
+ * Lists all active patients for the hospital tenant, enriched with this doctor's
+ * and hospital's appointments, encounters, active diagnoses, and unread lab/radiology
+ * results. Surfacing all registered hospital patients ensures doctors can easily view,
+ * track, and manage their full caseload and newly registered patients immediately.
  */
 
 async function resolveDoctor(requestContext: WonFlowRequestContext) {
@@ -39,24 +37,28 @@ function calculateAge(dateOfBirth: Date | null): number | undefined {
 }
 
 export async function listMyConnectedPatients(requestContext: WonFlowRequestContext) {
-  const { context, doctor } = await resolveDoctor(requestContext);
+  const { context } = await resolveDoctor(requestContext);
 
-  const appointments = await database.appointment.findMany({
-    where: { tenantId: context.tenantId, doctorId: doctor.id },
-    select: { id: true, patientId: true, status: true, startsAt: true, endsAt: true, service: { select: { name: true } } },
-    orderBy: { startsAt: "desc" },
+  // Fetch all active hospital patients for this tenant (most recently registered first)
+  const patients = await database.patient.findMany({
+    where: { tenantId: context.tenantId, archivedAt: null },
+    include: { identifiers: { where: { isPrimary: true }, take: 1 } },
+    orderBy: { createdAt: "desc" },
+    take: 300,
   });
 
-  const patientIds = [...new Set(appointments.map((appointment) => appointment.patientId))];
-  if (patientIds.length === 0) return { patients: [] };
+  if (patients.length === 0) return { patients: [] };
 
-  const [patients, encounters, unreadCounts] = await Promise.all([
-    database.patient.findMany({
-      where: { id: { in: patientIds }, tenantId: context.tenantId },
-      include: { identifiers: { where: { isPrimary: true }, take: 1 } },
+  const patientIds = patients.map((patient) => patient.id);
+
+  const [appointments, encounters, unreadCounts] = await Promise.all([
+    database.appointment.findMany({
+      where: { tenantId: context.tenantId, patientId: { in: patientIds } },
+      select: { id: true, patientId: true, doctorId: true, status: true, startsAt: true, endsAt: true, service: { select: { name: true } } },
+      orderBy: { startsAt: "desc" },
     }),
     database.encounter.findMany({
-      where: { tenantId: context.tenantId, doctorId: doctor.id, patientId: { in: patientIds } },
+      where: { tenantId: context.tenantId, patientId: { in: patientIds } },
       include: { diagnoses: { where: { isPrimary: true }, take: 1, orderBy: { createdAt: "desc" } } },
       orderBy: { createdAt: "desc" },
     }),
@@ -96,21 +98,56 @@ export async function listMyConnectedPatients(requestContext: WonFlowRequestCont
       const patientEncounters = encountersByPatient.get(patient.id) ?? [];
       const lastDiagnosis = patientEncounters.find((encounter) => encounter.diagnoses.length > 0)?.diagnoses[0]?.display;
 
+      const guardian = (patient.guardianData as Record<string, unknown>) || {};
+      const consent = (patient.consentData as Record<string, unknown>) || {};
+      const address = (patient.address as Record<string, unknown>) || {};
+
       return {
         id: patient.id,
         displayName: `${patient.givenName} ${patient.familyName}`.trim(),
         mrNumber: patient.patientNumber,
         identityNumber: patient.identifiers[0]?.value ?? "",
         mobileNumber: patient.phone ?? "",
+        email: patient.email ?? undefined,
         gender: patient.sex ?? "unknown",
         age: calculateAge(patient.dateOfBirth),
+        dateOfBirth: patient.dateOfBirth ? patient.dateOfBirth.toISOString().slice(0, 10) : undefined,
+        fatherName: typeof guardian.fatherName === "string" ? guardian.fatherName : undefined,
+        emergencyContactName: typeof guardian.emergencyContactName === "string" ? guardian.emergencyContactName : undefined,
+        emergencyContactPhone: typeof guardian.emergencyContactPhone === "string" ? guardian.emergencyContactPhone : undefined,
+        city: typeof address.city === "string" ? address.city : undefined,
+        addressLine: typeof address.text === "string" ? address.text : undefined,
+        bloodGroup: typeof consent.bloodGroup === "string" ? consent.bloodGroup : undefined,
+        notes: typeof consent.notes === "string" ? consent.notes : undefined,
         referralSource: readReferralSource(patient.consentData),
-        lastActivityAt: past[0]?.startsAt.toISOString(),
+        lastActivityAt: past[0]?.startsAt.toISOString() ?? patientEncounters[0]?.createdAt.toISOString() ?? patient.createdAt.toISOString(),
         lastDiagnosis: lastDiagnosis ?? null,
-        nextAppointment: upcoming[0] ? { appointmentDate: upcoming[0].startsAt.toISOString().slice(0, 10), slotStart: upcoming[0].startsAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }), serviceName: upcoming[0].service?.name ?? "Consultation" } : undefined,
+        nextAppointment: upcoming[0] ? { id: upcoming[0].id, appointmentDate: upcoming[0].startsAt.toISOString().slice(0, 10), slotStart: upcoming[0].startsAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }), serviceName: upcoming[0].service?.name ?? "Consultation" } : undefined,
         encounterCount: patientEncounters.length,
         unreadReports: unreadByPatient.get(patient.id) ?? 0,
       };
     }),
   };
+}
+
+export async function deleteDoctorConnectedPatient(
+  requestContext: WonFlowRequestContext,
+  patientId: string,
+) {
+  const { context } = await resolveDoctor(requestContext);
+  const patient = await database.patient.findFirst({
+    where: { id: patientId, tenantId: context.tenantId, archivedAt: null },
+  });
+  if (!patient) {
+    throw new WonFlowApiError(404, "patient-not-found", "Patient could not be found.");
+  }
+  const now = new Date();
+  await database.patient.update({
+    where: { id: patient.id },
+    data: {
+      status: "ARCHIVED",
+      archivedAt: now,
+    },
+  });
+  return { success: true, patientId };
 }

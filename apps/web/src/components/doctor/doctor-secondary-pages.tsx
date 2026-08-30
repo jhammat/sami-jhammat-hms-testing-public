@@ -1,21 +1,27 @@
 "use client";
 
 import {
+  Activity,
+  AlertTriangle,
   Bell,
   Building2,
   CalendarClock,
+  CalendarPlus,
   Check,
   ChevronRight,
   Clock3,
   Copy,
   ExternalLink,
+  Eye,
   FileClock,
+  FileHeart,
   FileText,
   FlaskConical,
   Globe,
   History,
   Image as ImageIcon,
   KeyRound,
+  Phone,
   Plus,
   RefreshCw,
   Save,
@@ -24,16 +30,29 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Smartphone,
+  Stethoscope,
+  Trash2,
   Upload,
+  UserCheck,
+  UserPlus,
   UserRound,
   UsersRound,
   Video,
   Volume2,
   X,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+
+import {
+  BarChart,
+  DonutChart,
+  RadialMeter,
+  type BarDatum,
+  type DonutSlice,
+} from "@/components/charts";
 
 import { phaseOneApi } from "@/lib/api/phase-one-api";
 
@@ -460,12 +479,15 @@ function StatusPill({
   children: ReactNode;
   tone?: "slate" | "indigo" | "emerald" | "amber" | "rose";
 }) {
+  // Alpha tints of each tone's own hue rather than fixed light steps. A
+  // `bg-indigo-50` pill kept its pale fill in dark mode while the global
+  // overrides lightened its label, so the text disappeared into it.
   const tones = {
-    slate: "bg-slate-100 text-slate-600 ring-slate-200",
-    indigo: "bg-indigo-50 text-indigo-700 ring-indigo-100",
-    emerald: "bg-emerald-50 text-emerald-700 ring-emerald-100",
-    amber: "bg-amber-50 text-amber-700 ring-amber-100",
-    rose: "bg-rose-50 text-rose-700 ring-rose-100",
+    slate: "bg-slate-500/12 text-slate-600 ring-slate-500/25 dark:text-slate-300",
+    indigo: "bg-indigo-500/12 text-indigo-700 ring-indigo-500/25 dark:text-indigo-300",
+    emerald: "bg-emerald-500/14 text-emerald-700 ring-emerald-500/28 dark:text-emerald-300",
+    amber: "bg-amber-500/16 text-amber-700 ring-amber-500/30 dark:text-amber-300",
+    rose: "bg-rose-500/14 text-rose-700 ring-rose-500/28 dark:text-rose-300",
   } as const;
 
   return (
@@ -546,8 +568,17 @@ interface RealConnectedPatient {
   mrNumber: string;
   identityNumber: string;
   mobileNumber: string;
+  email?: string;
   gender: string;
   age?: number;
+  dateOfBirth?: string;
+  fatherName?: string;
+  emergencyContactName?: string;
+  emergencyContactPhone?: string;
+  city?: string;
+  addressLine?: string;
+  bloodGroup?: string;
+  notes?: string;
   referralSource?: string;
   lastActivityAt?: string;
   lastDiagnosis: string | null;
@@ -579,11 +610,303 @@ function useMyConnectedPatients() {
     }
   }, []);
 
+  const removePatient = useCallback(async (patientId: string) => {
+    const res = await fetch(`/api/v1/doctor/patients/${patientId}`, { method: "DELETE" });
+    if (!res.ok) {
+      const fallback = await fetch(`/api/v1/patients/${patientId}`, { method: "DELETE" });
+      if (!fallback.ok) throw new Error("Failed to delete patient");
+    }
+    setPatients((prev) => prev.filter((p) => p.id !== patientId));
+  }, []);
+
   useEffect(() => {
     queueMicrotask(() => { void reload(); });
   }, [reload]);
 
-  return { patients, loading, reload };
+  return { patients, loading, reload, removePatient };
+}
+
+function DoctorPatientDetailsModal({
+  patient,
+  portalStatus,
+  onClose,
+  onOpenPortalModal,
+  onDeletePatient,
+}: {
+  patient: RealConnectedPatient | null;
+  portalStatus?: { hasPortalAccess: boolean; email?: string };
+  onClose: () => void;
+  onOpenPortalModal: (p: RealConnectedPatient) => void;
+  onDeletePatient?: (p: RealConnectedPatient) => Promise<void>;
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  if (!patient) return null;
+
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+      <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-indigo-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
+        {/* Header Banner */}
+        <div className="relative bg-gradient-to-r from-indigo-700 via-indigo-600 to-violet-700 p-5 text-white">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-center gap-3.5">
+              <div className="grid size-14 place-items-center rounded-2xl bg-white/20 text-xl font-black text-white shadow-inner backdrop-blur-md">
+                {patient.displayName.slice(0, 2).toUpperCase()}
+              </div>
+              <div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-lg font-black">{patient.displayName}</h3>
+                  <span className="rounded-full bg-white/20 px-2.5 py-0.5 font-mono text-[11px] font-bold text-white">
+                    {patient.mrNumber}
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-indigo-100">
+                  {patient.age ? `${patient.age} yrs` : "Age N/A"} · {humanize(patient.gender)}
+                  {patient.fatherName ? ` · s/o / d/o ${patient.fatherName}` : ""}
+                  {patient.bloodGroup ? ` · ${patient.bloodGroup}` : ""}
+                </p>
+              </div>
+            </div>
+            <button
+              className="rounded-xl p-1.5 text-white/80 transition hover:bg-white/10 hover:text-white"
+              onClick={onClose}
+              type="button"
+            >
+              <X size={20} />
+            </button>
+          </div>
+        </div>
+
+        {/* Scrollable Content */}
+        <div className="flex-1 space-y-5 overflow-y-auto p-5 text-xs">
+          {/* Quick Clinical Handling Actions */}
+          <div>
+            <h4 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Clinical Action Hub
+            </h4>
+            <div className="mt-2.5 grid grid-cols-2 gap-2 sm:grid-cols-3">
+              <Link
+                className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-indigo-200 bg-indigo-50/80 p-3 text-center font-bold text-indigo-900 transition hover:bg-indigo-100 hover:scale-[1.02] dark:border-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200"
+                href={`/doctor/consultations?patientId=${encodeURIComponent(patient.id)}`}
+              >
+                <Stethoscope className="size-5 text-indigo-600 dark:text-indigo-400" />
+                <span className="text-[11px] font-black">Start Consultation</span>
+              </Link>
+
+              <Link
+                className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 text-center font-bold text-slate-800 transition hover:bg-slate-100 hover:scale-[1.02] dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-200"
+                href={`/doctor/register-patient?patientId=${encodeURIComponent(patient.id)}`}
+              >
+                <CalendarPlus className="size-5 text-violet-600 dark:text-violet-400" />
+                <span className="text-[11px] font-black">Book Visit / Queue</span>
+              </Link>
+
+              <Link
+                className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 text-center font-bold text-slate-800 transition hover:bg-slate-100 hover:scale-[1.02] dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-200"
+                href={`/doctor/documents?patientId=${encodeURIComponent(patient.id)}`}
+              >
+                <FileHeart className="size-5 text-emerald-600 dark:text-emerald-400" />
+                <span className="text-[11px] font-black">Medical Documents</span>
+              </Link>
+
+              <Link
+                className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 text-center font-bold text-slate-800 transition hover:bg-slate-100 hover:scale-[1.02] dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-200"
+                href={`/doctor/results?patientId=${encodeURIComponent(patient.id)}`}
+              >
+                <Activity className="size-5 text-teal-600 dark:text-teal-400" />
+                <span className="text-[11px] font-black">Labs &amp; Results</span>
+              </Link>
+
+              <Link
+                className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 text-center font-bold text-slate-800 transition hover:bg-slate-100 hover:scale-[1.02] dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-200"
+                href={`/doctor/drains?patientId=${encodeURIComponent(patient.id)}`}
+              >
+                <FileText className="size-5 text-amber-600 dark:text-amber-400" />
+                <span className="text-[11px] font-black">Surgical Drains</span>
+              </Link>
+
+              <button
+                className="flex flex-col items-center justify-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50/80 p-3 text-center font-bold text-slate-800 transition hover:bg-slate-100 hover:scale-[1.02] dark:border-slate-800 dark:bg-slate-800/60 dark:text-slate-200"
+                onClick={() => {
+                  onClose();
+                  onOpenPortalModal(patient);
+                }}
+                type="button"
+              >
+                <KeyRound className="size-5 text-indigo-600 dark:text-indigo-400" />
+                <span className="text-[11px] font-black">
+                  {portalStatus?.hasPortalAccess ? "Portal Active" : "Create Portal"}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* Demographics & Contact Details */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+            <h4 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Identity &amp; Contact Details
+            </h4>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">Full Name:</span>
+                <p className="font-bold text-slate-900 dark:text-white">{patient.displayName}</p>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">Father / Guardian:</span>
+                <p className="font-bold text-slate-900 dark:text-white">{patient.fatherName || "Not documented"}</p>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">Mobile Phone:</span>
+                <div className="flex items-center gap-2">
+                  <p className="font-bold text-slate-900 dark:text-white">{patient.mobileNumber || "N/A"}</p>
+                  {patient.mobileNumber ? (
+                    <a
+                      className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 hover:bg-emerald-200"
+                      href={`tel:${patient.mobileNumber}`}
+                    >
+                      Call
+                    </a>
+                  ) : null}
+                </div>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">CNIC / B-Form:</span>
+                <p className="font-mono font-bold text-slate-900 dark:text-white">{patient.identityNumber || "N/A"}</p>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">City / Location:</span>
+                <p className="font-bold text-slate-900 dark:text-white">
+                  {patient.city || "Islamabad"} {patient.addressLine ? `(${patient.addressLine})` : ""}
+                </p>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">Blood Group:</span>
+                <p className="font-bold text-slate-900 dark:text-white">{patient.bloodGroup || "Not tested"}</p>
+              </div>
+              {patient.emergencyContactName ? (
+                <div className="sm:col-span-2">
+                  <span className="text-slate-500 dark:text-slate-400">Emergency Contact:</span>
+                  <p className="font-bold text-slate-900 dark:text-white">
+                    {patient.emergencyContactName} {patient.emergencyContactPhone ? `(${patient.emergencyContactPhone})` : ""}
+                  </p>
+                </div>
+              ) : null}
+              {patient.notes ? (
+                <div className="sm:col-span-2 rounded-xl bg-amber-50/80 p-2.5 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  <span className="block font-black text-[10px] uppercase tracking-wider">Clinical Notes / Allergies:</span>
+                  <p className="mt-0.5 font-medium">{patient.notes}</p>
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {/* Clinical Activity & Caseload Record */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/40">
+            <h4 className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+              Clinical Caseload &amp; History
+            </h4>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">Total Encounters:</span>
+                <p className="text-sm font-black text-indigo-600 dark:text-indigo-400">
+                  {patient.encounterCount} visit{patient.encounterCount === 1 ? "" : "s"}
+                </p>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">Last Diagnosis:</span>
+                <p className="font-bold text-slate-900 dark:text-white">{patient.lastDiagnosis ?? "Not documented"}</p>
+              </div>
+              <div>
+                <span className="text-slate-500 dark:text-slate-400">Next Scheduled Visit:</span>
+                <p className="font-bold text-slate-900 dark:text-white">
+                  {patient.nextAppointment
+                    ? `${formatDate(patient.nextAppointment.appointmentDate)} · ${patient.nextAppointment.slotStart}`
+                    : "None scheduled"}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Record Removal & Archival Danger Zone */}
+          {onDeletePatient ? (
+            <div className="rounded-2xl border border-rose-200/90 bg-rose-50/60 p-4 dark:border-rose-900/50 dark:bg-rose-950/20">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-[11px] font-black uppercase tracking-wider text-rose-700 dark:text-rose-400 flex items-center gap-1.5">
+                    <Trash2 size={13} />
+                    Delete Patient Record
+                  </h4>
+                  <p className="mt-0.5 text-[11px] text-slate-600 dark:text-slate-400">
+                    Remove and archive this patient from the active hospital directory.
+                  </p>
+                </div>
+
+                {!confirmDelete ? (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmDelete(true)}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3 py-1.5 text-xs font-black text-rose-700 shadow-xs hover:bg-rose-50 dark:border-rose-800 dark:bg-rose-950/60 dark:text-rose-300 transition"
+                  >
+                    <Trash2 size={13} />
+                    Delete Patient
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-bold text-rose-800 dark:text-rose-200">
+                      Confirm deletion?
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isDeleting}
+                      onClick={async () => {
+                        setIsDeleting(true);
+                        try {
+                          await onDeletePatient(patient);
+                          onClose();
+                        } catch {
+                          alert("Failed to delete patient");
+                        } finally {
+                          setIsDeleting(false);
+                        }
+                      }}
+                      className="rounded-xl bg-rose-600 px-3 py-1.5 text-xs font-black text-white hover:bg-rose-700 shadow-xs disabled:opacity-50 transition"
+                    >
+                      {isDeleting ? "Deleting…" : "Yes, Delete"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDelete(false)}
+                      className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 transition"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Modal Footer */}
+        <div className="flex items-center justify-between border-t border-slate-100 bg-slate-50 px-5 py-3 dark:border-slate-800 dark:bg-slate-800/50">
+          <Link
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+            href={`/doctor/register-patient`}
+          >
+            <UserPlus size={14} /> Register New Patient
+          </Link>
+          <button
+            className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 shadow-xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+            onClick={onClose}
+            type="button"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DoctorPatientPortalModal({
@@ -830,9 +1153,12 @@ function DoctorPatientPortalModal({
 }
 
 export function DoctorPatientsPage() {
-  const { patients, loading } = useMyConnectedPatients();
+  const { patients, loading, removePatient } = useMyConnectedPatients();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PatientFilter>("all");
+  const [selectedPatientDetails, setSelectedPatientDetails] = useState<RealConnectedPatient | null>(null);
+  const [patientToDelete, setPatientToDelete] = useState<RealConnectedPatient | null>(null);
+  const [isDirectDeleting, setIsDirectDeleting] = useState(false);
   const [portalModalPatient, setPortalModalPatient] = useState<RealConnectedPatient | null>(null);
   const [portalStatusMap, setPortalStatusMap] = useState<Record<string, { hasPortalAccess: boolean; email?: string }>>({});
 
@@ -881,8 +1207,68 @@ export function DoctorPatientsPage() {
     });
   }, [visiblePatients, portalStatusMap]);
 
+  /**
+   * Two different questions about the same caseload, so two forms.
+   *
+   * The donut is part-to-whole: what is my list made of. The bar is
+   * magnitude: which patients have the most results waiting on me, ranked
+   * — that ordering is the whole point and a donut would destroy it.
+   */
+  const caseloadMix: DonutSlice[] = [
+    {
+      id: "today",
+      label: "Seen or due today",
+      value: patients.filter(
+        (patient) =>
+          patient.nextAppointment?.appointmentDate === today ||
+          patient.lastActivityAt?.slice(0, 10) === today,
+      ).length,
+      color: "var(--viz-1)",
+    },
+    {
+      id: "upcoming",
+      label: "Upcoming appointment",
+      value: patients.filter(
+        (patient) =>
+          patient.nextAppointment !== undefined &&
+          patient.nextAppointment.appointmentDate !== today,
+      ).length,
+      color: "var(--viz-3)",
+    },
+    {
+      id: "unread",
+      label: "Unread reports",
+      value: patients.filter(
+        (patient) => patient.unreadReports > 0 && patient.nextAppointment === undefined,
+      ).length,
+      color: "var(--viz-4)",
+    },
+    {
+      id: "inactive",
+      label: "No activity scheduled",
+      value: patients.filter(
+        (patient) =>
+          patient.nextAppointment === undefined &&
+          patient.unreadReports === 0 &&
+          patient.lastActivityAt?.slice(0, 10) !== today,
+      ).length,
+      color: "var(--viz-mute-mark)",
+    },
+  ].filter((slice) => slice.value > 0);
+
+  const unreadLeaders: BarDatum[] = patients
+    .filter((patient) => patient.unreadReports > 0)
+    .sort((a, b) => b.unreadReports - a.unreadReports)
+    .slice(0, 6)
+    .map((patient) => ({
+      id: patient.id,
+      label: patient.displayName,
+      value: patient.unreadReports,
+      detail: patient.mrNumber,
+    }));
+
   const filters: Array<{ value: PatientFilter; label: string }> = [
-    { value: "all", label: "All Connected" },
+    { value: "all", label: "All Patients" },
     { value: "today", label: "Today" },
     { value: "upcoming", label: "Upcoming" },
     { value: "follow-ups", label: "Follow-ups" },
@@ -920,16 +1306,16 @@ export function DoctorPatientsPage() {
   return (
     <div className="space-y-4">
       <DoctorPageHeader
-        description="Patients legitimately connected through your appointments, queue and encounters."
+        description="View all registered hospital patients, medical records, and active clinical caseload."
         icon={<UsersRound size={18} />}
-        title="My Patients"
+        title="Patients Directory"
       />
 
       <section className="relative overflow-hidden rounded-[20px] border border-indigo-100/80 bg-gradient-to-r from-white via-slate-50/60 to-indigo-50/70 p-3 shadow-[0_12px_32px_rgba(79,70,229,0.08)]">
         <div className="pointer-events-none absolute -right-10 -top-16 h-32 w-32 rounded-full bg-violet-400/10 blur-2xl" />
         <div className="relative grid gap-2 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-center">
           <label className="relative block">
-            <span className="sr-only">Search connected patients</span>
+            <span className="sr-only">Search patients</span>
             <Search
               aria-hidden="true"
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -958,61 +1344,85 @@ export function DoctorPatientsPage() {
                 {item.label}
               </button>
             ))}
-            <button
-              className="min-h-9 cursor-not-allowed rounded-xl bg-slate-50 px-3 text-[11px] font-black text-slate-400 ring-1 ring-slate-200"
-              disabled
-              title="Patient-upload storage is not connected in this milestone."
-              type="button"
-            >
-              New Documents
-            </button>
           </div>
         </div>
       </section>
 
+      {patients.length > 0 ? (
+        <section className="grid gap-3 lg:grid-cols-2">
+          <DonutChart
+            title="Your caseload"
+            subtitle="Every patient, by where they are"
+            slices={caseloadMix}
+            centerValue={String(patients.length)}
+            centerLabel="Patients"
+            size={168}
+            thickness={20}
+            emptyMessage="No patients yet"
+          />
+
+          <BarChart
+            title="Patients with unread reports"
+            subtitle="Results released but not yet opened by you"
+            data={unreadLeaders}
+            valueFormatter={(value) => `${value} report${value === 1 ? "" : "s"}`}
+            emptyMessage="No unread reports"
+            emptyHint="Every released result for your patients has been reviewed."
+            footnote="Ranked highest first. Darker bars carry more unread results."
+          />
+        </section>
+      ) : null}
+
       <div className="flex items-center justify-between gap-3 rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 shadow-sm backdrop-blur">
         <div>
-          <h2 className="text-sm font-black text-slate-950">Connected directory</h2>
+          <h2 className="text-sm font-black text-slate-950">Patient Directory</h2>
           <p className="text-[11px] text-slate-500">
-            {visiblePatients.length} of {patients.length} connected patients shown
+            {visiblePatients.length} of {patients.length} patients shown · Click any patient card for details &amp; clinical actions
           </p>
         </div>
-        <StatusPill tone="indigo">Doctor-scoped records</StatusPill>
+        <StatusPill tone="indigo">Hospital Records</StatusPill>
       </div>
 
       {loading ? (
-        <p className="p-6 text-center text-xs font-bold text-slate-500">Loading connected patients…</p>
+        <p className="p-6 text-center text-xs font-bold text-slate-500">Loading patients…</p>
       ) : visiblePatients.length === 0 ? (
         <EmptyState
           description={
             patients.length === 0
-              ? "No patients are connected to this doctor through current appointments yet."
-              : "No connected patient matches the current search and filter."
+              ? "No registered patients in hospital directory yet. Click 'Register Patient' to create a record."
+              : "No patient matches the current search and filter."
           }
           icon={<UserRound size={19} />}
-          title={patients.length === 0 ? "No connected patients yet" : "No matching patients"}
+          title={patients.length === 0 ? "No patients found" : "No matching patients"}
         />
       ) : (
-        <div className="grid gap-3 xl:grid-cols-2">
+        <div className="grid gap-3.5 xl:grid-cols-2">
           {visiblePatients.map((patient) => {
             const portalAccessInfo = portalStatusMap[patient.id];
             return (
               <article
-                className="group relative isolate scroll-mt-24 overflow-hidden rounded-[20px] border border-indigo-100/80 bg-gradient-to-br from-white via-white to-indigo-50/55 p-4 shadow-[0_12px_30px_rgba(79,70,229,0.07)] transition duration-300 hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-[0_18px_42px_rgba(79,70,229,0.14)] focus:outline-none focus:ring-2 focus:ring-indigo-400 target:border-indigo-300 target:ring-2 target:ring-indigo-100"
+                className="group relative isolate cursor-pointer overflow-hidden rounded-[22px] border border-indigo-100/90 bg-gradient-to-br from-white via-white to-indigo-50/50 p-4 shadow-[0_12px_30px_rgba(79,70,229,0.06)] transition duration-300 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-[0_20px_45px_rgba(79,70,229,0.14)] focus:outline-none focus:ring-2 focus:ring-indigo-400"
                 id={`doctor-patient-${patient.id}`}
                 key={patient.id}
-                tabIndex={-1}
+                onClick={() => setSelectedPatientDetails(patient)}
+                tabIndex={0}
               >
-                <div className="flex items-start gap-3">
+                <div className="flex items-start gap-3.5">
                   <PatientAvatar patient={patient} />
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <h3 className="truncate text-sm font-black text-slate-950">
-                          {patient.displayName}
-                        </h3>
-                        <p className="mt-0.5 text-[11px] font-bold text-indigo-600">
-                          {patient.mrNumber}
+                        <div className="flex items-center gap-2">
+                          <h3 className="truncate text-sm font-black text-slate-950 group-hover:text-indigo-600 transition">
+                            {patient.displayName}
+                          </h3>
+                          <span className="rounded-md bg-indigo-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                            {patient.mrNumber}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-slate-500 font-medium">
+                          {patient.age === undefined ? "Age not recorded" : `${patient.age} yrs`} ·{" "}
+                          {humanize(patient.gender)} · {patient.mobileNumber || "No mobile"}
                         </p>
                       </div>
                       {patient.unreadReports > 0 ? (
@@ -1022,29 +1432,29 @@ export function DoctorPatientsPage() {
                         </StatusPill>
                       ) : null}
                     </div>
-                    <p className="mt-1 text-[11px] text-slate-500">
-                      {patient.age === undefined ? "Age not recorded" : `${patient.age} years`} ·{" "}
-                      {humanize(patient.gender)} · {patient.mobileNumber || "No mobile"}
-                    </p>
+
                     {patient.referralSource ? (
-                      <span className="mt-1.5 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-600">
+                      <span className="mt-1.5 inline-block rounded-full bg-slate-500/12 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300">
                         Source: {REFERRAL_SOURCE_LABELS[patient.referralSource] ?? humanize(patient.referralSource)}
                       </span>
                     ) : null}
                   </div>
                 </div>
 
-                {/* Patient Portal Status & 1-Click Management */}
-                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-indigo-100/70 bg-gradient-to-r from-indigo-50/60 to-white p-2.5">
+                {/* Patient Portal Status & Quick Toggle */}
+                <div
+                  className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-indigo-100/70 bg-gradient-to-r from-indigo-50/60 to-white p-2.5 dark:border-indigo-400/25 dark:from-indigo-500/12 dark:to-transparent"
+                  onClick={(e) => e.stopPropagation()}
+                >
                   <div className="flex items-center gap-1.5 text-[11px]">
                     <Globe className="text-indigo-600 size-3.5" />
                     {portalAccessInfo?.hasPortalAccess ? (
-                      <span className="inline-flex items-center gap-1.5 font-bold text-emerald-700">
+                      <span className="inline-flex items-center gap-1.5 font-bold text-emerald-700 dark:text-emerald-300">
                         <span className="size-2 rounded-full bg-emerald-500" />
                         Portal Active ({portalAccessInfo.email || "Registered"})
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 font-bold text-slate-500">
+                      <span className="inline-flex items-center gap-1.5 font-bold text-slate-500 dark:text-slate-300">
                         <span className="size-2 rounded-full bg-slate-300" />
                         Portal Not Created
                       </span>
@@ -1052,10 +1462,13 @@ export function DoctorPatientsPage() {
                   </div>
                   <button
                     type="button"
-                    onClick={() => setPortalModalPatient(patient)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setPortalModalPatient(patient);
+                    }}
                     className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-black transition ${
                       portalAccessInfo?.hasPortalAccess
-                        ? "bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50 shadow-sm"
+                        ? "bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50 shadow-sm dark:bg-indigo-500/15 dark:text-indigo-200 dark:border-indigo-400/30 dark:hover:bg-indigo-500/25"
                         : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
                     }`}
                   >
@@ -1064,7 +1477,7 @@ export function DoctorPatientsPage() {
                   </button>
                 </div>
 
-                <dl className="mt-3 grid gap-3 rounded-[15px] border border-white bg-gradient-to-r from-slate-50 via-indigo-50/50 to-cyan-50/45 p-3 shadow-inner sm:grid-cols-3">
+                <dl className="mt-3 grid gap-3 rounded-[15px] border border-white bg-gradient-to-r from-slate-50 via-indigo-50/50 to-cyan-50/45 p-3 shadow-inner sm:grid-cols-3 dark:border-white/10 dark:from-white/[0.04] dark:via-indigo-500/10 dark:to-cyan-500/10">
                   <div>
                     <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
                       Last visit
@@ -1093,31 +1506,126 @@ export function DoctorPatientsPage() {
                   </div>
                 </dl>
 
-                <div className="mt-3 flex items-center justify-between gap-3">
-                  <span className="text-[10px] font-semibold text-slate-500">
-                    {patient.encounterCount} encounter
-                    {patient.encounterCount === 1 ? "" : "s"}
+                {/* Direct Action Buttons on Card */}
+                <div
+                  className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100/80 pt-3 dark:border-slate-800"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <span className="text-[10px] font-bold text-slate-500">
+                    {patient.encounterCount} encounter{patient.encounterCount === 1 ? "" : "s"}
                   </span>
-                  <div className="flex items-center gap-2">
-                    {patient.nextAppointment?.id && (
-                      <Link
-                        className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-purple-600 px-3 text-[11px] font-black text-white hover:bg-purple-700 shadow-sm"
-                        href={`/doctor/appointments/${encodeURIComponent(patient.nextAppointment.id)}/video`}
-                      >
-                        <Video size={13} /> Video Call
-                      </Link>
-                    )}
-                    <Link
-                      className="inline-flex min-h-9 items-center gap-1 rounded-xl bg-indigo-600 px-3 text-[11px] font-black text-white hover:bg-indigo-700"
-                      href={`/operations/reception?patientId=${encodeURIComponent(patient.id)}`}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[10px] font-bold text-slate-700 shadow-xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                      onClick={() => setSelectedPatientDetails(patient)}
+                      type="button"
                     >
-                      Book appointment <ChevronRight size={13} />
+                      <Eye size={12} className="text-slate-500" />
+                      Details &amp; History
+                    </button>
+
+                    <Link
+                      className="inline-flex min-h-8 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 text-[10px] font-black text-white hover:bg-emerald-700 shadow-xs"
+                      href={`/doctor/consultations?patientId=${encodeURIComponent(patient.id)}`}
+                    >
+                      <Stethoscope size={12} />
+                      Consult
                     </Link>
+
+                    <Link
+                      className="inline-flex min-h-8 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 text-[10px] font-black text-white hover:bg-indigo-700 shadow-xs"
+                      href={`/doctor/register-patient?patientId=${encodeURIComponent(patient.id)}`}
+                    >
+                      <CalendarPlus size={12} />
+                      Book Visit
+                    </Link>
+
+                    <button
+                      className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-rose-200 bg-rose-50/80 px-2 text-[10px] font-bold text-rose-700 shadow-xs hover:bg-rose-100 hover:border-rose-300 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 transition"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPatientToDelete(patient);
+                      }}
+                      title="Delete Patient from Directory"
+                      type="button"
+                    >
+                      <Trash2 size={11} className="text-rose-600" />
+                      Delete
+                    </button>
                   </div>
                 </div>
               </article>
             );
           })}
+        </div>
+      )}
+
+      {/* Comprehensive Patient Details & Action Hub Modal */}
+      {selectedPatientDetails && (
+        <DoctorPatientDetailsModal
+          onClose={() => setSelectedPatientDetails(null)}
+          onDeletePatient={async (p) => {
+            await removePatient(p.id);
+            setSelectedPatientDetails(null);
+          }}
+          onOpenPortalModal={(p) => setPortalModalPatient(p)}
+          patient={selectedPatientDetails}
+          portalStatus={portalStatusMap[selectedPatientDetails.id]}
+        />
+      )}
+
+      {/* Direct Delete Patient Confirmation Dialog */}
+      {patientToDelete && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl border border-rose-200 bg-white p-6 shadow-2xl dark:border-rose-900/60 dark:bg-slate-900">
+            <div className="flex items-center gap-3 text-rose-600">
+              <span className="grid size-11 place-items-center rounded-2xl bg-rose-100 text-rose-600 dark:bg-rose-950">
+                <AlertTriangle size={22} />
+              </span>
+              <div>
+                <h3 className="text-base font-black text-slate-950 dark:text-white">
+                  Delete Patient Record
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Confirm removal from directory
+                </p>
+              </div>
+            </div>
+
+            <p className="mt-4 text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              Are you sure you want to remove <strong>{patientToDelete.displayName}</strong> (MRN: <code>{patientToDelete.mrNumber}</code>)? This will archive their patient file and remove them from the active directory.
+            </p>
+
+            <div className="mt-6 flex items-center justify-end gap-2.5">
+              <button
+                type="button"
+                disabled={isDirectDeleting}
+                onClick={() => setPatientToDelete(null)}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDirectDeleting}
+                onClick={async () => {
+                  setIsDirectDeleting(true);
+                  try {
+                    await removePatient(patientToDelete.id);
+                    setPatientToDelete(null);
+                  } catch {
+                    alert("Failed to delete patient");
+                  } finally {
+                    setIsDirectDeleting(false);
+                  }
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-xs font-black text-white hover:bg-rose-700 shadow-md shadow-rose-600/20 disabled:opacity-50 transition"
+              >
+                <Trash2 size={13} />
+                {isDirectDeleting ? "Deleting…" : "Yes, Delete Patient"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1162,6 +1670,50 @@ export function DoctorInboxPage() {
   const unread = items.filter((item) => !item.reviewed).length;
   const flagged = items.filter((item) => item.severity !== "normal").length;
 
+  /**
+   * The review backlog, two ways.
+   *
+   * Severity is a clinical state, so it takes the status palette and each
+   * slice always carries its word — a critical result must never depend on
+   * a reader separating red from amber. The source split is plain
+   * identity, so it takes categorical slots.
+   */
+  const severityMix: DonutSlice[] = [
+    {
+      id: "critical",
+      label: "Critical",
+      value: items.filter((item) => item.severity === "critical").length,
+      color: "var(--viz-critical)",
+    },
+    {
+      id: "abnormal",
+      label: "Abnormal",
+      value: items.filter((item) => item.severity === "abnormal").length,
+      color: "var(--viz-warning)",
+    },
+    {
+      id: "normal",
+      label: "Normal",
+      value: items.filter((item) => item.severity === "normal").length,
+      color: "var(--viz-good)",
+    },
+  ].filter((slice) => slice.value > 0);
+
+  const sourceMix: DonutSlice[] = [
+    {
+      id: "laboratory",
+      label: "Laboratory",
+      value: items.filter((item) => item.kind === "laboratory").length,
+      color: "var(--viz-1)",
+    },
+    {
+      id: "radiology",
+      label: "Radiology",
+      value: items.filter((item) => item.kind === "radiology").length,
+      color: "var(--viz-2)",
+    },
+  ].filter((slice) => slice.value > 0);
+
   return (
     <div className="space-y-4">
       <DoctorPageHeader
@@ -1191,6 +1743,43 @@ export function DoctorInboxPage() {
           value="—"
         />
       </div>
+
+      {items.length > 0 ? (
+        <section className="grid gap-3 lg:grid-cols-3">
+          <DonutChart
+            title="Results by severity"
+            subtitle="Every report assigned to you"
+            slices={severityMix}
+            centerValue={String(items.length)}
+            centerLabel="Reports"
+            size={168}
+            thickness={20}
+            emptyMessage="No reports assigned"
+          />
+
+          <DonutChart
+            title="Results by source"
+            subtitle="Laboratory against radiology"
+            slices={sourceMix}
+            centerLabel="Reports"
+            size={168}
+            thickness={20}
+            emptyMessage="No reports assigned"
+          />
+
+          <div className="wf-viz flex flex-col justify-center rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(11,18,32,0.04)]">
+            <RadialMeter
+              value={items.length - unread}
+              target={items.length}
+              label="Review progress"
+              caption={`${unread} still awaiting your review`}
+              size={132}
+              thickness={11}
+              status={unread === 0 ? "good" : flagged > 0 ? "critical" : "warning"}
+            />
+          </div>
+        </section>
+      ) : null}
 
       <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
         <div className="flex flex-wrap items-center gap-1.5">

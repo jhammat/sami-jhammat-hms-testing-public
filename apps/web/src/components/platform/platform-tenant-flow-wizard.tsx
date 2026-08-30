@@ -118,6 +118,28 @@ export function PlatformTenantFlowWizard() {
     { id: 5, title: "Complete", icon: <Check size={18} />, completed: currentStep === 5, current: currentStep === 5 },
   ];
 
+  /**
+   * Accepts what people actually paste into a domain box.
+   *
+   * The stored value must be a bare hostname, but nobody types one: they
+   * copy "https://hpbsurgery.pk/" out of the address bar. Rejecting that
+   * was the whole failure here — the domain check refused it, submission
+   * stopped, and because the field was never wired to show its error the
+   * Continue button simply appeared dead. So the protocol, any user info,
+   * port, path, query and trailing dot are stripped and the host is kept,
+   * rather than handing the work back to the person.
+   */
+  function normalizeDomain(value: string): string {
+    return value
+      .trim()
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
+      .replace(/^[^/@]*@/, "")
+      .split(/[/?#]/)[0]!
+      .replace(/:\d+$/, "")
+      .replace(/\.$/, "")
+      .toLowerCase();
+  }
+
   function updateRegistrationField(field: keyof CreatePlatformTenantInput, value: string) {
     setRegistrationForm((current) => ({
       ...current,
@@ -137,8 +159,10 @@ export function PlatformTenantFlowWizard() {
       nextErrors.slug = "Use lowercase letters, numbers, and hyphens only.";
     }
 
-    if (registrationForm.domain.trim() !== "" && !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i.test(registrationForm.domain)) {
-      nextErrors.domain = "Enter a valid domain name or leave it empty.";
+    const domain = normalizeDomain(registrationForm.domain);
+    if (domain !== "" && !/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$/i.test(domain)) {
+      nextErrors.domain =
+        "That does not look like a domain name. Use just the host, for example hpbsurgery.pk, or leave it empty.";
     }
     
     if (registrationForm.primaryContactEmail.trim() !== "" && !/^\S+@\S+\.\S+$/.test(registrationForm.primaryContactEmail)) {
@@ -156,7 +180,10 @@ export function PlatformTenantFlowWizard() {
     setError("");
     
     try {
-      const newTenantId = await createTenant(registrationForm);
+      const newTenantId = await createTenant({
+        ...registrationForm,
+        domain: normalizeDomain(registrationForm.domain),
+      });
       setTenantId(newTenantId);
       setCurrentStep(2);
     } catch (err) {
@@ -329,9 +356,16 @@ export function PlatformTenantFlowWizard() {
                   value={registrationForm.legalName}
                 />
               </Field>
-              <Field hint="Optional organization domain. Do not include a protocol." label="Domain">
+              <Field
+                error={registrationErrors.domain}
+                hint="Optional. Paste a full URL if it is easier — it is trimmed to the host."
+                label="Domain"
+              >
                 <input
                   className={platformInputClassName}
+                  onBlur={(e) =>
+                    updateRegistrationField("domain", normalizeDomain(e.target.value))
+                  }
                   onChange={(e) => updateRegistrationField("domain", e.target.value)}
                   placeholder="organization.example"
                   value={registrationForm.domain}

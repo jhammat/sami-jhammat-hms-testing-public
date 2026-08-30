@@ -1,0 +1,505 @@
+/* =========================================================
+   WonFlow Surfaces — the accent token layer
+   ---------------------------------------------------------
+   The clinical workspaces (physiotherapy, nutrition, and the
+   allied profile pages) each carry their own accent hue, and
+   every one of them has to work in both themes.
+
+   Doing that with Tailwind colour literals did not survive
+   dark mode. The blanket "html.dark [class*=bg-white]" rules
+   in globals.css catch the neutral utilities, but they cannot
+   catch an accent-tinted surface: a hero painted with a light
+   linear-gradient stayed pale while its text-slate-950
+   heading was flipped to near-white by those same rules, so
+   the title rendered white on white and simply vanished. The
+   selected row in the referral inbox failed the same way —
+   bg-teal-50 stayed pale while the patient name turned light.
+
+   So accents are tokens, set by a data-wf-accent attribute on
+   the element and resolved once here for light and again for
+   dark. A component asks for var(--wf-a-soft-bg) and gets a
+   surface that is correct in whichever theme is active; it can
+   no longer paint half of a pairing and leave the other half
+   to a global override.
+   ========================================================= */
+
+.wf-surface {
+  --wf-panel: #ffffff;
+  --wf-panel-border: rgb(226 232 240 / 0.8);
+  --wf-well: rgb(248 250 252 / 0.6);
+  --wf-well-border: #e2e8f0;
+  --wf-line: #f1f5f9;
+  --wf-ink: #020617;
+  --wf-ink-2: #475569;
+  --wf-ink-3: #94a3b8;
+  --wf-shadow: 0 1px 2px rgb(11 18 32 / 0.04), 0 12px 32px -20px rgb(11 18 32 / 0.22);
+}
+
+html.dark .wf-surface {
+  --wf-panel: #0d1b2d;
+  --wf-panel-border: rgb(148 163 184 / 0.16);
+  --wf-well: rgb(148 163 184 / 0.06);
+  --wf-well-border: rgb(148 163 184 / 0.14);
+  --wf-line: rgb(148 163 184 / 0.12);
+  --wf-ink: #e8eefb;
+  --wf-ink-2: #a8b8cd;
+  --wf-ink-3: #7f8fa5;
+  --wf-shadow: 0 1px 2px rgb(0 0 0 / 0.3), 0 12px 32px -20px rgb(0 0 0 / 0.7);
+}
+
+/* --- Accents: light --- */
+
+[data-wf-accent="indigo"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(129 140 248 / 0.22), transparent 38%),
+    linear-gradient(135deg, #ffffff, #eef2ff 55%, #f5f3ff);
+  --wf-a-hero-border: #e0e7ff;
+  --wf-a-eyebrow: #4338ca;
+  --wf-a-chip-bg: #eef2ff;
+  --wf-a-chip-text: #4338ca;
+  --wf-a-chip-ring: #c7d2fe;
+  --wf-a-solid: #4f46e5;
+  --wf-a-solid-hover: #4338ca;
+  --wf-a-ring: rgb(199 210 254 / 0.7);
+  --wf-a-soft-bg: #eef2ff;
+  --wf-a-soft-text: #4338ca;
+  --wf-a-rail: linear-gradient(90deg, #818cf8, #a78bfa, #38bdf8);
+}
+
+[data-wf-accent="sky"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(56 189 248 / 0.22), transparent 38%),
+    linear-gradient(135deg, #ffffff, #eff6ff 55%, #ecfeff);
+  --wf-a-hero-border: #e0f2fe;
+  --wf-a-eyebrow: #0369a1;
+  --wf-a-chip-bg: #f0f9ff;
+  --wf-a-chip-text: #0369a1;
+  --wf-a-chip-ring: #bae6fd;
+  --wf-a-solid: #0284c7;
+  --wf-a-solid-hover: #0369a1;
+  --wf-a-ring: rgb(186 230 253 / 0.7);
+  --wf-a-soft-bg: #f0f9ff;
+  --wf-a-soft-text: #0369a1;
+  --wf-a-rail: linear-gradient(90deg, #38bdf8, #22d3ee, #60a5fa);
+}
+
+[data-wf-accent="teal"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(45 212 191 / 0.22), transparent 38%),
+    linear-gradient(135deg, #ffffff, #ecfeff 52%, #eef2ff);
+  --wf-a-hero-border: #ccfbf1;
+  --wf-a-eyebrow: #0f766e;
+  --wf-a-chip-bg: #f0fdfa;
+  --wf-a-chip-text: #0f766e;
+  --wf-a-chip-ring: #99f6e4;
+  --wf-a-solid: #0d9488;
+  --wf-a-solid-hover: #0f766e;
+  --wf-a-ring: rgb(153 246 228 / 0.7);
+  --wf-a-soft-bg: #f0fdfa;
+  --wf-a-soft-text: #0f766e;
+  --wf-a-rail: linear-gradient(90deg, #2dd4bf, #22d3ee, #38bdf8);
+}
+
+[data-wf-accent="emerald"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(52 211 153 / 0.22), transparent 38%),
+    linear-gradient(135deg, #ffffff, #ecfdf5 54%, #f0fdfa);
+  --wf-a-hero-border: #d1fae5;
+  --wf-a-eyebrow: #047857;
+  --wf-a-chip-bg: #ecfdf5;
+  --wf-a-chip-text: #047857;
+  --wf-a-chip-ring: #a7f3d0;
+  --wf-a-solid: #059669;
+  --wf-a-solid-hover: #047857;
+  --wf-a-ring: rgb(167 243 208 / 0.7);
+  --wf-a-soft-bg: #ecfdf5;
+  --wf-a-soft-text: #047857;
+  --wf-a-rail: linear-gradient(90deg, #34d399, #2dd4bf, #a3e635);
+}
+
+[data-wf-accent="amber"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(251 191 36 / 0.2), transparent 38%),
+    linear-gradient(135deg, #ffffff, #fffbeb 54%, #fef2f2);
+  --wf-a-hero-border: #fef3c7;
+  --wf-a-eyebrow: #b45309;
+  --wf-a-chip-bg: #fffbeb;
+  --wf-a-chip-text: #92400e;
+  --wf-a-chip-ring: #fde68a;
+  --wf-a-solid: #d97706;
+  --wf-a-solid-hover: #b45309;
+  --wf-a-ring: rgb(253 230 138 / 0.7);
+  --wf-a-soft-bg: #fffbeb;
+  --wf-a-soft-text: #92400e;
+  --wf-a-rail: linear-gradient(90deg, #fbbf24, #fb923c, #fb7185);
+}
+
+[data-wf-accent="violet"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(167 139 250 / 0.22), transparent 38%),
+    linear-gradient(135deg, #ffffff, #f5f3ff 54%, #fdf4ff);
+  --wf-a-hero-border: #ede9fe;
+  --wf-a-eyebrow: #6d28d9;
+  --wf-a-chip-bg: #f5f3ff;
+  --wf-a-chip-text: #6d28d9;
+  --wf-a-chip-ring: #ddd6fe;
+  --wf-a-solid: #7c3aed;
+  --wf-a-solid-hover: #6d28d9;
+  --wf-a-ring: rgb(221 214 254 / 0.7);
+  --wf-a-soft-bg: #f5f3ff;
+  --wf-a-soft-text: #6d28d9;
+  --wf-a-rail: linear-gradient(90deg, #a78bfa, #e879f9, #818cf8);
+}
+
+/* --- Accents: dark ---
+   Selected for the dark surface rather than derived by
+   inverting the light steps: the hero becomes a deep tinted
+   wash instead of a pale one, the soft surface becomes a
+   translucent tint of the accent, and every text token is
+   re-picked to clear contrast against those, not against
+   white. --- */
+
+html.dark [data-wf-accent="indigo"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(99 102 241 / 0.28), transparent 42%),
+    linear-gradient(135deg, #101c33, #16203c 55%, #1a1a3a);
+  --wf-a-hero-border: rgb(129 140 248 / 0.28);
+  --wf-a-eyebrow: #a5b4fc;
+  --wf-a-chip-bg: rgb(99 102 241 / 0.18);
+  --wf-a-chip-text: #c7d2fe;
+  --wf-a-chip-ring: rgb(129 140 248 / 0.35);
+  --wf-a-solid: #6366f1;
+  --wf-a-solid-hover: #818cf8;
+  --wf-a-ring: rgb(129 140 248 / 0.4);
+  --wf-a-soft-bg: rgb(99 102 241 / 0.16);
+  --wf-a-soft-text: #c7d2fe;
+}
+
+html.dark [data-wf-accent="sky"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(14 165 233 / 0.28), transparent 42%),
+    linear-gradient(135deg, #0b1e2e, #0e2438 55%, #102a3a);
+  --wf-a-hero-border: rgb(56 189 248 / 0.28);
+  --wf-a-eyebrow: #7dd3fc;
+  --wf-a-chip-bg: rgb(14 165 233 / 0.18);
+  --wf-a-chip-text: #bae6fd;
+  --wf-a-chip-ring: rgb(56 189 248 / 0.35);
+  --wf-a-solid: #0284c7;
+  --wf-a-solid-hover: #0ea5e9;
+  --wf-a-ring: rgb(56 189 248 / 0.4);
+  --wf-a-soft-bg: rgb(14 165 233 / 0.16);
+  --wf-a-soft-text: #bae6fd;
+}
+
+html.dark [data-wf-accent="teal"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(20 184 166 / 0.28), transparent 42%),
+    linear-gradient(135deg, #0a1f2b, #0d2734 55%, #121f38);
+  --wf-a-hero-border: rgb(45 212 191 / 0.28);
+  --wf-a-eyebrow: #5eead4;
+  --wf-a-chip-bg: rgb(20 184 166 / 0.18);
+  --wf-a-chip-text: #99f6e4;
+  --wf-a-chip-ring: rgb(45 212 191 / 0.35);
+  --wf-a-solid: #0d9488;
+  --wf-a-solid-hover: #14b8a6;
+  --wf-a-ring: rgb(45 212 191 / 0.4);
+  --wf-a-soft-bg: rgb(20 184 166 / 0.16);
+  --wf-a-soft-text: #99f6e4;
+}
+
+html.dark [data-wf-accent="emerald"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(16 185 129 / 0.28), transparent 42%),
+    linear-gradient(135deg, #0a2019, #0d2a22 55%, #0f2630);
+  --wf-a-hero-border: rgb(52 211 153 / 0.28);
+  --wf-a-eyebrow: #6ee7b7;
+  --wf-a-chip-bg: rgb(16 185 129 / 0.18);
+  --wf-a-chip-text: #a7f3d0;
+  --wf-a-chip-ring: rgb(52 211 153 / 0.35);
+  --wf-a-solid: #059669;
+  --wf-a-solid-hover: #10b981;
+  --wf-a-ring: rgb(52 211 153 / 0.4);
+  --wf-a-soft-bg: rgb(16 185 129 / 0.16);
+  --wf-a-soft-text: #a7f3d0;
+}
+
+html.dark [data-wf-accent="amber"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(245 158 11 / 0.26), transparent 42%),
+    linear-gradient(135deg, #241a0c, #2c1f0e 55%, #2b1616);
+  --wf-a-hero-border: rgb(251 191 36 / 0.28);
+  --wf-a-eyebrow: #fcd34d;
+  --wf-a-chip-bg: rgb(245 158 11 / 0.18);
+  --wf-a-chip-text: #fde68a;
+  --wf-a-chip-ring: rgb(251 191 36 / 0.35);
+  --wf-a-solid: #d97706;
+  --wf-a-solid-hover: #f59e0b;
+  --wf-a-ring: rgb(251 191 36 / 0.4);
+  --wf-a-soft-bg: rgb(245 158 11 / 0.16);
+  --wf-a-soft-text: #fde68a;
+}
+
+html.dark [data-wf-accent="violet"] {
+  --wf-a-hero:
+    radial-gradient(circle at top right, rgb(139 92 246 / 0.28), transparent 42%),
+    linear-gradient(135deg, #1a1330, #211636 55%, #2a1436);
+  --wf-a-hero-border: rgb(167 139 250 / 0.28);
+  --wf-a-eyebrow: #c4b5fd;
+  --wf-a-chip-bg: rgb(139 92 246 / 0.18);
+  --wf-a-chip-text: #ddd6fe;
+  --wf-a-chip-ring: rgb(167 139 250 / 0.35);
+  --wf-a-solid: #7c3aed;
+  --wf-a-solid-hover: #8b5cf6;
+  --wf-a-ring: rgb(167 139 250 / 0.4);
+  --wf-a-soft-bg: rgb(139 92 246 / 0.16);
+  --wf-a-soft-text: #ddd6fe;
+}
+
+/* --- Components built on the tokens --- */
+
+.wf-hero {
+  background: var(--wf-a-hero);
+  border: 1px solid var(--wf-a-hero-border);
+}
+
+.wf-hero-title {
+  color: var(--wf-ink);
+}
+
+.wf-hero-body {
+  color: var(--wf-ink-2);
+}
+
+.wf-hero-eyebrow {
+  color: var(--wf-a-eyebrow);
+}
+
+.wf-hero-rail {
+  background: var(--wf-a-rail);
+}
+
+/* The decorative ring on the hero is white in light mode; on a
+   dark hero the same white reads as a hard scar, so it drops to
+   a faint tint instead. */
+.wf-hero-ornament {
+  border-color: rgb(255 255 255 / 0.55);
+}
+
+html.dark .wf-hero-ornament {
+  border-color: rgb(255 255 255 / 0.05);
+}
+
+.wf-chip {
+  background: var(--wf-a-chip-bg);
+  color: var(--wf-a-chip-text);
+  box-shadow: inset 0 0 0 1px var(--wf-a-chip-ring);
+}
+
+.wf-chip-quiet {
+  background: rgb(255 255 255 / 0.7);
+  color: var(--wf-ink-2);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.9);
+}
+
+html.dark .wf-chip-quiet {
+  background: rgb(255 255 255 / 0.06);
+  color: var(--wf-ink-2);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+}
+
+.wf-panel {
+  background: var(--wf-panel);
+  border: 1px solid var(--wf-panel-border);
+  box-shadow: var(--wf-shadow);
+}
+
+.wf-panel-divider {
+  border-color: var(--wf-line);
+}
+
+.wf-well {
+  background: var(--wf-well);
+  border: 1px solid var(--wf-well-border);
+}
+
+.wf-ink {
+  color: var(--wf-ink);
+}
+
+.wf-ink-2 {
+  color: var(--wf-ink-2);
+}
+
+.wf-ink-3 {
+  color: var(--wf-ink-3);
+}
+
+/* Row in a selectable list (referral inbox, exercise catalogue). */
+.wf-row {
+  background: var(--wf-panel);
+  border: 1px solid var(--wf-panel-border);
+}
+
+.wf-row:hover {
+  border-color: var(--wf-a-ring);
+}
+
+.wf-row[aria-current="true"] {
+  background: var(--wf-a-soft-bg);
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--wf-a-ring);
+}
+
+.wf-row[aria-current="true"] .wf-row-title {
+  color: var(--wf-a-soft-text);
+}
+
+.wf-row-title {
+  color: var(--wf-ink);
+}
+
+/* Tab strip. */
+.wf-tabs {
+  background: var(--wf-well);
+  border: 1px solid var(--wf-well-border);
+}
+
+.wf-tab {
+  color: var(--wf-ink-2);
+}
+
+.wf-tab[aria-selected="true"] {
+  background: var(--wf-panel);
+  color: var(--wf-ink);
+  box-shadow: inset 0 0 0 1px var(--wf-panel-border);
+}
+
+.wf-tab-count {
+  background: var(--wf-a-chip-bg);
+  color: var(--wf-a-chip-text);
+}
+
+.wf-tab[aria-selected="false"] .wf-tab-count {
+  background: var(--wf-well-border);
+  color: var(--wf-ink-2);
+}
+
+/* Solid accent button. */
+.wf-btn-accent {
+  background: var(--wf-a-solid);
+  color: #ffffff;
+}
+
+.wf-btn-accent:hover:not(:disabled) {
+  background: var(--wf-a-solid-hover);
+}
+
+.wf-btn-quiet {
+  background: var(--wf-panel);
+  border: 1px solid var(--wf-panel-border);
+  color: var(--wf-ink-2);
+}
+
+.wf-btn-quiet:hover:not(:disabled) {
+  border-color: var(--wf-a-ring);
+  color: var(--wf-ink);
+}
+
+/* Form controls. */
+.wf-input {
+  background: var(--wf-panel);
+  border: 1px solid var(--wf-well-border);
+  color: var(--wf-ink);
+}
+
+.wf-input::placeholder {
+  color: var(--wf-ink-3);
+}
+
+.wf-input:focus {
+  border-color: var(--wf-a-solid);
+  box-shadow: 0 0 0 4px var(--wf-a-ring);
+  outline: none;
+}
+
+.wf-label {
+  color: var(--wf-ink-2);
+}
+
+.wf-empty {
+  background: var(--wf-well);
+  border: 1px dashed var(--wf-well-border);
+  color: var(--wf-ink-2);
+}
+
+/* Notices. Status colour never travels alone here: each tone
+   also ships a glyph and a word, because two of the four status
+   steps sit under 3:1 on a light surface. */
+.wf-notice-success {
+  background: rgb(16 185 129 / 0.1);
+  border: 1px solid rgb(16 185 129 / 0.32);
+  color: #065f46;
+}
+
+.wf-notice-error {
+  background: rgb(220 38 38 / 0.08);
+  border: 1px solid rgb(220 38 38 / 0.32);
+  color: #991b1b;
+}
+
+.wf-notice-warning {
+  background: rgb(245 158 11 / 0.1);
+  border: 1px solid rgb(245 158 11 / 0.32);
+  color: #92400e;
+}
+
+.wf-notice-info {
+  background: rgb(37 99 235 / 0.08);
+  border: 1px solid rgb(37 99 235 / 0.3);
+  color: #1e40af;
+}
+
+html.dark .wf-notice-success {
+  background: rgb(16 185 129 / 0.14);
+  color: #a7f3d0;
+}
+
+html.dark .wf-notice-error {
+  background: rgb(220 38 38 / 0.16);
+  color: #fecaca;
+}
+
+html.dark .wf-notice-warning {
+  background: rgb(245 158 11 / 0.14);
+  color: #fde68a;
+}
+
+html.dark .wf-notice-info {
+  background: rgb(37 99 235 / 0.16);
+  color: #bfdbfe;
+}
+
+/* --- Guidance --- */
+
+/* A calm prerequisite hint, not an error. Deliberately quieter than
+   `.wf-notice-*`: those report what just happened, this one explains what
+   has to be true before something will work, and it is on screen before
+   anyone has done anything wrong. */
+.wf-guidance {
+  background: color-mix(in srgb, var(--wf-a-solid) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--wf-a-solid) 22%, transparent);
+  color: var(--wf-ink-2);
+}
+
+.wf-guidance-title {
+  color: var(--wf-ink);
+}
+
+.wf-guidance-icon {
+  background: color-mix(in srgb, var(--wf-a-solid) 16%, transparent);
+  color: var(--wf-a-solid);
+}
+
+html.dark .wf-guidance-icon {
+  color: var(--wf-a-chip-text);
+}

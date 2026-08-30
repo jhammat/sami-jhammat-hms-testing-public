@@ -8,7 +8,10 @@ import type { APIRequestContext, Page } from "@playwright/test";
  */
 
 const password = process.env.WONFLOW_DEVELOPMENT_PASSWORD ?? "WonFlowDemo2026!";
-const pageSize = 4;
+// Must match `useWonFlowPagination(filteredUsers, 6)` on the team console.
+// This was 4 and the console pages 6 at a time, so every paging assertion
+// compared against a page size the app has not used for some time.
+const pageSize = 6;
 
 async function loginAsAdmin(request: APIRequestContext) {
   const response = await request.post("/api/auth/login", {
@@ -62,7 +65,7 @@ test.describe("hospital team console", () => {
     await inviteStaff(page, displayName, email);
 
     // The invite refreshes the list; the new member is findable by search.
-    const search = page.getByPlaceholder("Search by name, email, branch, department, role or workspace");
+    const search = page.getByPlaceholder(/^Search by name, email/i);
     await search.fill(email);
     await expect(userCard(page, displayName)).toBeVisible();
     await expect(page.locator("article").filter({ hasText: "@wonflow.local" })).toHaveCount(1);
@@ -86,7 +89,7 @@ test.describe("hospital team console", () => {
     await expect(userCard(page, displayName)).toHaveCount(0);
   });
 
-  test("the roster pages through every user four at a time", async ({ page }) => {
+  test("the roster pages through every user a page at a time", async ({ page }) => {
     await loginAsAdmin(page.request);
 
     const total = await countUsers(page.request);
@@ -129,7 +132,7 @@ test.describe("hospital team console", () => {
     await expect(paginationSummary(page)).toHaveText(`Showing ${pageSize + 1}–${Math.min(pageSize * 2, total)} of ${total} users`);
 
     // Narrowing to a single result must jump back to page one.
-    await page.getByPlaceholder("Search by name, email, branch, department, role or workspace").fill("reception@wonflow.local");
+    await page.getByPlaceholder(/^Search by name, email/i).fill("reception@wonflow.local");
     await expect(page.locator("article").filter({ hasText: "reception@wonflow.local" })).toBeVisible();
   });
 
@@ -157,7 +160,7 @@ test.describe("hospital team console", () => {
     await expect(page.getByText("Account created — share these credentials")).toBeVisible();
     await expect(page.getByText("Temporary password:", { exact: true })).toBeVisible();
 
-    const search = page.getByPlaceholder("Search by name, email, branch, department, role or workspace");
+    const search = page.getByPlaceholder(/^Search by name, email/i);
     await search.fill(email);
     const card = userCard(page, displayName);
     await expect(card).toBeVisible();
@@ -182,7 +185,7 @@ test.describe("hospital team console", () => {
 
     // The department only reaches the client through the staffProfile -> doctor
     // -> department relation, so this guards that join.
-    await page.getByPlaceholder("Search by name, email, branch, department, role or workspace").fill(departmentName);
+    await page.getByPlaceholder(/^Search by name, email/i).fill(departmentName);
     const card = userCard(page, doctor!.displayName);
     await expect(card).toBeVisible();
     await expect(card).toContainText(departmentName);

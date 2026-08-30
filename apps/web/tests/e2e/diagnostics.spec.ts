@@ -2,6 +2,33 @@ import { expect, test } from "@playwright/test";
 import type { APIRequestContext } from "@playwright/test";
 
 const password = process.env.WONFLOW_DEVELOPMENT_PASSWORD ?? "WonFlowDemo2026!";
+
+/**
+ * Maps a tenant membership id to the login it belongs to.
+ *
+ * Seeded clinical records are attributed to several different doctors, so a
+ * test that needs to act "as the clinician who did X" has to look up which
+ * account that was instead of assuming a fixed one.
+ */
+async function resolveMembershipEmail(
+  request: APIRequestContext,
+  membershipId: string | null | undefined,
+): Promise<string> {
+  expect(membershipId, "the order has no ordering clinician recorded").toBeTruthy();
+
+  await loginAs(request, "admin@wonflow.local");
+  const response = await request.get("/api/v1/admin/team-overview");
+  expect(response.status()).toBe(200);
+
+  const users = (await response.json()).users as Array<{
+    id: string;
+    identity?: { email?: string | null } | null;
+  }>;
+
+  const email = users.find((user) => user.id === membershipId)?.identity?.email;
+  expect(email, `no login found for membership ${membershipId}`).toBeTruthy();
+  return email!;
+}
 const today = () => new Date().toISOString().slice(0, 10);
 
 async function loginAs(request: APIRequestContext, email: string) {
@@ -13,6 +40,8 @@ interface WorklistOrder {
   id: string;
   name: string;
   status: string;
+  /** The clinician who raised the order; results route back to them. */
+  orderedByMembershipId: string | null;
   specimens: unknown[];
   results: Array<{ releasedAt: string | null }>;
 }
@@ -178,7 +207,19 @@ for (const department of departments) {
       expect(releaseResponse.status()).toBe(200);
 
       // The ordering doctor sees it on their results screen.
-      await loginAs(page.request, "doctor@wonflow.local");
+      //
+      // It has to be the doctor who actually raised THIS order, not the
+      // generic `doctor@wonflow.local` account. `getClinicianResults`
+      // filters on `orderedByMembershipId`, and the seed spreads its
+      // diagnostic orders across Dr Imran Siddiqui and the supervised
+      // doctor -- `doctor@wonflow.local` owns none of them, so signing in
+      // as that account showed an empty screen and the test failed on a
+      // correct permission boundary rather than on a defect.
+      const orderingDoctorEmail = await resolveMembershipEmail(
+        page.request,
+        order!.orderedByMembershipId,
+      );
+      await loginAs(page.request, orderingDoctorEmail);
       const doctorPath = department.type === "LABORATORY" ? "/doctor/results" : "/doctor/radiology-results";
       await page.goto(doctorPath, { waitUntil: "networkidle" });
       await expect(page.getByText(narrative)).toBeVisible({ timeout: 20_000 });

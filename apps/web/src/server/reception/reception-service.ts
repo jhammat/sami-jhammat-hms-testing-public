@@ -1,3 +1,4 @@
+import{dayFilterIn,dayWindowIn}from"@/server/time/business-day";
 import{randomBytes}from"node:crypto";import{database}from"@wonflow/database";import type{Prisma}from"@wonflow/database";import{requireBranchId,requirePermission,requireTenantContext}from"@wonflow/contracts";import type{WonFlowRequestContext}from"@wonflow/contracts";import{WonFlowApiError}from"@/server/http/route-handler";import{checkDoctorBookable}from"@/server/scheduling/effective-availability";import{listBookableSlots}from"@/server/scheduling/appointment-slots";
 const normalizeOptional=(v?:string)=>v?.trim().toLowerCase()||null;const trimOrUndefined=(v?:string)=>{const t=v?.trim();return t?t:undefined;};const patientNumber=()=>`P-${new Date().toISOString().slice(0,10).replaceAll("-","")}-${randomBytes(3).toString("hex").toUpperCase()}`;const isUniqueConstraintError=(caught:unknown)=>typeof caught==="object"&&caught!==null&&(caught as{code?:string}).code==="P2002";
 
@@ -82,7 +83,7 @@ async function resolveReferredPatientScope(c: { tenantId: string; membershipId: 
 
 export class ReceptionService{
 async getCatalog(rc:WonFlowRequestContext){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const[branches,doctors,services]=await Promise.all([database.branch.findMany({where:{tenantId:c.tenantId,organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"},orderBy:[{isMainBranch:"desc"},{name:"asc"}],select:{id:true,name:true,address:true,phone:true,timezone:true}}),database.doctorProfile.findMany({where:{tenantId:c.tenantId,staffProfile:{status:"ACTIVE",membership:{organizationId:c.organizationId,archivedAt:null,status:{in:["ACTIVE","INVITED"]}}}},include:{staffProfile:{include:{membership:true}},department:{select:{id:true,name:true}}},orderBy:{staffProfile:{membership:{displayName:"asc"}}}}),database.serviceDefinition.findMany({where:{tenantId:c.tenantId,isActive:true,OR:[{branchId:null},{branch:{organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"}}]},orderBy:[{category:"asc"},{name:"asc"}]})]);return{branches,practitioners:doctors.map(doctor=>{const doctorServices=services.filter(service=>service.doctorId===doctor.id&&service.priceMinorUnits!==null);const normalFee=doctorServices[0]?.priceMinorUnits??0;return{id:doctor.id,displayName:doctor.staffProfile.membership.displayName,specialtyName:doctor.specialty??"Clinical practitioner",primaryBranchId:doctor.staffProfile.branchId??branches[0]?.id??"",departmentName:doctor.department?.name??null,consultationFee:normalFee/100,urgentConsultationFee:normalFee?normalFee*1.5/100:0};}),services:services.map(service=>({id:service.id,name:service.name,category:service.category,price:service.priceMinorUnits===null?0:service.priceMinorUnits/100,doctorId:service.doctorId,branchId:service.branchId,publiclyBookable:service.publiclyBookable,consultationModes:service.consultationModes,requiresPrepayment:service.requiresPrepayment}))};}
-async getOverview(rc:WonFlowRequestContext,date:string){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const branchId=requireBranchId(c),start=new Date(`${date}T00:00:00.000Z`),end=new Date(`${date}T23:59:59.999Z`);const[appointments,queue,patientsToday]=await Promise.all([database.appointment.findMany({where:{tenantId:c.tenantId,branchId,startsAt:{gte:start,lte:end}},orderBy:{startsAt:"asc"}}),database.queueEntry.findMany({where:{tenantId:c.tenantId,queue:{branchId,queueDate:start}},include:{patient:true,appointment:true},orderBy:[{priority:"desc"},{tokenNumber:"asc"}]}),database.patient.count({where:{tenantId:c.tenantId,createdAt:{gte:start,lte:end}}})]);return{patientsToday,appointmentsToday:appointments.length,waitingCount:queue.filter(x=>x.status==="WAITING").length,checkedInCount:appointments.filter(x=>x.checkedInAt).length,appointments,queue};}
+async getOverview(rc:WonFlowRequestContext,date:string){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const branchId=requireBranchId(c),{gte:start,lte:end}=dayFilterIn(date,c.timezone),queueDate=new Date(`${date}T00:00:00.000Z`);const[appointments,queue,patientsToday]=await Promise.all([database.appointment.findMany({where:{tenantId:c.tenantId,branchId,startsAt:{gte:start,lte:end}},orderBy:{startsAt:"asc"}}),database.queueEntry.findMany({where:{tenantId:c.tenantId,queue:{branchId,queueDate}},include:{patient:true,appointment:true},orderBy:[{priority:"desc"},{tokenNumber:"asc"}]}),database.patient.count({where:{tenantId:c.tenantId,createdAt:{gte:start,lte:end}}})]);return{patientsToday,appointmentsToday:appointments.length,waitingCount:queue.filter(x=>x.status==="WAITING").length,checkedInCount:appointments.filter(x=>x.checkedInAt).length,appointments,queue};}
 /** Duplicate-check lookup for the registration form: same name+DOB or same phone, called before the record is saved. */
 async findDuplicatePatients(rc:WonFlowRequestContext,lookup:DuplicatePatientLookup){const c=requireTenantContext(rc);requirePermission(c,"patients.read");return queryDuplicatePatients(c,lookup);}
 /**
@@ -225,7 +226,34 @@ async listPatients(rc:WonFlowRequestContext,options:ListPatientsOptions={}){
   }
 
   const query=options.query?.trim();
-  if(query){where.OR=[{patientNumber:{contains:query,mode:"insensitive"}},{givenName:{contains:query,mode:"insensitive"}},{familyName:{contains:query,mode:"insensitive"}},{normalizedPhone:{contains:query.toLowerCase()}},{normalizedEmail:{contains:query.toLowerCase()}},{identifiers:{some:{normalizedValue:{contains:query.toLowerCase()}}}}];}
+  if(query){
+    const words = query.split(/\s+/).filter(Boolean);
+    const orConditions: Prisma.PatientWhereInput[] = [
+      { patientNumber: { contains: query, mode: "insensitive" } },
+      { givenName: { contains: query, mode: "insensitive" } },
+      { middleName: { contains: query, mode: "insensitive" } },
+      { familyName: { contains: query, mode: "insensitive" } },
+      { normalizedPhone: { contains: query.toLowerCase() } },
+      { normalizedEmail: { contains: query.toLowerCase() } },
+      { identifiers: { some: { normalizedValue: { contains: query.toLowerCase() } } } },
+    ];
+    if (words.length > 1) {
+      orConditions.push({
+        AND: words.map((word) => ({
+          OR: [
+            { givenName: { contains: word, mode: "insensitive" } },
+            { middleName: { contains: word, mode: "insensitive" } },
+            { familyName: { contains: word, mode: "insensitive" } },
+            { patientNumber: { contains: word, mode: "insensitive" } },
+            { normalizedPhone: { contains: word.toLowerCase() } },
+            { normalizedEmail: { contains: word.toLowerCase() } },
+            { identifiers: { some: { normalizedValue: { contains: word.toLowerCase() } } } },
+          ],
+        })),
+      });
+    }
+    where.OR = orConditions;
+  }
   if(options.gender&&options.gender!=="all")where.sex=options.gender;
   if(options.minimumAge!==undefined||options.maximumAge!==undefined){
     const dobFilter:Prisma.DateTimeNullableFilter={};
@@ -250,8 +278,16 @@ async listPatients(rc:WonFlowRequestContext,options:ListPatientsOptions={}){
     database.patient.findMany({where,include:{identifiers:{select:{type:true,value:true,isPrimary:true}}},orderBy,skip:(page-1)*pageSize,take:pageSize}),
     database.patient.count({where}),
     database.patient.count({where:tenantWhere}),
-    database.patient.count({where:{...tenantWhere,sex:"male"}}),
-    database.patient.count({where:{...tenantWhere,sex:"female"}}),
+    // Case-insensitive on purpose. `Patient.sex` is free text with no enum
+    // behind it, and the rows in a real database spell it every way at once —
+    // "Male", "MALE" and "male" all occur, written by different screens over
+    // time. An exact match on "male" counted almost none of them, so the
+    // directory reported zero male and zero female patients above a table
+    // listing both. Normalising the stored values is a data migration and a
+    // separate decision; counting correctly across the spellings that already
+    // exist is not.
+    database.patient.count({where:{...tenantWhere,sex:{equals:"male",mode:"insensitive"}}}),
+    database.patient.count({where:{...tenantWhere,sex:{equals:"female",mode:"insensitive"}}}),
   ]);
   return{patients,total,page,pageSize,summary:{totalPatients,malePatients,femalePatients}};
 }
@@ -350,10 +386,43 @@ async listAppointments(rc:WonFlowRequestContext,options:{query?:string;branchId?
   if(options.practitionerId)where.doctorId=options.practitionerId;
   const validStatuses=["PENDING","CONFIRMED","CHECKED_IN","IN_QUEUE","IN_PROGRESS","COMPLETED","CANCELLED","NO_SHOW"] as const;
   if(options.status&&(validStatuses as readonly string[]).includes(options.status))where.status=options.status as typeof validStatuses[number];
-  if(options.date){const start=new Date(`${options.date}T00:00:00.000Z`);if(!Number.isNaN(start.getTime())){const end=new Date(start.getTime()+86_400_000);where.startsAt={gte:start,lt:end};}}
-  else if(options.dateFrom||options.dateTo){const range:Prisma.DateTimeFilter={};if(options.dateFrom){const start=new Date(`${options.dateFrom}T00:00:00.000Z`);if(!Number.isNaN(start.getTime()))range.gte=start;}if(options.dateTo){const end=new Date(`${options.dateTo}T00:00:00.000Z`);if(!Number.isNaN(end.getTime()))range.lt=new Date(end.getTime()+86_400_000);}where.startsAt=range;}
+  // The appointment book is filtered by the hospital's calendar day, not
+  // the server's. Asking for the 30th at a UTC+5 site used to return the
+  // 30th 05:00 through the 31st 04:59.
+  if(options.date){try{where.startsAt=dayFilterIn(options.date,c.timezone);}catch{/* an unparseable date filters nothing */}}
+  else if(options.dateFrom||options.dateTo){const range:Prisma.DateTimeFilter={};if(options.dateFrom){try{range.gte=dayWindowIn(options.dateFrom,c.timezone).start;}catch{/* ignore */}}if(options.dateTo){try{range.lte=dayWindowIn(options.dateTo,c.timezone).end;}catch{/* ignore */}}where.startsAt=range;}
   const query=options.query?.trim();
-  if(query)where.OR=[{reason:{contains:query,mode:"insensitive"}},{patient:{OR:[{givenName:{contains:query,mode:"insensitive"}},{familyName:{contains:query,mode:"insensitive"}},{patientNumber:{contains:query,mode:"insensitive"}},{normalizedPhone:{contains:query.toLowerCase()}}]}},{doctor:{staffProfile:{membership:{displayName:{contains:query,mode:"insensitive"}}}}}];
+  if(query){
+    const words = query.split(/\s+/).filter(Boolean);
+    const patientFields: Prisma.PatientWhereInput[] = [
+      { givenName: { contains: query, mode: "insensitive" } },
+      { middleName: { contains: query, mode: "insensitive" } },
+      { familyName: { contains: query, mode: "insensitive" } },
+      { patientNumber: { contains: query, mode: "insensitive" } },
+      { normalizedPhone: { contains: query.toLowerCase() } },
+    ];
+    const appointmentOr: Prisma.AppointmentWhereInput[] = [
+      { reason: { contains: query, mode: "insensitive" } },
+      { patient: { OR: patientFields } },
+      { doctor: { staffProfile: { membership: { displayName: { contains: query, mode: "insensitive" } } } } },
+    ];
+    if (words.length > 1) {
+      appointmentOr.push({
+        patient: {
+          AND: words.map((word) => ({
+            OR: [
+              { givenName: { contains: word, mode: "insensitive" } },
+              { middleName: { contains: word, mode: "insensitive" } },
+              { familyName: { contains: word, mode: "insensitive" } },
+              { patientNumber: { contains: word, mode: "insensitive" } },
+              { normalizedPhone: { contains: word.toLowerCase() } },
+            ],
+          })),
+        },
+      });
+    }
+    where.OR = appointmentOr;
+  }
   const whereWithoutStatus:Prisma.AppointmentWhereInput={...where,status:undefined};
   const [appointments,total,statusCounts]=await Promise.all([
     database.appointment.findMany({where,select:{id:true,patientId:true,doctorId:true,branchId:true,serviceId:true,status:true,consultationMode:true,source:true,reason:true,startsAt:true,endsAt:true,checkedInAt:true,tokenNumber:true,cancellationReason:true,cancelledAt:true,createdAt:true,patient:{select:{id:true,patientNumber:true,givenName:true,middleName:true,familyName:true,phone:true,identifiers:{select:{type:true,value:true,isPrimary:true}}}},doctor:{select:{id:true,specialty:true,staffProfile:{select:{membership:{select:{displayName:true}}}}}},service:{select:{id:true,name:true,durationMinutes:true,priceMinorUnits:true,currencyCode:true}}},orderBy:{startsAt:options.sort==="time-descending"?"desc":"asc"},skip:(page-1)*pageSize,take:pageSize}),

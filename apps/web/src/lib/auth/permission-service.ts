@@ -27,6 +27,39 @@ export async function resolvePermissionCodes(input: { membershipId: string; tena
   return [...allowed].sort();
 }
 
+/**
+ * The timezone the signed-in user's hospital actually keeps.
+ *
+ * This was hard-coded to "Asia/Karachi" for every tenant on the platform.
+ * That is right for one customer and wrong for the next, and it is the value
+ * every "today" window is measured against — so a hospital anywhere else
+ * would have had its clinic day drawn in the wrong place.
+ *
+ * Resolution order is branch, then the tenant default, then UTC. A branch is
+ * the most specific answer: a hospital group can genuinely span zones, and
+ * the day belongs to the site the user is signed in to.
+ */
+async function resolveTimezone(input: {
+  tenantId: string;
+  branchId: string | null;
+}): Promise<string> {
+  if (input.branchId) {
+    const branch = await database.branch.findFirst({
+      where: { id: input.branchId, tenantId: input.tenantId },
+      select: { timezone: true },
+    });
+
+    if (branch?.timezone) return branch.timezone;
+  }
+
+  const tenant = await database.tenant.findUnique({
+    where: { id: input.tenantId },
+    select: { defaultTimezone: true },
+  });
+
+  return tenant?.defaultTimezone || "UTC";
+}
+
 export async function requireRequestContext(): Promise<WonFlowRequestContext> {
   const session = await readSession();
   if (!session) throw new WonFlowRequestContextError("invalid-request-context", "Authentication is required.");
@@ -35,10 +68,13 @@ export async function requireRequestContext(): Promise<WonFlowRequestContext> {
     userId: session.identityId, identityId: session.identityId, membershipId: null, sessionId: session.sessionId, workspace: "platform", locale: "en", timezone: "UTC",
     currencyCode: "PKR", permissionCodes: session.permissionCodes, sourceApplication: "web", tenantId: null, organizationId: null, branchId: null };
   if (!session.membershipId || !session.tenantId || !session.organizationId) throw new WonFlowRequestContextError("tenant-context-required", "Select an organization and workspace.");
-  const permissionCodes = await resolvePermissionCodes({ membershipId: session.membershipId, tenantId: session.tenantId, branchId: session.branchId });
+  const [permissionCodes, timezone] = await Promise.all([
+    resolvePermissionCodes({ membershipId: session.membershipId, tenantId: session.tenantId, branchId: session.branchId }),
+    resolveTimezone({ tenantId: session.tenantId, branchId: session.branchId }),
+  ]);
   const context: WonFlowTenantRequestContext = { scope: "tenant", requestId: crypto.randomUUID(), userId: session.membershipId,
     identityId: session.identityId, membershipId: session.membershipId,
-    sessionId: session.sessionId, workspace: session.workspace?.toLowerCase() ?? "admin", locale: "en", timezone: "Asia/Karachi",
+    sessionId: session.sessionId, workspace: session.workspace?.toLowerCase() ?? "admin", locale: "en", timezone,
     currencyCode: "PKR", permissionCodes, sourceApplication: "web", tenantId: session.tenantId,
     organizationId: session.organizationId, branchId: session.branchId };
   return context;

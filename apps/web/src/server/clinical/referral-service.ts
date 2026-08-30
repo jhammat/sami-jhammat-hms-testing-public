@@ -665,7 +665,74 @@ export class ReferralService {
       database.clinicalReferral.count({ where }),
     ]);
 
-    return { referrals, total, page, pageSize };
+    return {
+      referrals: referrals.map((referral) => this.toContractShape(referral)),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  /**
+   * Renames the Prisma relation keys to the ones the contract declares.
+   *
+   * Prisma returns relations under their MODEL names -- `Patient`,
+   * `DoctorProfile`, `StaffProfile` -- but `ClinicalReferral` in
+   * @wonflow/contracts declares `patient`, `referringDoctor` and
+   * `assignedTo`, and that is what every screen reads. Nothing bridged the
+   * two, so `referral.patient` was always undefined and both allied
+   * referral inboxes silently fell back to showing "Patient #a022e3"
+   * instead of a name. Types did not catch it because the service returned
+   * a raw Prisma row rather than the declared contract type.
+   */
+  private toContractShape<T extends Record<string, unknown>>(row: T) {
+    const { Patient, DoctorProfile, StaffProfile, ...rest } = row as T & {
+      Patient?: unknown;
+      DoctorProfile?: unknown;
+      StaffProfile?: unknown;
+    };
+
+    return {
+      ...rest,
+      ...(Patient ? { patient: Patient } : {}),
+      ...(DoctorProfile ? { referringDoctor: DoctorProfile } : {}),
+      assignedTo: StaffProfile ?? null,
+    };
+  }
+
+  /**
+   * Refuses access to a patient the caller holds no live referral for.
+   *
+   * The allied services used to authorize on `referrals.read` alone -- a
+   * ROLE-level permission -- and then trust whatever `patientId` arrived in
+   * the request. Any physiotherapist could therefore read or write therapy
+   * records for any patient in the hospital by passing an id, which is
+   * exactly the "access by job title" the platform rules forbid. This is the
+   * per-patient check that was missing: an active, in-date referral in the
+   * caller's own specialty, optionally narrowed to the therapist it was
+   * assigned to.
+   */
+  async assertReferredPatient(
+    requestContext: WonFlowRequestContext,
+    specialty: string,
+    patientId: string,
+    staffProfileId?: string | null,
+  ): Promise<void> {
+    const context = requireTenantContext(requestContext);
+
+    const permitted = await this.getActiveReferredPatientIds(
+      context.tenantId,
+      specialty,
+      staffProfileId ?? null,
+    );
+
+    if (permitted.includes(patientId)) return;
+
+    throw new WonFlowApiError(
+      403,
+      "referral-required",
+      "You do not have a current referral for this patient, so their record is not open to you. Ask the referring surgeon to raise one, or check whether the existing referral has expired.",
+    );
   }
 
   /**

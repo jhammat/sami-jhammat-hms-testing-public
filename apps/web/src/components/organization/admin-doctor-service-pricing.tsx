@@ -11,9 +11,43 @@ import { useWonFlowAsyncData } from "@/lib/data";
 import { getServiceCategory, groupServiceCategoriesByHandler, hasLivePortal, serviceCategories } from "@/lib/services/service-categories";
 import { nextServiceCode, normalizeServiceCode } from "@/lib/services/service-code";
 
-type FeeAuthority = "DOCTOR" | "HOSPITAL";
+type FeeAuthority = "DOCTOR" | "HOSPITAL" | "APPROVAL_REQUIRED";
 type BillingOwner = "HOSPITAL" | "DOCTOR";
 type WorkspaceCode = "ADMIN" | "RECEPTION" | "DOCTOR" | "LABORATORY" | "RADIOLOGY" | "PHARMACY" | "BILLING" | "MANAGEMENT" | "PHYSIOTHERAPIST" | "NUTRITIONIST";
+
+interface FeeRequestRecord {
+  id: string;
+  requestType: "CREATE_SERVICE" | "UPDATE_FEE";
+  proposedName: string | null;
+  proposedDescription: string | null;
+  proposedDurationMinutes: number | null;
+  proposedPriceMinorUnits: number;
+  proposedCurrencyCode: string;
+  status: "PENDING" | "APPROVED" | "DECLINED";
+  rejectionReason: string | null;
+  createdAt: string;
+  reviewedAt: string | null;
+  doctor: {
+    id: string;
+    specialty: string | null;
+    staffProfile: {
+      membership: {
+        id: string;
+        displayName: string;
+      };
+    };
+  };
+  service: {
+    id: string;
+    name: string;
+    code: string;
+    priceMinorUnits: number | null;
+    currencyCode: string;
+  } | null;
+  proposedBranch: { id: string; name: string } | null;
+  requestedBy: { id: string; displayName: string };
+  reviewedBy: { id: string; displayName: string } | null;
+}
 
 /** Desks that can operate a service, in the order administrators think of them. */
 const serviceDesks: Array<{ code: WorkspaceCode; label: string }> = [
@@ -36,6 +70,8 @@ function defaultDeskForCategory(category: string): WorkspaceCode {
   if (category === "LABORATORY") return "LABORATORY";
   if (category === "RADIOLOGY") return "RADIOLOGY";
   if (category === "PHARMACY") return "PHARMACY";
+  if (category === "PHYSIOTHERAPY") return "PHYSIOTHERAPIST";
+  if (category === "NUTRITION") return "NUTRITIONIST";
   if (category === "CONSULTATION") return "DOCTOR";
   return "RECEPTION";
 }
@@ -72,7 +108,21 @@ interface ServiceOverview {
       staffProfile: { membership: { displayName: string } };
     } | null;
   }>;
+  enabledModules?: string[];
 }
+
+const deskModuleMap: Record<WorkspaceCode, string | null> = {
+  RECEPTION: "reception-desk",
+  BILLING: "billing-counter",
+  LABORATORY: "laboratory",
+  RADIOLOGY: "radiology",
+  PHARMACY: "pharmacy",
+  PHYSIOTHERAPIST: "physiotherapy",
+  NUTRITIONIST: "nutrition",
+  DOCTOR: null,
+  MANAGEMENT: null,
+  ADMIN: null,
+};
 
 const billingOwnerLabels: Record<BillingOwner, string> = {
   HOSPITAL: "Hospital administration",
@@ -128,6 +178,7 @@ function AuthoritySelector({ authority, onSaved }: { authority: FeeAuthority; on
 
   const options = [
     { value: "DOCTOR" as const, icon: Stethoscope, title: "Doctor managed", description: "Doctors create their consultation services and set their own fees." },
+    { value: "APPROVAL_REQUIRED" as const, icon: ShieldCheck, title: "Approval required", description: "Doctors propose consultation fees. Hospital administrators review and approve or decline each request." },
     { value: "HOSPITAL" as const, icon: Building2, title: "Hospital managed", description: "Hospital administrators create doctor services and control the fees." },
   ];
 
@@ -140,7 +191,7 @@ function AuthoritySelector({ authority, onSaved }: { authority: FeeAuthority; on
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">This setting is enforced by the backend for every doctor consultation service.</p>
         </div>
       </div>
-      <div className="mt-4 grid gap-3 md:grid-cols-2">
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
         {options.map(({ value, icon: Icon, title, description }) => (
           <button
             className={`rounded-2xl border p-4 text-left transition ${
@@ -166,6 +217,284 @@ function AuthoritySelector({ authority, onSaved }: { authority: FeeAuthority; on
         ))}
       </div>
       <div className="mt-3"><ErrorMessage message={error} /></div>
+    </section>
+  );
+}
+
+function PendingFeeRequestsPanel({ onActionCompleted }: { onActionCompleted(): void }) {
+  const [requests, setRequests] = useState<FeeRequestRecord[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [activeActionId, setActiveActionId] = useState<string | null>(null);
+  const [decliningId, setDecliningId] = useState<string | null>(null);
+  const [declineReason, setDeclineReason] = useState("");
+  const [error, setError] = useState("");
+  const [viewHistory, setViewHistory] = useState(false);
+
+  const loadRequests = async () => {
+    try {
+      const res = await phaseOneApi<{ feeRequests: FeeRequestRecord[] }>("/api/v1/admin/fee-requests");
+      setRequests(res.feeRequests || []);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useMemo(() => {
+    loadRequests();
+  }, []);
+
+  const pendingRequests = requests.filter((r) => r.status === "PENDING");
+  const reviewedRequests = requests.filter((r) => r.status !== "PENDING");
+
+  const handleApprove = async (requestId: string) => {
+    setActiveActionId(requestId);
+    setError("");
+    try {
+      await phaseOneApi(`/api/v1/admin/fee-requests/${requestId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: "APPROVE" }),
+      });
+      await loadRequests();
+      onActionCompleted();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to approve fee request.");
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  const handleDecline = async (requestId: string) => {
+    if (!declineReason.trim()) {
+      setError("Please provide a reason for declining.");
+      return;
+    }
+    setActiveActionId(requestId);
+    setError("");
+    try {
+      await phaseOneApi(`/api/v1/admin/fee-requests/${requestId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action: "DECLINE", rejectionReason: declineReason.trim() }),
+      });
+      setDecliningId(null);
+      setDeclineReason("");
+      await loadRequests();
+      onActionCompleted();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to decline fee request.");
+    } finally {
+      setActiveActionId(null);
+    }
+  };
+
+  return (
+    <section className="wf-admin-panel rounded-[22px] border border-amber-200/80 bg-gradient-to-br from-amber-50/60 via-white to-orange-50/30 p-5 shadow-[0_8px_30px_rgba(245,158,11,0.06)] dark:border-amber-500/30 dark:bg-slate-900/90 dark:shadow-[0_8px_30px_rgba(0,0,0,0.3)]">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 text-white shadow-md shadow-amber-500/25">
+            <Stethoscope size={20} />
+          </span>
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-950 dark:text-white">Doctor Fee Approval Requests</h2>
+              {pendingRequests.length > 0 && (
+                <span className="rounded-full bg-amber-500 px-2.5 py-0.5 text-xs font-black text-white animate-pulse">
+                  {pendingRequests.length} pending
+                </span>
+              )}
+            </div>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              Doctors submit consultation fee proposals. Review and approve or decline them here.
+            </p>
+          </div>
+        </div>
+
+        {reviewedRequests.length > 0 && (
+          <button
+            className="self-start text-xs font-bold text-indigo-600 hover:text-indigo-800 dark:text-indigo-400 sm:self-auto"
+            onClick={() => setViewHistory(!viewHistory)}
+            type="button"
+          >
+            {viewHistory ? "Hide decision history" : `View decision history (${reviewedRequests.length})`}
+          </button>
+        )}
+      </div>
+
+      <ErrorMessage message={error} />
+
+      {loading ? (
+        <p className="mt-4 text-xs text-slate-500">Loading fee proposals…</p>
+      ) : pendingRequests.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-white/60 p-5 text-center dark:border-slate-800 dark:bg-slate-800/40">
+          <p className="text-xs font-semibold text-slate-600 dark:text-slate-400">
+            No pending fee approval requests from doctors.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-4 space-y-3">
+          {pendingRequests.map((req) => (
+            <article
+              className="rounded-2xl border border-amber-200/90 bg-white p-4.5 shadow-sm transition hover:border-amber-300 dark:border-slate-800 dark:bg-slate-800/80"
+              key={req.id}
+            >
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <strong className="text-sm font-black text-slate-950 dark:text-white">
+                      {req.doctor.staffProfile.membership.displayName}
+                    </strong>
+                    {req.doctor.specialty && (
+                      <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                        {req.doctor.specialty}
+                      </span>
+                    )}
+                    <span className="rounded-md bg-amber-100 px-2 py-0.5 text-[10px] font-black uppercase tracking-wider text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                      {req.requestType === "CREATE_SERVICE" ? "New service proposal" : "Fee change request"}
+                    </span>
+                  </div>
+
+                  <div className="mt-2 space-y-1 text-xs text-slate-600 dark:text-slate-300">
+                    <p>
+                      <strong>Service:</strong> {req.proposedName || req.service?.name || "Consultation"}
+                      {req.service?.code ? ` (${req.service.code})` : ""}
+                    </p>
+                    {req.requestType === "UPDATE_FEE" && req.service?.priceMinorUnits !== null && req.service?.priceMinorUnits !== undefined && (
+                      <p>
+                        <strong>Current Fee:</strong>{" "}
+                        <span className="line-through text-slate-400">
+                          {new Intl.NumberFormat("en-PK", { style: "currency", currency: req.proposedCurrencyCode, maximumFractionDigits: 0 }).format(req.service.priceMinorUnits / 100)}
+                        </span>
+                      </p>
+                    )}
+                    {req.proposedDurationMinutes && (
+                      <p><strong>Duration:</strong> {req.proposedDurationMinutes} minutes</p>
+                    )}
+                    {req.proposedBranch && (
+                      <p><strong>Location:</strong> {req.proposedBranch.name}</p>
+                    )}
+                    <p className="text-[10px] text-slate-400">
+                      Submitted on {new Date(req.createdAt).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <span className="block text-xs font-semibold uppercase tracking-wider text-slate-400">Proposed Fee</span>
+                  <strong className="text-xl font-black text-emerald-600 dark:text-emerald-400">
+                    {new Intl.NumberFormat("en-PK", { style: "currency", currency: req.proposedCurrencyCode, maximumFractionDigits: 0 }).format(req.proposedPriceMinorUnits / 100)}
+                  </strong>
+                </div>
+              </div>
+
+              {/* Action buttons & Decline Form */}
+              <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-700">
+                {decliningId === req.id ? (
+                  <div className="space-y-2">
+                    <textarea
+                      aria-label="Reason for declining"
+                      className="w-full rounded-xl border border-rose-200 bg-rose-50/40 p-2.5 text-xs text-slate-900 outline-none focus:border-rose-500 dark:border-rose-900/50 dark:bg-rose-950/20 dark:text-white"
+                      onChange={(e) => setDeclineReason(e.target.value)}
+                      placeholder="Explain to the doctor why this fee proposal is declined (e.g. above hospital cap)..."
+                      rows={2}
+                      value={declineReason}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        className="inline-flex min-h-8 items-center rounded-lg bg-rose-600 px-3 text-xs font-bold text-white transition hover:bg-rose-700 disabled:opacity-60"
+                        disabled={activeActionId === req.id}
+                        onClick={() => handleDecline(req.id)}
+                        type="button"
+                      >
+                        {activeActionId === req.id ? "Declining…" : "Confirm Decline"}
+                      </button>
+                      <button
+                        className="inline-flex min-h-8 items-center rounded-lg border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        onClick={() => {
+                          setDecliningId(null);
+                          setDeclineReason("");
+                        }}
+                        type="button"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <button
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100 disabled:opacity-60 dark:border-rose-500/30 dark:bg-rose-950/40 dark:text-rose-300"
+                      disabled={activeActionId !== null}
+                      onClick={() => {
+                        setDecliningId(req.id);
+                        setDeclineReason("");
+                      }}
+                      type="button"
+                    >
+                      Decline
+                    </button>
+                    <button
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-4 text-xs font-bold text-white shadow-sm shadow-emerald-500/20 transition hover:from-emerald-500 hover:to-teal-500 disabled:opacity-60"
+                      disabled={activeActionId !== null}
+                      onClick={() => handleApprove(req.id)}
+                      type="button"
+                    >
+                      {activeActionId === req.id ? "Approving…" : "Approve & Activate Fee"}
+                    </button>
+                  </div>
+                )}
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {/* History section */}
+      {viewHistory && reviewedRequests.length > 0 && (
+        <div className="mt-5 border-t border-slate-200/80 pt-4 dark:border-slate-800">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Recent Fee Decisions
+          </h3>
+          <div className="mt-3 space-y-2">
+            {reviewedRequests.slice(0, 10).map((req) => (
+              <div
+                className="flex items-center justify-between rounded-xl border border-slate-100 bg-white/70 p-3 text-xs dark:border-slate-800/80 dark:bg-slate-800/50"
+                key={req.id}
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <strong className="text-slate-900 dark:text-white">
+                      {req.doctor.staffProfile.membership.displayName}
+                    </strong>
+                    <span className="text-slate-500">· {req.proposedName || req.service?.name || "Consultation"}</span>
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[9px] font-black uppercase ${
+                        req.status === "APPROVED"
+                          ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300"
+                          : "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                      }`}
+                    >
+                      {req.status}
+                    </span>
+                  </div>
+                  {req.rejectionReason && (
+                    <p className="mt-1 text-[11px] text-rose-600 dark:text-rose-400">
+                      Reason: {req.rejectionReason}
+                    </p>
+                  )}
+                  <p className="mt-0.5 text-[10px] text-slate-400">
+                    Reviewed by {req.reviewedBy?.displayName ?? "Admin"} on{" "}
+                    {req.reviewedAt ? new Date(req.reviewedAt).toLocaleDateString() : ""}
+                  </p>
+                </div>
+                <strong className="text-xs font-black text-slate-700 dark:text-slate-300">
+                  {new Intl.NumberFormat("en-PK", { style: "currency", currency: req.proposedCurrencyCode, maximumFractionDigits: 0 }).format(req.proposedPriceMinorUnits / 100)}
+                </strong>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -295,12 +624,44 @@ function ServiceCatalogue({ overview, onCreated }: { overview: ServiceOverview; 
   const [error, setError] = useState("");
 
   const isDoctorManaged = overview.configuration.doctorFeeAuthority === "DOCTOR";
-  const availableCategories = isDoctorManaged ? serviceCategories.filter((category) => category.code !== "CONSULTATION") : serviceCategories;
-  const selectedCategory = isDoctorManaged && form.category === "CONSULTATION" ? availableCategories[0]!.code : form.category;
+  const enabledModulesSet = useMemo(() => new Set(overview.enabledModules ?? []), [overview.enabledModules]);
+
+  const availableCategories = useMemo(() => {
+    return serviceCategories.filter((category) => {
+      // If the category requires an entitlement module that is not enabled in super admin, exclude it
+      if (category.requiredModule && !enabledModulesSet.has(category.requiredModule)) {
+        return false;
+      }
+      if (isDoctorManaged && category.code === "CONSULTATION") {
+        return false;
+      }
+      return true;
+    });
+  }, [enabledModulesSet, isDoctorManaged]);
+
+  const availableDesks = useMemo(() => {
+    return serviceDesks.filter((desk) => {
+      const reqMod = deskModuleMap[desk.code];
+      if (reqMod && !enabledModulesSet.has(reqMod)) {
+        return false;
+      }
+      return true;
+    });
+  }, [enabledModulesSet]);
+
+  const fallbackCategory = availableCategories[0]?.code ?? "CONSULTATION";
+  const selectedCategory = isDoctorManaged && form.category === "CONSULTATION"
+    ? fallbackCategory
+    : availableCategories.some((c) => c.code === form.category)
+    ? form.category
+    : fallbackCategory;
   const submittedCategory = !isDoctorManaged && form.doctorId ? "CONSULTATION" : selectedCategory;
   const generatedCode = nextServiceCode(submittedCategory, overview.services.map((service) => service.code));
   // "desk:RECEPTION" or "person:<membershipId>"; empty falls back to the category's desk.
-  const handlerValue = form.handler || `desk:${defaultDeskForCategory(submittedCategory)}`;
+  const defaultDeskForSubmitted = defaultDeskForCategory(submittedCategory);
+  const isDefaultDeskAvailable = availableDesks.some((d) => d.code === defaultDeskForSubmitted);
+  const fallbackDesk = isDefaultDeskAvailable ? defaultDeskForSubmitted : (availableDesks[0]?.code ?? "RECEPTION");
+  const handlerValue = form.handler || `desk:${fallbackDesk}`;
   const handlerPersonId = handlerValue.startsWith("person:") ? handlerValue.slice("person:".length) : "";
   const handlerPerson = overview.handlers.find((handler) => handler.id === handlerPersonId) ?? null;
   const handlerSummary = handlerPerson ? handlerPerson.displayName : deskLabel(handlerValue.slice("desk:".length) as WorkspaceCode);
@@ -331,21 +692,27 @@ function ServiceCatalogue({ overview, onCreated }: { overview: ServiceOverview; 
   // Paginate 6 entries per page as requested
   const servicePages = useWonFlowPagination(filteredServices, 6);
 
-  // Category filter options with counts
+  // Category filter options with counts — only include categories that have existing services or are entitled
   const categoryFilters = useMemo(() => {
     const counts = new Map<string, number>();
     for (const service of overview.services) {
       counts.set(service.category, (counts.get(service.category) ?? 0) + 1);
     }
+    const visibleCategories = serviceCategories.filter((c) => {
+      const count = counts.get(c.code) ?? 0;
+      if (count > 0) return true; // keep existing service categories filterable
+      if (c.requiredModule && !enabledModulesSet.has(c.requiredModule)) return false;
+      return true;
+    });
     return [
       { code: "ALL", label: "All services", count: overview.services.length },
-      ...serviceCategories.map((c) => ({
+      ...visibleCategories.map((c) => ({
         code: c.code,
         label: c.label,
         count: counts.get(c.code) ?? 0,
       })),
     ];
-  }, [overview.services]);
+  }, [overview.services, enabledModulesSet]);
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -370,7 +737,7 @@ function ServiceCatalogue({ overview, onCreated }: { overview: ServiceOverview; 
           currencyCode: "PKR",
         }),
       });
-      setForm({ codeMode: form.codeMode, code: "", name: "", category: isDoctorManaged ? "LABORATORY" : "CONSULTATION", handler: "", doctorId: "", branchId: "", duration: "15", price: "", publiclyBookable: false, billingOwner: "HOSPITAL", consultationModes: ["IN_PERSON"] });
+      setForm({ codeMode: form.codeMode, code: "", name: "", category: isDoctorManaged ? fallbackCategory : "CONSULTATION", handler: "", doctorId: "", branchId: "", duration: "15", price: "", publiclyBookable: false, billingOwner: "HOSPITAL", consultationModes: ["IN_PERSON"] });
       onCreated();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The service could not be created.");
@@ -550,7 +917,7 @@ function ServiceCatalogue({ overview, onCreated }: { overview: ServiceOverview; 
             <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">Who operates this service — a desk, or one named person.</p>
             <select aria-label="Handled by" className={fieldClass} onChange={(event) => setForm({ ...form, handler: event.target.value })} value={handlerValue}>
               <optgroup label="Desk">
-                {serviceDesks.map((desk) => <option key={desk.code} value={`desk:${desk.code}`}>{desk.label}</option>)}
+                {availableDesks.map((desk) => <option key={desk.code} value={`desk:${desk.code}`}>{desk.label}</option>)}
               </optgroup>
               {overview.handlers.length > 0 ? (
                 <optgroup label="Specific person">
@@ -636,6 +1003,7 @@ export function AdminDoctorServicePricingPage() {
         {(overview) => (
           <div className="space-y-4">
             <AuthoritySelector authority={overview.configuration.doctorFeeAuthority} onSaved={resource.reload} />
+            <PendingFeeRequestsPanel onActionCompleted={resource.reload} />
             <ServiceCatalogue onCreated={resource.reload} overview={overview} />
           </div>
         )}

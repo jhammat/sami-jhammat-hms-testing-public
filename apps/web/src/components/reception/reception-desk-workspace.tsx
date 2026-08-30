@@ -48,7 +48,6 @@ import {
   Check,
   CheckCircle2,
   ChevronRight,
-  Clock3,
   Copy,
   ExternalLink,
   FileText,
@@ -67,6 +66,7 @@ import {
   Video,
   X,
 } from "lucide-react";
+import { localDateOffsetByDays, todayLocalDate } from "@/lib/time/local-date";
 
 type Gender =
   | "Male"
@@ -284,7 +284,6 @@ const EMPTY_PATIENT_DRAFT:
     medicalAlert: "",
   };
 
-
 export const LEGACY_RECEPTION_SERVICES:
   readonly AdditionalService[] = [
     {
@@ -397,23 +396,8 @@ export const LEGACY_RECEPTION_SERVICES:
     },
   ];
 
-const RECENT_APPOINTMENTS:
-  readonly RecentAppointment[] = [];
-
 function getToday(): string {
-  const now =
-    new Date();
-
-  const localDate =
-    new Date(
-      now.getTime() -
-        now.getTimezoneOffset() *
-          60_000,
-    );
-
-  return localDate
-    .toISOString()
-    .slice(0, 10);
+  return todayLocalDate();
 }
 
 function formatMoney(
@@ -802,22 +786,6 @@ function BillingRow({
       </span>
     </div>
   );
-}
-
-function statusClassName(
-  status:
-    RecentAppointment["status"],
-): string {
-  switch (status) {
-    case "In Progress":
-      return "bg-emerald-50 text-emerald-700";
-
-    case "Arrived":
-      return "bg-blue-50 text-blue-700";
-
-    case "Completed":
-      return "bg-slate-100 text-slate-600";
-  }
 }
 
 function createAppointmentToken(): string {
@@ -1560,11 +1528,7 @@ export function ReceptionDeskWorkspace() {
     return selectedDoctor.consultationFee;
   }, [selectedConsultationService, selectedDoctor]);
 
-  const tomorrowDateString = useMemo(() => {
-    const tm = new Date();
-    tm.setDate(tm.getDate() + 1);
-    return tm.toISOString().slice(0, 10);
-  }, []);
+  const tomorrowDateString = useMemo(() => localDateOffsetByDays(1), []);
 
   const slotsData = useWonFlowAsyncData<ReceptionSlotsResult>({
     key: `slots:${selectedDoctorId}:${appointmentDate}:${selectedConsultationService?.durationMinutes ?? 20}:${selectedDoctor?.primaryBranchId ?? ""}`,
@@ -4383,100 +4347,6 @@ export function ReceptionDeskWorkspace() {
                   </div>
                 </section>
 
-                <section className="wf-recent-panel flex max-h-[150px] flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-[0_3px_14px_rgba(15,23,42,0.035)]">
-                  <SectionHeader
-                    icon={
-                      <Clock3
-                        size={14}
-                      />
-                    }
-                    title="Recent Appointments"
-                  />
-
-                  <div className="wf-scrollbar min-h-0 overflow-auto p-2.5">
-                    <table className="w-full min-w-[410px] text-left">
-                      <thead>
-                        <tr className="text-[7px] font-black uppercase tracking-[0.08em] text-slate-400">
-                          <th className="pb-1.5">
-                            Token
-                          </th>
-
-                          <th className="pb-1.5">
-                            Patient
-                          </th>
-
-                          <th className="pb-1.5">
-                            Doctor
-                          </th>
-
-                          <th className="pb-1.5">
-                            Time
-                          </th>
-
-                          <th className="pb-1.5">
-                            Status
-                          </th>
-                        </tr>
-                      </thead>
-
-                      <tbody>
-
-                        {RECENT_APPOINTMENTS.map(
-                          (
-                            appointment,
-                          ) => (
-                            <tr
-                              className="border-t border-slate-100 text-[8px] font-semibold text-slate-600"
-                              key={
-                                appointment.token
-                              }
-                            >
-                              <td className="py-1.5 font-black text-slate-900">
-                                {
-                                  appointment.token
-                                }
-                              </td>
-
-                              <td className="py-1.5">
-                                {
-                                  appointment.patient
-                                }
-                              </td>
-
-                              <td className="py-1.5">
-                                {
-                                  appointment.doctor
-                                }
-                              </td>
-
-                              <td className="py-1.5">
-                                {
-                                  appointment.time
-                                }
-                              </td>
-
-                              <td className="py-1.5">
-                                <span
-                                  className={[
-                                    "rounded-md px-1.5 py-0.5",
-                                    "text-[7px] font-black",
-                                    statusClassName(
-                                      appointment.status,
-                                    ),
-                                  ].join(" ")}
-                                >
-                                  {
-                                    appointment.status
-                                  }
-                                </span>
-                              </td>
-                            </tr>
-                          ),
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
               </div>
             </div>
 

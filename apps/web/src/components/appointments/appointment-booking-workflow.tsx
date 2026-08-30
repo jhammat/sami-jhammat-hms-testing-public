@@ -19,6 +19,7 @@ import {
   WonFlowOperationalPanel,
   WonFlowPageHeader,
 } from "@/components/workspace";
+import { todayLocalDate } from "@/lib/time/local-date";
 
 /**
  * A real booking against the live database — patients, doctors and slots
@@ -87,7 +88,7 @@ function formatSlotLabel(slot: AppointmentSlot): string {
 }
 
 function todayDateInputValue(): string {
-  return new Date().toISOString().slice(0, 10);
+  return todayLocalDate();
 }
 
 export function AppointmentBookingWorkflow({

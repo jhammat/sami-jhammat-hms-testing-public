@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { CalendarDays, CheckCircle2, Loader2, MapPin, Stethoscope, TriangleAlert, User, Video } from "lucide-react";
+import { todayLocalDate } from "@/lib/time/local-date";
 
 interface DoctorOption {
   id: string;
@@ -27,7 +28,7 @@ interface SlotOption {
 }
 
 function todayIsoDate(): string {
-  return new Date().toISOString().slice(0, 10);
+  return todayLocalDate();
 }
 
 function formatSlotTime(startsAt: string): string {

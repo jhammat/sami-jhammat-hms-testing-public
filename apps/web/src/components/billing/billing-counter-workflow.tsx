@@ -43,7 +43,6 @@ import {
   useRecordPayment,
 } from "@/lib/api/billing";
 import type { BillingPaymentMethod, InvoiceRecord } from "@/lib/api/billing";
-import type { DiagnosticOrder } from "@/components/diagnostics";
 
 interface DraftLine {
   key: string;
@@ -383,39 +382,78 @@ function CalculatorModal({
   );
 }
 
-const PRESET_CATEGORIES = [
-  {
-    category: "Laboratory",
-    items: [
-      { name: "CBC Blood Test (Laboratory)", price: "800", dept: "Laboratory" },
-      { name: "LFT / Liver Function (Laboratory)", price: "1200", dept: "Laboratory" },
-      { name: "Urinary Routine Exam (Laboratory)", price: "400", dept: "Laboratory" },
-      { name: "Blood Glucose Fasting (Laboratory)", price: "250", dept: "Laboratory" },
-      { name: "Lipid Profile (Laboratory)", price: "1500", dept: "Laboratory" },
-      { name: "Thyroid Profile / TSH (Laboratory)", price: "1800", dept: "Laboratory" },
-    ],
-  },
-  {
-    category: "Radiology & Imaging",
-    items: [
-      { name: "Chest X-Ray PA View (Radiology)", price: "1500", dept: "Radiology" },
-      { name: "Abdominal Ultrasound (Radiology)", price: "2500", dept: "Radiology" },
-      { name: "Pelvic Ultrasound (Radiology)", price: "2200", dept: "Radiology" },
-      { name: "CT Brain Plain (Radiology)", price: "7500", dept: "Radiology" },
-      { name: "MRI Spine (Radiology)", price: "12000", dept: "Radiology" },
-    ],
-  },
-  {
-    category: "Procedures & Cardiology",
-    items: [
-      { name: "ECG 12-Lead (Cardiology)", price: "1000", dept: "Cardiology" },
-      { name: "Echocardiography (Cardiology)", price: "4500", dept: "Cardiology" },
-      { name: "Nebulization Session (OPD)", price: "500", dept: "OPD" },
-      { name: "Wound Dressing / Suturing (Minor OT)", price: "1500", dept: "Minor OT" },
-      { name: "General OPD Consultation Fee", price: "1000", dept: "Consultation" },
-    ],
-  },
-];
+/**
+ * The billable catalogue comes from the hospital's own ServiceDefinition
+ * records, never from a list in this file.
+ *
+ * What used to live here was sixteen invented services with invented prices —
+ * "CBC Blood Test PKR 800", "MRI Spine PKR 12000" — rendered under the
+ * heading "Hospital Catalog" and clickable straight onto a real invoice. No
+ * hospital using this product charged those amounts, and several of those
+ * services did not exist at all in the tenants that shipped it. A cashier
+ * had no way to tell the fabricated rows from their employer's real prices.
+ *
+ * `/api/v1/reception/catalog` returns the real, admin-maintained catalogue
+ * and needs only `appointments.read`, which the billing role already holds.
+ */
+/**
+ * Exactly what `/api/v1/billing/diagnostic-orders` returns.
+ *
+ * Narrower than the clinical `DiagnosticOrder` on purpose: the billing
+ * counter is not given results, specimens or attachments, so it must not be
+ * typed as though it were.
+ */
+/**
+ * The hospital's own price for a doctor-ordered test, or null.
+ *
+ * This used to be a keyword ladder: a name containing "ct" billed 7,500, "mri"
+ * billed 12,000, "cbc" billed 800. Those numbers were invented, applied to a
+ * real invoice line without the cashier typing them, and matched on substrings
+ * loose enough that "Tacrolimus trough level" contains no "ct" but
+ * "Coagulation screen" does. A test the hospital has not priced now returns
+ * null and the cashier enters the figure, which is the only honest answer.
+ */
+function priceForOrder(
+  order: { name: string; code: string },
+  services: CatalogService[],
+): number | null {
+  const name = order.name.trim().toLowerCase();
+  const code = order.code.trim().toLowerCase();
+
+  const exact = services.find(
+    (service) => service.name.trim().toLowerCase() === name || service.id.toLowerCase() === code,
+  );
+  if (exact) return exact.price;
+
+  // A single unambiguous containment match is still the hospital's own price.
+  const contains = services.filter((service) => {
+    const candidate = service.name.trim().toLowerCase();
+    return candidate.includes(name) || name.includes(candidate);
+  });
+
+  return contains.length === 1 ? contains[0]!.price : null;
+}
+
+interface BillableDiagnosticOrder {
+  id: string;
+  type: string;
+  status: string;
+  code: string;
+  name: string;
+  accessionNumber: string | null;
+  orderedAt: string | null;
+  createdAt: string;
+  patient: { id: string; patientNumber: string; givenName: string; familyName: string };
+}
+
+interface CatalogService {
+  id: string;
+  name: string;
+  category: string | null;
+  /** Major units — the endpoint has already divided by 100. */
+  price: number;
+}
+
 
 export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?: string }) {
   const session = useWonFlowSession();
@@ -456,9 +494,11 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
     account?: string;
   } | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
+  const [catalogServices, setCatalogServices] = useState<CatalogService[]>([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
 
   // Pending Doctor Orders
-  const [pendingOrders, setPendingOrders] = useState<DiagnosticOrder[]>([]);
+  const [pendingOrders, setPendingOrders] = useState<BillableDiagnosticOrder[]>([]);
 
   // Invoices list & pagination
   const [invoiceSearchQuery, setInvoiceSearchQuery] = useState("");
@@ -483,17 +523,47 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
     return () => clearTimeout(timer);
   }, [patientId, patients.data?.patients]);
 
-  // Fetch pending doctor orders for the hospital
+  /**
+   * Whether the worklist refused us rather than returning nothing.
+   *
+   * Without this the panel below simply never rendered, so a billing user
+   * had no way to tell "no tests were ordered today" from "your account is
+   * not allowed to see ordered tests" — the feature looked absent instead
+   * of blocked.
+   */
+  const [ordersBlocked, setOrdersBlocked] = useState(false);
+
+  /**
+   * Pending doctor orders, so the counter can bill for what was ordered.
+   *
+   * This reads `/api/v1/billing/diagnostic-orders`, which projects only what
+   * an invoice line needs — what was ordered, for whom, when. It used to read
+   * the laboratory and radiology worklist instead, which carries released
+   * results; the billing role is correctly refused that, so the request
+   * answered 403 on every load and this panel could never populate. Billing
+   * has no business reading a result, so the fix was a billing-scoped
+   * endpoint rather than a wider clinical role.
+   */
   const fetchPendingOrders = useCallback(async () => {
     try {
-      const today = new Date().toISOString().slice(0, 10);
-      const [labRes, radRes] = await Promise.all([
-        fetch(`/api/v1/diagnostics/worklist?type=LABORATORY&date=${today}`, { credentials: "same-origin", cache: "no-store" }).then((r) => (r.ok ? r.json() : { orders: [] })),
-        fetch(`/api/v1/diagnostics/worklist?type=RADIOLOGY&date=${today}`, { credentials: "same-origin", cache: "no-store" }).then((r) => (r.ok ? r.json() : { orders: [] })),
-      ]);
-      const combined: DiagnosticOrder[] = [...(labRes.orders ?? []), ...(radRes.orders ?? [])];
-      const waiting = combined.filter((o) => o.status === "ORDERED" || o.status === "ACCEPTED");
-      setPendingOrders(waiting);
+      const response = await fetch("/api/v1/billing/diagnostic-orders", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+
+      // Read the body on every outcome. An unread body leaves the request
+      // open in the browser, which used to stop this screen ever reaching
+      // network idle and hung its load for a minute and a half.
+      const payload = await response.json().catch(() => null);
+
+      if (response.status === 403) {
+        setOrdersBlocked(true);
+        setPendingOrders([]);
+        return;
+      }
+
+      setOrdersBlocked(false);
+      setPendingOrders(response.ok && payload ? ((payload.orders ?? []) as BillableDiagnosticOrder[]) : []);
     } catch {
       setPendingOrders([]);
     }
@@ -505,6 +575,36 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
     }, 0);
     return () => clearTimeout(timer);
   }, [fetchPendingOrders]);
+
+  /** The hospital's real billable services, for the catalogue strip. */
+  useEffect(() => {
+    let active = true;
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/v1/reception/catalog", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        const payload = await response.json().catch(() => null);
+        if (!active) return;
+
+        if (response.ok && payload?.services) {
+          setCatalogServices(
+            (payload.services as CatalogService[]).filter((service) => service.price > 0),
+          );
+        }
+      } catch {
+        // The catalogue strip stays empty; custom lines still work.
+      } finally {
+        if (active) setCatalogLoaded(true);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Doctor orders relevant for the selected patient
   const patientPrescribedOrders = useMemo(() => {
@@ -518,7 +618,7 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
 
   // Group all pending orders by patient for arriving queue
   const arrivingPatientsWithOrders = useMemo(() => {
-    const map = new Map<string, { patient: DiagnosticOrder["patient"]; orders: DiagnosticOrder[] }>();
+    const map = new Map<string, { patient: BillableDiagnosticOrder["patient"]; orders: BillableDiagnosticOrder[] }>();
     for (const ord of pendingOrders) {
       const key = ord.patient.patientNumber;
       if (!map.has(key)) {
@@ -567,23 +667,17 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
   const addAllDoctorOrders = () => {
     if (!patientPrescribedOrders.length) return;
     const newItems = patientPrescribedOrders.map((order) => {
-      let price = "1000";
-      const lower = order.name.toLowerCase();
-      if (lower.includes("ct") || lower.includes("computed")) price = "7500";
-      else if (lower.includes("mri")) price = "12000";
-      else if (lower.includes("x-ray") || lower.includes("xray")) price = "1500";
-      else if (lower.includes("ultrasound")) price = "2500";
-      else if (lower.includes("cbc")) price = "800";
-      else if (lower.includes("lft")) price = "1200";
-      else if (lower.includes("urine")) price = "400";
-      else if (lower.includes("sugar") || lower.includes("glucose")) price = "250";
+      const listed = priceForOrder(order, catalogServices);
+      const price = listed === null ? "" : String(listed);
 
       return {
         key: crypto.randomUUID(),
         description: `[Doctor Prescribed] ${order.name} (${order.code})`,
         quantity: "1",
+        // Blank where the hospital has not published a price for this test,
+        // so the cashier has to enter it rather than invoice a guess.
         unitPricePkr: price,
-        department: order.specimenOrBodySite ?? "Diagnostics",
+        department: order.type === "RADIOLOGY" ? "Radiology" : "Laboratory",
         orderId: order.id,
         isDoctorPrescribed: true,
       };
@@ -832,13 +926,27 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
     return filteredInvoices.slice(start, start + pageSize);
   }, [filteredInvoices, currentPage, pageSize]);
 
-  // Available Presets Filtered by category
-  const activePresets = useMemo(() => {
-    if (selectedCategory === "All") {
-      return PRESET_CATEGORIES.flatMap((c) => c.items);
+  /** Categories are whatever this hospital actually uses, in its own words. */
+  const catalogCategories = useMemo(() => {
+    const seen = new Set<string>();
+    for (const service of catalogServices) {
+      if (service.category?.trim()) seen.add(service.category.trim());
     }
-    return PRESET_CATEGORIES.find((c) => c.category === selectedCategory)?.items ?? [];
-  }, [selectedCategory]);
+    return ["All", ...[...seen].sort((a, b) => a.localeCompare(b))];
+  }, [catalogServices]);
+
+  const activePresets = useMemo(() => {
+    const source =
+      selectedCategory === "All"
+        ? catalogServices
+        : catalogServices.filter((service) => service.category?.trim() === selectedCategory);
+
+    return source.map((service) => ({
+      name: service.name,
+      price: String(service.price),
+      dept: service.category ?? "Service",
+    }));
+  }, [catalogServices, selectedCategory]);
 
   return (
     <div className="w-full space-y-4 px-2 sm:px-4 pb-8">
@@ -1192,6 +1300,17 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
                     </div>
                   ) : null}
 
+                  {!selectedPatientRecord && ordersBlocked && (
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs leading-5 text-slate-600 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+                      <span className="font-bold text-slate-800 dark:text-slate-100">
+                        Doctor-ordered tests are not shown on this account.
+                      </span>{" "}
+                      Listing them needs &ldquo;billing.invoices.manage&rdquo;, which this account
+                      does not hold. Ask your administrator to add it to your role. You can still
+                      invoice these tests by adding them as line items in the meantime.
+                    </div>
+                  )}
+
                   {/* Arrived Patients with Pending Doctor Prescriptions Queue */}
                   {!selectedPatientRecord && arrivingPatientsWithOrders.length > 0 && (
                     <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-2.5">
@@ -1269,16 +1388,9 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
 
                 <div className="grid gap-2 sm:grid-cols-2 max-h-40 overflow-y-auto pr-1">
                   {patientPrescribedOrders.map((order) => {
-                    const isLab = order.specimenOrBodySite !== "Study";
-                    let estPrice = "1000";
-                    const lower = order.name.toLowerCase();
-                    if (lower.includes("ct")) estPrice = "7500";
-                    else if (lower.includes("mri")) estPrice = "12000";
-                    else if (lower.includes("x-ray")) estPrice = "1500";
-                    else if (lower.includes("ultrasound")) estPrice = "2500";
-                    else if (lower.includes("cbc")) estPrice = "800";
-                    else if (lower.includes("lft")) estPrice = "1200";
-                    else if (lower.includes("urine")) estPrice = "400";
+                    const isLab = order.type !== "RADIOLOGY";
+                    const listed = priceForOrder(order, catalogServices);
+                    const estPrice = listed === null ? "" : String(listed);
 
                     return (
                       <div
@@ -1288,10 +1400,18 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
                         <div className="min-w-0 pr-2">
                           <div className="flex items-center gap-1 text-[10px] font-black uppercase text-indigo-600">
                             {isLab ? <FlaskConical size={11} /> : <ScanLine size={11} />}
-                            {order.specimenOrBodySite ?? (isLab ? "Lab" : "Radiology")}
+                            {isLab ? "Laboratory" : "Radiology"}
                           </div>
                           <h4 className="font-bold text-slate-900 text-xs truncate mt-0.5">{order.name}</h4>
-                          <span className="text-xs font-mono font-bold text-indigo-700">PKR {estPrice}</span>
+                          {listed === null ? (
+                            <span className="text-xs font-bold text-amber-700">
+                              Not priced — enter the amount
+                            </span>
+                          ) : (
+                            <span className="text-xs font-mono font-bold text-indigo-700">
+                              PKR {estPrice}
+                            </span>
+                          )}
                         </div>
 
                         <button
@@ -1300,7 +1420,7 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
                             addPresetLine({
                               name: `[Doctor Prescribed] ${order.name} (${order.code})`,
                               price: estPrice,
-                              dept: order.specimenOrBodySite ?? "Diagnostics",
+                              dept: isLab ? "Laboratory" : "Radiology",
                               orderId: order.id,
                               isDoctor: true,
                             })
@@ -1323,12 +1443,12 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
                   <h3 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
                     <Layers size={16} className="text-indigo-600" /> Hospital Catalog (Add Extra Tests)
                   </h3>
-                  <p className="text-xs text-slate-400 font-medium">Click any test or procedure to add to bill</p>
+                  <p className="text-xs text-slate-400 font-medium">Your hospital&apos;s published services and prices — click to add to the bill</p>
                 </div>
 
                 {/* Category Pills */}
                 <div className="flex items-center gap-1">
-                  {["All", "Laboratory", "Radiology & Imaging", "Procedures & Cardiology"].map((cat) => (
+                  {catalogCategories.map((cat) => (
                     <button
                       className={`rounded-lg px-2.5 py-1 text-xs font-bold transition ${
                         selectedCategory === cat
@@ -1339,13 +1459,23 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
                       onClick={() => setSelectedCategory(cat)}
                       type="button"
                     >
-                      {cat.split(" ")[0]}
+                      {cat}
                     </button>
                   ))}
                 </div>
               </div>
 
               {/* Service Chips */}
+              {catalogLoaded && catalogServices.length === 0 ? (
+                <p className="rounded-xl border border-slate-200 bg-slate-50 p-2.5 text-xs leading-5 text-slate-600">
+                  <span className="font-bold text-slate-800">
+                    No priced services are published yet.
+                  </span>{" "}
+                  Ask your administrator to add them under Services, and they will appear here with
+                  the hospital&apos;s own prices. You can still bill by adding custom lines below.
+                </p>
+              ) : null}
+
               <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
                 {activePresets.map((preset) => (
                   <button

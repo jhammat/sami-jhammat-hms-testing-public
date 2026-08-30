@@ -187,7 +187,17 @@ export async function getPatientBookingCatalog(requestContext: WonFlowRequestCon
 
   const rules = candidateRules.filter((rule) => rule.doctor.publiclyBookable && rule.serviceId !== null && rule.service?.isActive === true && rule.service.publiclyBookable);
 
-  const dayStart = new Date(`${date}T00:00:00.000Z`), dayEnd = new Date(`${date}T23:59:59.999Z`);
+  // Padded a day either side of the UTC date on purpose.
+  //
+  // The rules behind these slots can belong to branches in different
+  // timezones, so there is no single local day to bound this by. A plain
+  // UTC day missed appointments sitting in the hospital's own early hours
+  // — at UTC+5 anything before 05:00 local — and a missed appointment here
+  // shows its slot as free, which is a double booking. The reservation
+  // check below compares exact instants, so this only has to be a
+  // superset; being wider costs a few rows and cannot select wrongly.
+  const dayStart = new Date(new Date(`${date}T00:00:00.000Z`).getTime() - 86_400_000),
+    dayEnd = new Date(new Date(`${date}T23:59:59.999Z`).getTime() + 86_400_000);
   const appointments = rules.length === 0
     ? []
     : await database.appointment.findMany({ where: { tenantId: context.tenantId, doctorId: { in: [...new Set(rules.map((rule) => rule.doctorId))] }, startsAt: { lte: dayEnd }, endsAt: { gte: dayStart }, status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_QUEUE", "IN_PROGRESS"] } }, select: { doctorId: true, startsAt: true, endsAt: true } });

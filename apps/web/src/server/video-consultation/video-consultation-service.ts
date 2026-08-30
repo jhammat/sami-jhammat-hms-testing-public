@@ -37,13 +37,23 @@ async function resolveParticipant(requestContext: WonFlowRequestContext, appoint
   if (!role) throw new WonFlowApiError(403, "video-call-access-denied", "Only the booked patient and assigned doctor can access this video consultation.");
   if (["CANCELLED", "NO_SHOW"].includes(appointment.status)) throw new WonFlowApiError(409, "appointment-not-active", "This appointment is no longer active.");
 
-  // If appointment was booked without online consultation mode, upgrade it gracefully
+  // An in-person appointment has no video room, and asking for one does not
+  // create it.
+  //
+  // This used to "upgrade the appointment gracefully": any GET on the video
+  // endpoint rewrote `consultationMode` to ONLINE and handed back a room.
+  // That was wrong twice over. A read mutated a clinical record, so merely
+  // opening a URL changed the booking. And it changed the one field the
+  // hospital uses to decide whether to expect the patient through the door
+  // — a patient who booked an in-person visit could silently convert it to
+  // a video call and simply not turn up, with no clinician action and no
+  // trace beyond the row itself.
   if (appointment.consultationMode !== "ONLINE") {
-    await database.appointment.update({
-      where: { id: appointment.id },
-      data: { consultationMode: "ONLINE" },
-    });
-    appointment.consultationMode = "ONLINE";
+    throw new WonFlowApiError(
+      409,
+      "appointment-not-online",
+      "This booking is not an online consultation, so it has no video room. Ask reception to rebook it as a video consultation.",
+    );
   }
 
   return { context, appointment, role };
@@ -89,7 +99,15 @@ function accessWindow(startsAt: Date, endsAt: Date, status?: string) {
   const closesAt = new Date(endsAt.getTime() + JOIN_LATE_MINUTES * 60_000);
   const now = new Date();
   const isActiveAppointment = status ? !["CANCELLED", "NO_SHOW", "COMPLETED"].includes(status) : true;
-  return { opensAt, closesAt, canJoin: isActiveAppointment || (now >= opensAt && now <= closesAt) };
+
+  // Both conditions, not either. This read `isActiveAppointment || inWindow`,
+  // which made the window it had just computed meaningless: any appointment
+  // that was not cancelled, missed or completed counted as joinable at any
+  // moment, so a room for next Tuesday accepted a join and WebRTC signalling
+  // today. The appointment must be live AND the clock must be inside the
+  // room's window.
+  const inWindow = now >= opensAt && now <= closesAt;
+  return { opensAt, closesAt, canJoin: isActiveAppointment && inWindow };
 }
 
 function iceServers() {
@@ -186,9 +204,21 @@ export async function sendVideoSignal(requestContext: WonFlowRequestContext, app
   if (!(["SDP_OFFER", "SDP_ANSWER", "ICE_CANDIDATE"] as string[]).includes(input.type)) throw new WonFlowApiError(400, "invalid-video-signal", "The call signal type is invalid.");
   const serialized = JSON.stringify(input.payload);
   if (serialized.length > 65_536) throw new WonFlowApiError(413, "video-signal-too-large", "The call signal is too large.");
-  let session = await database.videoCallSession.findUnique({ where: { appointmentId } });
+  // A signal never opens or reopens a room by itself.
+  //
+  // This used to call `joinVideoConsultation` whenever the session was
+  // missing or ENDED, so a stray ICE candidate arriving after the clinician
+  // hung up silently resurrected the call and started accepting traffic
+  // again. Joining is an explicit act with its own endpoint and its own
+  // audit entry; signalling is not a way to perform it implicitly.
+  const session = await database.videoCallSession.findUnique({ where: { appointmentId } });
+
   if (!session || session.status === "ENDED") {
-    session = await joinVideoConsultation(requestContext, appointmentId);
+    throw new WonFlowApiError(
+      409,
+      "video-call-not-open",
+      "This call is not open. Join the consultation first, then try again.",
+    );
   }
   return database.videoCallSignal.create({
     data: {

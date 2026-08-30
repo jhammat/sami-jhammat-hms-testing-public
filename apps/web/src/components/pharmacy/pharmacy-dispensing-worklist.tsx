@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+import { useWonFlowSession } from "@/app/_providers";
 import {
   AlertCircle,
   AlertTriangle,
@@ -112,6 +114,7 @@ interface PosCartItem {
 // -------------------------------------------------------------
 
 export function PharmacyDispensingWorklist() {
+  const session = useWonFlowSession();
   const [activeTab, setActiveTab] = useState<"billing" | "stock" | "history">("billing");
   const [medications, setMedications] = useState<PharmacyMedication[]>([]);
   const [loadingMeds, setLoadingMeds] = useState(true);
@@ -240,10 +243,20 @@ export function PharmacyDispensingWorklist() {
   }, [isReceivedValid, receivedNum, netTotalPkr]);
 
   // Add Item to Cart
+  /*
+   * `unitPrice` defaults to 0, not 15.
+   *
+   * It used to default to fifteen rupees, and every quick tile passed that
+   * literal in — so a pharmacist adding Enoxaparin, Tacrolimus and Creon to a
+   * bill got PKR 15.00 each, on a counter that takes real money. There is no
+   * price column on `Medication` for it to have read instead, so the honest
+   * behaviour is to leave the line unpriced and make the pharmacist enter the
+   * amount. The unit price cell in the cart is already editable.
+   */
   function handleAddToCart(
     med: PharmacyMedication,
     requestedQty: number = 10,
-    unitPrice: number = 15,
+    unitPrice: number = 0,
     customInstructions?: string,
   ) {
     const validQty = Math.max(1, requestedQty);
@@ -496,10 +509,10 @@ export function PharmacyDispensingWorklist() {
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-base font-black text-slate-950 dark:text-white sm:text-lg">
-                  WonFlow Standalone Pharmacy POS & Dispensary
+                  {session?.orgLabel ? `${session.orgLabel} — Pharmacy` : "Pharmacy counter"}
                 </h1>
                 <span className="rounded-lg bg-emerald-50 px-2 py-0.5 text-[11px] font-black uppercase tracking-wider text-emerald-800 dark:bg-emerald-950/70 dark:text-emerald-300">
-                  🏥 100% Standalone Pharmacy Counter
+                  Dispensing &amp; counter sales
                 </span>
               </div>
               <p className="mt-0.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
@@ -709,13 +722,13 @@ export function PharmacyDispensingWorklist() {
                       <button
                         key={med.id}
                         type="button"
-                        onClick={() => handleAddToCart(med, quickAddQty, 15)}
+                        onClick={() => handleAddToCart(med, quickAddQty)}
                         className="flex items-center justify-between rounded-xl border border-slate-200 bg-slate-50/70 p-2.5 text-left text-xs transition hover:border-emerald-400 hover:bg-emerald-50/50"
                       >
                         <div className="truncate">
                           <div className="truncate font-black text-slate-900">{med.brandName || med.genericName}</div>
                           <div className="text-[10px] text-slate-500">
-                            PKR 15.00 • {stock} in stock
+                            {stock} in stock · price set at the counter
                           </div>
                         </div>
                         <span className="shrink-0 rounded bg-emerald-600 px-2 py-1 text-[10px] font-black text-white">
@@ -857,9 +870,15 @@ export function PharmacyDispensingWorklist() {
                             <input
                               type="number"
                               min="0"
-                              value={item.unitPricePkr}
+                              value={item.unitPricePkr || ""}
+                              placeholder="0"
                               onChange={(e) => handleSetCartItemUnitPrice(item.cartId, parseFloat(e.target.value))}
-                              className="h-6 w-14 rounded border border-slate-200 text-center text-xs font-bold text-slate-900"
+                              aria-label={`Unit price for ${item.medicationName}`}
+                              className={`h-6 w-14 rounded border text-center text-xs font-bold text-slate-900 ${
+                                item.unitPricePkr > 0
+                                  ? "border-slate-200"
+                                  : "border-amber-400 bg-amber-50"
+                              }`}
                             />
                           </div>
                           <span className="text-xs font-black text-slate-950 dark:text-white">
@@ -1586,6 +1605,7 @@ function PosReceiptModal({
   receipt: PosSaleReceipt;
   onClose: () => void;
 }) {
+  const session = useWonFlowSession();
   const [printFormat, setPrintFormat] = useState<"80mm_thermal" | "standard_a4">("80mm_thermal");
 
   function handlePrint() {
@@ -1665,11 +1685,24 @@ function PosReceiptModal({
               className="w-[300px] bg-white p-4 font-mono text-xs text-slate-950 shadow-md border border-slate-200 rounded-xl"
               style={{ fontFamily: "'Courier New', Courier, monospace" }}
             >
+              {/* The hospital's own identity, from the signed-in session.
+
+                  This header used to be four fixed lines: "WONFLOW PHARMACY &
+                  POS", a made-up branch name, a made-up telephone number, and
+                  — worst of all — "NTN: 8947291-3 • STRN: 3277876". Those are
+                  Pakistani tax registration numbers, printed on a cash memo
+                  that is a financial document. Inventing them is not a
+                  cosmetic default. There is nowhere in the data model to
+                  store a tenant's real NTN or STRN yet, so the receipt now
+                  omits the line rather than fabricating it. */}
               <div className="text-center border-b border-dashed border-slate-400 pb-3">
-                <h2 className="text-sm font-black tracking-tight">WONFLOW PHARMACY & POS</h2>
-                <p className="text-[10px]">Medical Complex Dispensary</p>
-                <p className="text-[10px]">NTN: 8947291-3 • STRN: 3277876</p>
-                <p className="text-[10px]">Tel: +92 (042) 111-966-356</p>
+                <h2 className="text-sm font-black tracking-tight">
+                  {(session?.orgLabel ?? "Pharmacy").toUpperCase()}
+                </h2>
+                {session?.branchLabel ? (
+                  <p className="text-[10px]">{session.branchLabel}</p>
+                ) : null}
+                <p className="text-[10px]">Pharmacy dispensation receipt</p>
               </div>
 
               <div className="my-2 space-y-0.5 text-[10px] border-b border-dashed border-slate-400 pb-2">
@@ -1754,9 +1787,13 @@ function PosReceiptModal({
             >
               <div className="flex items-start justify-between border-b-2 border-slate-900 pb-4">
                 <div>
-                  <h2 className="text-base font-black text-slate-950">WONFLOW PHARMACY & DISPENSARY</h2>
-                  <p className="text-xs text-slate-600">Official Point of Sale Cash Memo & Dispensation Receipt</p>
-                  <p className="text-[11px] text-slate-500">NTN: 8947291-3 • STRN: 3277876 • 24/7 Service</p>
+                  <h2 className="text-base font-black text-slate-950">
+                    {(session?.orgLabel ?? "Pharmacy").toUpperCase()}
+                  </h2>
+                  <p className="text-xs text-slate-600">Cash memo and dispensation receipt</p>
+                  {session?.branchLabel ? (
+                    <p className="text-[11px] text-slate-500">{session.branchLabel}</p>
+                  ) : null}
                 </div>
                 <div className="text-right">
                   <span className="rounded bg-emerald-50 px-2 py-0.5 font-mono text-xs font-bold text-emerald-800">

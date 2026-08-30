@@ -1,9 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { useWonFlowSession } from "@/app/_providers";
-import { useInvoice } from "@/lib/api/billing";
+import { useInvoice, useInvoices } from "@/lib/api/billing";
 import { useRefunds, useRequestRefund, useApproveRefund } from "@/lib/api/billing";
 import type { RefundStatus } from "@/lib/api/billing";
 
@@ -19,14 +19,45 @@ const STATUS_TONE: Record<RefundStatus, string> = {
   CANCELLED: "bg-slate-100 text-slate-500 border-slate-200",
 };
 
+/**
+ * Refunds are raised against an invoice the cashier picks from a list.
+ *
+ * This panel used to open with two text boxes labelled "Invoice ID" and
+ * "Payment ID", each expecting a raw uuid typed by hand. Nobody at a counter
+ * has those, and there was nowhere on the screen to find them — the refund
+ * desk was effectively unusable without a database client open beside it.
+ */
 function RequestRefundPanel() {
   const [invoiceId, setInvoiceId] = useState("");
   const [paymentId, setPaymentId] = useState("");
   const [amountPkr, setAmountPkr] = useState("");
   const [reason, setReason] = useState("");
   const [error, setError] = useState("");
+  const [query, setQuery] = useState("");
+
+  // Only a paid or part-paid invoice can be refunded; a draft has taken no
+  // money, so listing it would only offer a dead end.
+  const paidInvoices = useInvoices({ status: "PAID" });
+  const partialInvoices = useInvoices({ status: "PARTIALLY_PAID" });
+
   const invoice = useInvoice(invoiceId);
   const requestRefund = useRequestRefund();
+
+  const refundable = useMemo(() => {
+    const all = [
+      ...(paidInvoices.data?.invoices ?? []),
+      ...(partialInvoices.data?.invoices ?? []),
+    ].filter((candidate) => candidate.paidMinor > 0);
+
+    const term = query.trim().toLowerCase();
+    if (!term) return all.slice(0, 25);
+
+    return all
+      .filter((candidate) => candidate.invoiceNumber.toLowerCase().includes(term))
+      .slice(0, 25);
+  }, [paidInvoices.data, partialInvoices.data, query]);
+
+  const selected = refundable.find((candidate) => candidate.id === invoiceId);
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -37,7 +68,7 @@ function RequestRefundPanel() {
     if (!reason.trim()) { setError("A reason is required to request a refund."); return; }
     try {
       await requestRefund.mutate({ invoiceId, paymentId, amountMinor, reason: reason.trim() });
-      setPaymentId(""); setAmountPkr(""); setReason("");
+      setPaymentId(""); setAmountPkr(""); setReason(""); setInvoiceId(""); setQuery("");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "The refund could not be requested.");
     }
@@ -47,22 +78,97 @@ function RequestRefundPanel() {
     <form className="space-y-3 rounded-3xl border border-slate-200 bg-white p-5" onSubmit={submit}>
       <h2 className="text-lg font-black">Request a refund</h2>
       {error ? <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm font-bold text-red-700">{error}</div> : null}
-      <label className="block text-xs font-bold">Invoice ID
-        <input className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2" onChange={(event) => setInvoiceId(event.target.value.trim())} value={invoiceId} />
+      <label className="block text-xs font-bold">Find the invoice
+        <input
+          className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 font-normal"
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="Search by invoice number"
+          value={query}
+        />
       </label>
+
+      {refundable.length === 0 ? (
+        <p className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+          {paidInvoices.status === "loading" || partialInvoices.status === "loading"
+            ? "Loading invoices…"
+            : query.trim()
+              ? "No paid invoice matches that number."
+              : "No paid or part-paid invoice is available to refund."}
+        </p>
+      ) : (
+        <div className="max-h-44 space-y-1 overflow-y-auto pr-1">
+          {refundable.map((candidate) => {
+            const isSelected = candidate.id === invoiceId;
+
+            return (
+              <button
+                className={`flex w-full items-center justify-between gap-3 rounded-xl border px-3 py-2 text-left text-xs transition ${
+                  isSelected
+                    ? "border-indigo-400 bg-indigo-50"
+                    : "border-slate-200 bg-white hover:border-indigo-200 hover:bg-slate-50"
+                }`}
+                key={candidate.id}
+                onClick={() => {
+                  setInvoiceId(candidate.id);
+                  setPaymentId("");
+                  setAmountPkr("");
+                }}
+                type="button"
+              >
+                <span className="min-w-0">
+                  <span className="block truncate font-black text-slate-900">
+                    {candidate.invoiceNumber}
+                  </span>
+                  <span className="block text-[10px] font-medium text-slate-500">
+                    {minorToPkr(candidate.paidMinor)} collected of{" "}
+                    {minorToPkr(candidate.totalMinor)}
+                    {candidate.paidMinor < candidate.totalMinor ? " · part paid" : ""}
+                  </span>
+                </span>
+
+                {isSelected ? (
+                  <span className="shrink-0 rounded-full bg-indigo-600 px-2 py-0.5 text-[9px] font-black uppercase text-white">
+                    Selected
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {invoice.status === "success" && invoice.data?.invoice ? (
         <div className="rounded-xl bg-slate-50 p-3 text-xs">
+          <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+            Payments on {selected?.invoiceNumber ?? invoice.data.invoice.invoiceNumber}
+          </p>
           <p className="font-bold">{invoice.data.invoice.invoiceNumber} · {invoice.data.invoice.status} · paid {minorToPkr(invoice.data.invoice.paidMinor)}</p>
           {(invoice.data.invoice.payments ?? []).map((payment) => (
-            <button className="mt-1 block w-full rounded-lg border border-slate-200 px-2 py-1 text-left hover:bg-white" key={payment.id} onClick={() => setPaymentId(payment.id)} type="button">
-              Payment {payment.id.slice(0, 8)} · {payment.method} · {minorToPkr(payment.amountMinor)}
+            <button
+              className={`mt-1 block w-full rounded-lg border px-2 py-1 text-left transition ${
+                paymentId === payment.id
+                  ? "border-indigo-400 bg-indigo-50 font-black"
+                  : "border-slate-200 hover:bg-white"
+              }`}
+              key={payment.id}
+              onClick={() => {
+                setPaymentId(payment.id);
+                // The full payment is the common case; the cashier can reduce
+                // it for a partial refund rather than compute it from nothing.
+                setAmountPkr((payment.amountMinor / 100).toFixed(2));
+              }}
+              type="button"
+            >
+              {payment.method} · {minorToPkr(payment.amountMinor)}
+              {payment.reference ? ` · ${payment.reference}` : ""}
             </button>
           ))}
         </div>
       ) : null}
-      <label className="block text-xs font-bold">Payment ID
-        <input className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2" onChange={(event) => setPaymentId(event.target.value.trim())} value={paymentId} />
-      </label>
+      {invoiceId && !paymentId ? (
+        <p className="text-[11px] font-medium text-amber-700">
+          Choose which payment to refund from the list above.
+        </p>
+      ) : null}
       <label className="block text-xs font-bold">Amount (PKR)
         <input className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2" min="0" onChange={(event) => setAmountPkr(event.target.value)} step="0.01" type="number" value={amountPkr} />
       </label>
@@ -113,9 +219,16 @@ export function BillingRefundWorklist({ initialReturnId }: { initialReturnId?: s
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
-      <header className="rounded-3xl bg-gradient-to-r from-rose-700 to-indigo-700 p-6 text-white">
+      {/* Blue through violet, the same ramp every other operations header uses.
+          A crimson-to-indigo bar read as an error state on a screen that is
+          ordinary counter work, and was the only header in the product that
+          did not belong to the palette. */}
+      <header className="rounded-3xl bg-gradient-to-r from-blue-700 via-indigo-700 to-violet-700 p-6 text-white">
         <h1 className="text-2xl font-black">Refunds</h1>
-        <p className="mt-1 text-sm text-rose-100">Signed in as {session?.name ?? "—"} — approvals are always attributed to your session, never a typed name.</p>
+        <p className="mt-1 text-sm text-indigo-100">
+          Signed in as {session?.name ?? "—"} — approvals are always attributed to your session,
+          never a typed name.
+        </p>
       </header>
 
       <RequestRefundPanel />

@@ -1,5 +1,8 @@
 "use client";
 
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Radio, Video, X, Zap } from "lucide-react";
 import {
   createContext,
   useCallback,
@@ -719,7 +722,102 @@ function DoctorPortalShellContent({
     <DoctorPortalContext.Provider
       value={contextValue}
     >
+      <DoctorLiveVideoCallNotifier />
       {children}
     </DoctorPortalContext.Provider>
+  );
+}
+
+/**
+ * The live-call banner.
+ *
+ * Declared at module scope, and it matters. This function used to sit
+ * INSIDE DoctorPortalShellContent — written at column zero, so it read as a
+ * top-level declaration, but lexically nested. React therefore saw a brand
+ * new component type on every parent render, and the doctor shell re-renders
+ * on every queue poll and every twenty-second sitting check. The banner was
+ * unmounted and remounted each time, which reset its `dismissed` state: a
+ * doctor who dismissed the banner got it back within seconds, and its own
+ * polling effect restarted on every remount.
+ */
+function DoctorLiveVideoCallNotifier() {
+  const pathname = usePathname();
+  const [liveCall, setLiveCall] = useState<{
+    id: string;
+    patientName: string;
+    patientNumber: string;
+    serviceName: string;
+    reason: string;
+  } | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const check = async () => {
+      try {
+        const res = await fetch("/api/v1/doctor/video-consultations", { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as { liveCall?: { id: string; patientName: string; patientNumber: string; serviceName: string; reason: string } };
+          if (active) setLiveCall(data.liveCall ?? null);
+        }
+      } catch {}
+    };
+    void check();
+    const interval = window.setInterval(check, 20_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  // Hide banner if currently inside the video room or video appointment page
+  if (!liveCall || dismissed || pathname?.startsWith("/doctor/video-room") || pathname?.includes("/video")) {
+    return null;
+  }
+
+  return (
+    <div className="sticky top-2 z-[90] mb-3 animate-bounce-short">
+      <div className="relative overflow-hidden rounded-2xl border-2 border-emerald-400 bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-700 p-3.5 text-white shadow-xl shadow-emerald-500/20">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="relative grid size-9 place-items-center rounded-xl bg-white/20 text-white backdrop-blur">
+              <Radio className="size-5 animate-pulse text-emerald-200" />
+              <span className="absolute -right-0.5 -top-0.5 size-2.5 rounded-full bg-emerald-300 ring-2 ring-emerald-200 animate-ping" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-emerald-300 px-2 py-0.2 text-[9px] font-black uppercase tracking-wider text-emerald-950">
+                  Live Video Call
+                </span>
+                <span className="text-[11px] font-bold text-emerald-100">
+                  {liveCall.serviceName}
+                </span>
+              </div>
+              <p className="text-xs font-black">
+                {liveCall.patientName} ({liveCall.patientNumber}) · {liveCall.reason}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Link
+              className="inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-1.5 text-xs font-black text-emerald-950 shadow-md transition hover:scale-105"
+              href="/doctor/video-room"
+            >
+              <Zap className="size-3.5 text-emerald-600" />
+              Join Live Video Room
+            </Link>
+            <button
+              aria-label="Dismiss banner"
+              className="rounded-lg p-1 text-white/70 hover:bg-white/10 hover:text-white"
+              onClick={() => setDismissed(true)}
+              type="button"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -18,7 +18,9 @@ import {
   X,
 } from "lucide-react";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { DonutChart, RadialMeter, type DonutSlice } from "@/components/charts";
 import type {
   EducationAssignmentItem,
   EducationComprehensionQuestion,
@@ -158,6 +160,32 @@ export function PatientEducationLibraryView() {
     }
   };
 
+  const assigned = library?.assigned ?? [];
+  const completedCount = assigned.filter((item) => item.isCompleted).length;
+
+  /**
+   * Where the patient is with the reading their team assigned.
+   *
+   * Overdue is a status, not a category, so it wears the status palette
+   * and always carries its own label — a patient who cannot separate amber
+   * from grey still reads the word "Overdue".
+   */
+  const progressMix = useMemo<DonutSlice[]>(() => {
+    const overdue = assigned.filter(
+      (item) => !item.isCompleted && item.isOverdue,
+    ).length;
+
+    const outstanding = assigned.filter(
+      (item) => !item.isCompleted && !item.isOverdue,
+    ).length;
+
+    return [
+      { id: "done", label: "Completed", value: completedCount, color: "var(--viz-good)" },
+      { id: "todo", label: "Still to read", value: outstanding, color: "var(--viz-mute-mark)" },
+      { id: "overdue", label: "Overdue", value: overdue, color: "var(--viz-critical)" },
+    ];
+  }, [assigned, completedCount]);
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -219,6 +247,33 @@ export function PatientEducationLibraryView() {
           <span>{successMessage}</span>
         </div>
       )}
+
+      {assigned.length > 0 ? (
+        <div className="grid gap-5 sm:grid-cols-2">
+          <div className="flex items-center justify-center rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(11,18,32,0.04)]">
+            <RadialMeter
+              value={completedCount}
+              target={assigned.length}
+              label="Your reading progress"
+              caption={`${completedCount} of ${assigned.length} modules finished`}
+              size={140}
+              thickness={12}
+            />
+          </div>
+
+          <DonutChart
+            title="Assigned reading"
+            subtitle="Set for you by your care team"
+            slices={progressMix}
+            centerValue={`${completedCount}/${assigned.length}`}
+            centerLabel="Completed"
+            size={176}
+            thickness={20}
+            emptyMessage="Nothing assigned yet"
+            footnote="Pre-operative modules matter most — finish those before your surgery date."
+          />
+        </div>
+      ) : null}
 
       {/* Section 1: Assigned Learning Modules (Primary Focus) */}
       <div className="space-y-3">

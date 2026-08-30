@@ -5,6 +5,15 @@ node_modules/
 samiscreenshots/
 future/
 
+# Review artefacts. Regenerated on demand, never deployed - the portal sweep
+# writes ~44 MB of screenshots here:
+#   pnpm --filter web exec playwright test --config playwright.sweep.config.ts
+hpbspscreenshots/
+
+# Dead working files
+temp_old_schema.prisma
+thingstowork.md
+
 # Next.js and builds
 .next/
 out/

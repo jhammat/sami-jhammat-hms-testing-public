@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import type { FormEvent, ReactNode } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Building2,
   CalendarDays,
@@ -43,7 +43,7 @@ interface BranchRecord {
 interface OrganizationConfiguration {
   id: string;
   displayName: string;
-  doctorFeeAuthority: "DOCTOR" | "HOSPITAL";
+  doctorFeeAuthority: "DOCTOR" | "HOSPITAL" | "APPROVAL_REQUIRED";
   legalName: string | null;
   email: string | null;
   phone: string | null;
@@ -328,6 +328,124 @@ function LabeledField({ label, children }: { label: string; children: ReactNode 
   return <label className="space-y-1.5"><span className="block text-xs font-bold text-slate-700">{label}</span>{children}</label>;
 }
 
+/**
+ * Self-service password change for the signed-in administrator.
+ *
+ * Administrators could reset everybody else's password but not their own:
+ * `resetUserPassword` refuses when the target is the caller, pointing at
+ * "your account settings" -- a screen that did not exist for them. The only
+ * route out was asking a platform administrator for a temporary password,
+ * which is a worse credential than the one being replaced.
+ *
+ * This reuses POST /api/auth/change-password, which already verifies the
+ * current password, enforces the password policy and rotates the session.
+ */
+function AdministratorPasswordForm() {
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmation, setConfirmation] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [done, setDone] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError("");
+    setDone(false);
+
+    if (newPassword !== confirmation) {
+      setError("The new passwords do not match. Retype them and try again.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const response = await fetch("/api/auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ currentPassword, newPassword, confirmation }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "The password could not be changed.");
+      }
+
+      // Only clear the fields once the server has confirmed the change.
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmation("");
+      setDone(true);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The password could not be changed.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form className="max-w-xl space-y-3" onSubmit={submit}>
+      <LabeledField label="Current password">
+        <input
+          autoComplete="current-password"
+          className={fieldClass}
+          onChange={(event) => setCurrentPassword(event.target.value)}
+          required
+          type="password"
+          value={currentPassword}
+        />
+      </LabeledField>
+
+      <LabeledField label="New password">
+        <input
+          autoComplete="new-password"
+          className={fieldClass}
+          minLength={12}
+          onChange={(event) => setNewPassword(event.target.value)}
+          required
+          type="password"
+          value={newPassword}
+        />
+      </LabeledField>
+
+      <LabeledField label="Confirm new password">
+        <input
+          autoComplete="new-password"
+          className={fieldClass}
+          minLength={12}
+          onChange={(event) => setConfirmation(event.target.value)}
+          required
+          type="password"
+          value={confirmation}
+        />
+      </LabeledField>
+
+      <p className="text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+        At least 12 characters. If you signed in with a temporary password,
+        changing it here clears the prompt to replace it.
+      </p>
+
+      {error ? (
+        <p className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
+          {error}
+        </p>
+      ) : null}
+
+      {done ? (
+        <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/40 dark:text-emerald-300">
+          Your password has been changed. Use it the next time you sign in.
+        </p>
+      ) : null}
+
+      <button className={primaryButtonClass} disabled={saving} type="submit">
+        <Save aria-hidden="true" size={17} />
+        {saving ? "Changing" : "Change my password"}
+      </button>
+    </form>
+  );
+}
+
 export function LiveHospitalSetupPage() {
   const resource = useAdminResource<{ configuration: OrganizationConfiguration }>("admin:configuration", "/api/v1/admin/configuration");
   return (
@@ -336,6 +454,9 @@ export function LiveHospitalSetupPage() {
       <WonFlowAsyncDataBoundary loadingTitle="Loading hospital profile" loadingDescription="Reading the current organization configuration." onRetry={resource.reload} state={resource}>
         {({ configuration }) => <Panel title="Organization profile" description="These values are stored in the tenant database."><ConfigurationForm configuration={configuration} onSaved={resource.reload} /></Panel>}
       </WonFlowAsyncDataBoundary>
+      <Panel description="Change the password for your own administrator account." title="My sign-in password">
+        <AdministratorPasswordForm />
+      </Panel>
     </div>
   );
 }
@@ -674,6 +795,25 @@ function IssuedCredentialsPanel({ credentials, organizationName }: { credentials
   );
 }
 
+/**
+ * Every staff workspace an administrator can invite into, with its label.
+ *
+ * The order is the order it is offered in. Which of these actually appear is
+ * decided by the tenant's entitlements at render time, not here.
+ */
+const WORKSPACE_INVITE_OPTIONS: { code: string; label: string }[] = [
+  { code: "DOCTOR", label: "Doctor" },
+  { code: "RECEPTION", label: "Reception" },
+  { code: "LABORATORY", label: "Laboratory" },
+  { code: "RADIOLOGY", label: "Radiology" },
+  { code: "PHARMACY", label: "Pharmacy" },
+  { code: "PHYSIOTHERAPIST", label: "Physiotherapist" },
+  { code: "NUTRITIONIST", label: "Clinical dietitian" },
+  { code: "BILLING", label: "Billing" },
+  { code: "MANAGEMENT", label: "Management" },
+  { code: "ADMIN", label: "Administrator" },
+];
+
 function TeamManager({ users, branches, departments, organizationName, onInvited }: { users: UserRecord[]; branches: BranchRecord[]; departments: DepartmentRecord[]; organizationName?: string; onInvited(): void }) {
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
@@ -691,6 +831,78 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
   const [selectedWorkspace, setSelectedWorkspace] = useState("ALL");
   const [selectedBranch, setSelectedBranch] = useState("ALL");
 
+  /**
+   * Which staff workspaces this hospital may actually create logins for.
+   *
+   * The list used to be hardcoded, which had two consequences: the two
+   * allied-health roles were missing entirely, and a hospital that had
+   * switched off laboratory, radiology or pharmacy was still offered those
+   * workspaces — an invitation that creates a login for a module the tenant
+   * cannot open. The server decides now, from the tenant's entitlements.
+   *
+   * `undefined` means "not answered yet"; the select stays disabled rather
+   * than briefly offering the full list and then taking options away.
+   */
+  const [allowedWorkspaces, setAllowedWorkspaces] = useState<string[] | undefined>();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/v1/tenant/entitlements", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        const payload = await response.json().catch(() => null);
+        if (cancelled || !response.ok || !payload) return;
+        setAllowedWorkspaces(payload.workspaces ?? []);
+      } catch {
+        // Leave it unanswered rather than guessing at a permissions list.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const workspaceOptions = useMemo(
+    () =>
+      WORKSPACE_INVITE_OPTIONS.filter(
+        (option) => allowedWorkspaces?.includes(option.code) ?? false,
+      ),
+    [allowedWorkspaces],
+  );
+
+  /**
+   * The workspace actually in force.
+   *
+   * Derived during render rather than corrected afterwards in an effect:
+   * the default is DOCTOR, but a tenant might not be offered every option,
+   * and calling setState from an effect to fix that cascades an extra render
+   * and briefly leaves an invalid workspace selected. This just never
+   * reports one that is not on offer.
+   */
+  const effectiveWorkspace =
+    workspaceOptions.some((option) => option.code === workspace)
+      ? workspace
+      : (workspaceOptions[0]?.code ?? workspace);
+
+  /**
+   * Role filter chips, counted from the staff who are actually here.
+   *
+   * This was a second hardcoded list of workspaces, and it had drifted the
+   * same way the invite dropdown had: no physiotherapist or dietitian entry.
+   * Staff holding those roles were counted by nobody and reachable by no
+   * filter -- a hospital with seven members saw chips accounting for four of
+   * them and no way to page through the rest.
+   *
+   * So the known roles come from the same catalogue the invite form uses,
+   * and then ANY other workspace code found on a real membership is appended.
+   * A role added to the enum later shows up here on its own rather than
+   * waiting for someone to remember this list.
+   */
   const workspaceFilterOptions = useMemo(() => {
     const counts = new Map<string, number>();
     for (const u of users) {
@@ -698,16 +910,26 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
         counts.set(ws, (counts.get(ws) ?? 0) + 1);
       }
     }
+
+    const known = WORKSPACE_INVITE_OPTIONS.map(({ code, label }) => ({
+      code,
+      label,
+      count: counts.get(code) ?? 0,
+    }));
+
+    const unlisted = [...counts.keys()]
+      .filter((code) => !WORKSPACE_INVITE_OPTIONS.some((option) => option.code === code))
+      .sort()
+      .map((code) => ({
+        code,
+        label: code.charAt(0) + code.slice(1).toLowerCase().replace(/_/g, " "),
+        count: counts.get(code) ?? 0,
+      }));
+
     return [
       { code: "ALL", label: "All staff", count: users.length },
-      { code: "DOCTOR", label: "Doctor", count: counts.get("DOCTOR") ?? 0 },
-      { code: "RECEPTION", label: "Reception", count: counts.get("RECEPTION") ?? 0 },
-      { code: "ADMIN", label: "Admin", count: counts.get("ADMIN") ?? 0 },
-      { code: "LABORATORY", label: "Laboratory", count: counts.get("LABORATORY") ?? 0 },
-      { code: "RADIOLOGY", label: "Radiology", count: counts.get("RADIOLOGY") ?? 0 },
-      { code: "PHARMACY", label: "Pharmacy", count: counts.get("PHARMACY") ?? 0 },
-      { code: "BILLING", label: "Billing", count: counts.get("BILLING") ?? 0 },
-      { code: "MANAGEMENT", label: "Management", count: counts.get("MANAGEMENT") ?? 0 },
+      ...known,
+      ...unlisted,
     ];
   }, [users]);
 
@@ -765,7 +987,7 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
 
   async function invite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (workspace === "DOCTOR" && !department) {
+    if (effectiveWorkspace === "DOCTOR" && !department) {
       setError(departments.length === 0
         ? "Create a department first, then assign this doctor to it."
         : "Select the doctor's department.");
@@ -775,7 +997,7 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
     setError("");
     setCredentials(undefined);
     try {
-      const response = await phaseOneApi<{ credentials: IssuedCredentials }>("/api/v1/admin/users/invitations", { method: "POST", body: JSON.stringify({ displayName, email, departmentId: workspace === "DOCTOR" ? department : undefined, primaryBranchId: branchId || undefined, workspaceCodes: [workspace] }) });
+      const response = await phaseOneApi<{ credentials: IssuedCredentials }>("/api/v1/admin/users/invitations", { method: "POST", body: JSON.stringify({ displayName, email, departmentId: effectiveWorkspace === "DOCTOR" ? department : undefined, primaryBranchId: branchId || undefined, workspaceCodes: [effectiveWorkspace] }) });
       setCredentials(response.credentials);
       setDisplayName("");
       setEmail("");
@@ -879,7 +1101,11 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
           <div className="space-y-2.5">
             {userPages.visible.map((user) => (
               <article className="flex flex-col gap-3 rounded-2xl border border-slate-200/80 bg-white p-4 transition duration-200 hover:border-indigo-200/80 hover:shadow-sm sm:flex-row sm:items-center sm:justify-between dark:border-slate-800 dark:bg-slate-800/60 dark:hover:border-slate-700" key={user.id}>
-                <div>
+                {/* min-w-0 so a long subtitle — a doctor with a department, or
+                    a member holding three workspaces — wraps inside its own
+                    column instead of squeezing the action buttons onto a
+                    second line and leaving one row taller than its neighbours. */}
+                <div className="min-w-0 flex-1">
                   <h3 className="font-bold text-slate-950 dark:text-white">{user.displayName}</h3>
                   <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
                     {user.identity.email} · {user.primaryBranch?.name ?? "No branch assigned"}{user.doctorProfile?.department ? ` · ${user.doctorProfile.department.name}` : ""}
@@ -893,7 +1119,7 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
                     </span>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
                   <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[9px] font-bold text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-950/60 dark:text-emerald-300">
                     {user.status}
                   </span>
@@ -929,18 +1155,32 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
           <LabeledField label="Full name"><input className={fieldClass} onChange={(event) => setDisplayName(event.target.value)} required value={displayName} /></LabeledField>
           <LabeledField label="Email (login username)"><input className={fieldClass} onChange={(event) => setEmail(event.target.value)} required type="email" value={email} /></LabeledField>
           <LabeledField label="Workspace">
-            <select className={fieldClass} onChange={(event) => setWorkspace(event.target.value)} value={workspace}>
-              <option value="DOCTOR">Doctor</option>
-              <option value="RECEPTION">Reception</option>
-              <option value="LABORATORY">Laboratory</option>
-              <option value="RADIOLOGY">Radiology</option>
-              <option value="PHARMACY">Pharmacy</option>
-              <option value="BILLING">Billing</option>
-              <option value="MANAGEMENT">Management</option>
-              <option value="ADMIN">Administrator</option>
+            <select
+              className={fieldClass}
+              disabled={allowedWorkspaces === undefined}
+              onChange={(event) => setWorkspace(event.target.value)}
+              value={effectiveWorkspace}
+            >
+              {allowedWorkspaces === undefined ? (
+                <option value={effectiveWorkspace}>Loading workspaces…</option>
+              ) : (
+                workspaceOptions.map((option) => (
+                  <option key={option.code} value={option.code}>
+                    {option.label}
+                  </option>
+                ))
+              )}
             </select>
+            {allowedWorkspaces !== undefined &&
+            workspaceOptions.length < WORKSPACE_INVITE_OPTIONS.length ? (
+              <p className="mt-1.5 text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+                Only the workspaces this hospital is licensed for are listed. To
+                offer more, ask your platform administrator to enable that
+                module for your organization.
+              </p>
+            ) : null}
           </LabeledField>
-          {workspace === "DOCTOR" ? (
+          {effectiveWorkspace === "DOCTOR" ? (
             <LabeledField label="Department">
               <select className={fieldClass} onChange={(event) => setDepartment(event.target.value)} required value={department}>
                 <option value="">Select department</option>
@@ -1059,9 +1299,13 @@ export function LiveHospitalDoctorsPage() {
   );
 }
 
-function ServiceManagerModern({ services, branches, onCreated }: { services: ServiceRecord[]; branches: BranchRecord[]; onCreated(): void }) {
+function ServiceManagerModern({ branches, enabledModules, onCreated, services }: { branches: BranchRecord[]; enabledModules?: string[]; onCreated(): void; services: ServiceRecord[] }) {
   const [query, setQuery] = useState("");
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState("ALL");
+  const enabledModulesSet = useMemo(() => new Set(enabledModules ?? []), [enabledModules]);
+  const availableCategories = useMemo(() => {
+    return serviceCategories.filter((c) => !c.requiredModule || enabledModulesSet.has(c.requiredModule));
+  }, [enabledModulesSet]);
   const [form, setForm] = useState({ codeMode: "auto", code: "", name: "", category: "CONSULTATION", durationMinutes: "15", price: "", branchId: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -1080,11 +1324,17 @@ function ServiceManagerModern({ services, branches, onCreated }: { services: Ser
   const categoryFilters = useMemo(() => {
     const counts = new Map<string, number>();
     for (const service of services) counts.set(service.category, (counts.get(service.category) ?? 0) + 1);
+    const visibleCategories = serviceCategories.filter((c) => {
+      const count = counts.get(c.code) ?? 0;
+      if (count > 0) return true;
+      if (c.requiredModule && !enabledModulesSet.has(c.requiredModule)) return false;
+      return true;
+    });
     return [
       { code: "ALL", label: "All services", count: services.length },
-      ...serviceCategories.map((c) => ({ code: c.code, label: c.label, count: counts.get(c.code) ?? 0 })),
+      ...visibleCategories.map((c) => ({ code: c.code, label: c.label, count: counts.get(c.code) ?? 0 })),
     ];
-  }, [services]);
+  }, [services, enabledModulesSet]);
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1212,7 +1462,7 @@ function ServiceManagerModern({ services, branches, onCreated }: { services: Ser
           <LabeledField label="Service name"><input className={fieldClass} onChange={(event) => setForm({ ...form, name: event.target.value })} required value={form.name} /></LabeledField>
           <LabeledField label="Category">
             <select className={fieldClass} onChange={(event) => setForm({ ...form, category: event.target.value })} required value={form.category}>
-              {groupServiceCategoriesByHandler(serviceCategories).map(({ handler, categories }) => (
+              {groupServiceCategoriesByHandler(availableCategories).map(({ handler, categories }) => (
                 <optgroup key={handler} label={`Handled by ${handler}`}>
                   {categories.map((category) => <option key={category.code} value={category.code}>{category.label}</option>)}
                 </optgroup>
@@ -1238,8 +1488,8 @@ function ServiceManagerModern({ services, branches, onCreated }: { services: Ser
 }
 
 export function LiveHospitalServicesPage() {
-  const resource = useAdminResource<{ services: ServiceRecord[]; configuration: OrganizationConfiguration }>("admin:services-live", "/api/v1/admin/service-overview");
-  return <div className="space-y-4" id="main-content"><PageIntro description="Configure the real service catalogue used by appointments and billing." eyebrow="Services & governance" icon={Stethoscope} title="Services & prices" /><WonFlowAsyncDataBoundary loadingDescription="Reading catalogue records from the tenant database." loadingTitle="Loading services" onRetry={resource.reload} state={resource}>{({ services, configuration }) => <ServiceManagerModern branches={configuration.branches} onCreated={resource.reload} services={services} />}</WonFlowAsyncDataBoundary></div>;
+  const resource = useAdminResource<{ services: ServiceRecord[]; configuration: OrganizationConfiguration; enabledModules?: string[] }>("admin:services-live", "/api/v1/admin/service-overview");
+  return <div className="space-y-4" id="main-content"><PageIntro description="Configure the real service catalogue used by appointments and billing." eyebrow="Services & governance" icon={Stethoscope} title="Services & prices" /><WonFlowAsyncDataBoundary loadingDescription="Reading catalogue records from the tenant database." loadingTitle="Loading services" onRetry={resource.reload} state={resource}>{({ services, configuration, enabledModules }) => <ServiceManagerModern branches={configuration.branches} enabledModules={enabledModules} onCreated={resource.reload} services={services} />}</WonFlowAsyncDataBoundary></div>;
 }
 
 const weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];

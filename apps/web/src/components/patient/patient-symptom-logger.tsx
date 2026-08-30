@@ -22,6 +22,8 @@ import {
   Wind,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+
+import { DonutChart, TrendLine, type DonutSlice } from "@/components/charts";
 import type {
   SymptomDefinition,
   SymptomLogItem,
@@ -150,6 +152,56 @@ export function PatientSymptomLogger() {
 
   const CurrentIcon = iconMap[selectedSymptom.icon] || Activity;
 
+  /**
+   * How the selected symptom has been trending, oldest first.
+   *
+   * Every symptom is scored 0-10, so one axis serves them all — but only
+   * one symptom is plotted at a time. Overlaying six symptoms would need
+   * six lines the patient has to colour-match, and the question they
+   * actually have is "is THIS getting better".
+   */
+  const severityTrend = useMemo(() => {
+    const points = recentLogs
+      .filter((log) => log.symptomCode === selectedSymptom.code)
+      .slice(0, 21)
+      .reverse()
+      .map((log) => ({
+        label: new Date(log.recordedAt).toLocaleDateString("en-GB", {
+          day: "numeric",
+          month: "short",
+        }),
+        value: log.severityScore,
+      }));
+
+    return [
+      {
+        id: selectedSymptom.code,
+        label: selectedSymptom.name,
+        color: "var(--viz-2)",
+        points,
+      },
+    ];
+  }, [recentLogs, selectedSymptom]);
+
+  /** What the patient has been reporting, as a share of all entries. */
+  const symptomMix = useMemo<DonutSlice[]>(() => {
+    const counts = new Map<string, { label: string; value: number }>();
+
+    recentLogs.forEach((log) => {
+      const existing = counts.get(log.symptomCode);
+      counts.set(log.symptomCode, {
+        label: log.symptomName,
+        value: (existing?.value ?? 0) + 1,
+      });
+    });
+
+    return [...counts.entries()].map(([code, entry]) => ({
+      id: code,
+      label: entry.label,
+      value: entry.value,
+    }));
+  }, [recentLogs]);
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -190,6 +242,34 @@ export function PatientSymptomLogger() {
           {error}
         </div>
       )}
+
+      {recentLogs.length > 0 ? (
+        <div className="grid gap-5 lg:grid-cols-3">
+          <TrendLine
+            className="lg:col-span-2"
+            title={`${selectedSymptom.name} over time`}
+            subtitle="Only the symptom you have selected below"
+            series={severityTrend}
+            yMin={0}
+            yMax={10}
+            unit="/ 10"
+            height={210}
+            emptyMessage="You have not logged this symptom yet"
+            emptyHint="Choose a different symptom, or log this one below."
+            footnote="A line that falls week on week is what your team is hoping to see."
+          />
+
+          <DonutChart
+            title="What you have reported"
+            subtitle="Share of all your entries"
+            slices={symptomMix}
+            centerLabel="Entries"
+            size={168}
+            thickness={20}
+            emptyMessage="Nothing logged yet"
+          />
+        </div>
+      ) : null}
 
       {/* 4-Tap Symptom Logger Form */}
       <form

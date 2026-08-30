@@ -102,7 +102,7 @@ export class DoctorFeeService {
     },
   ) {
     const { context, doctor, organization } = await resolveDoctor(requestContext);
-    if (organization.doctorFeeAuthority !== "DOCTOR") {
+    if (organization.doctorFeeAuthority === "HOSPITAL") {
       throw new WonFlowApiError(403, "hospital-controls-fee", "This hospital manages doctor consultation services and fees.");
     }
     if (!input.name?.trim() || !input.code?.trim()) {
@@ -129,6 +129,31 @@ export class DoctorFeeService {
       throw new WonFlowApiError(400, "invalid-service-branch", "The selected branch is unavailable.");
     }
     const currencyCode = branch?.currencyCode ?? context.currencyCode;
+
+    // Approval-required mode: submit a fee request instead of creating the service directly.
+    if (organization.doctorFeeAuthority === "APPROVAL_REQUIRED") {
+      const feeRequest = await database.doctorFeeRequest.create({
+        data: {
+          tenantId: context.tenantId,
+          doctorId: doctor.id,
+          requestedByMembershipId: context.membershipId!,
+          requestType: "CREATE_SERVICE",
+          proposedName: input.name.trim(),
+          proposedDescription: input.description?.trim() || null,
+          proposedDurationMinutes: input.durationMinutes,
+          proposedPriceMinorUnits: input.priceMinorUnits,
+          proposedCurrencyCode: currencyCode,
+          proposedBranchId: branch?.id ?? null,
+          proposedPubliclyBookable: input.publiclyBookable ?? false,
+          proposedConsultationModes: input.consultationModes?.length ? input.consultationModes : ["IN_PERSON"],
+        },
+        include: { proposedBranch: true, doctor: { include: { staffProfile: { include: { membership: true } } } } },
+      });
+      await audit(context, "doctor.consultation-service.fee-request-created", feeRequest.id);
+      return { feeRequest, pendingApproval: true };
+    }
+
+    // Doctor-managed mode: create the service directly.
     const entity = await database.$transaction(async (tx) => {
       const created = await tx.serviceDefinition.create({
         data: {
@@ -170,7 +195,7 @@ export class DoctorFeeService {
     },
   ) {
     const { context, doctor, organization } = await resolveDoctor(requestContext);
-    if (organization.doctorFeeAuthority !== "DOCTOR") {
+    if (organization.doctorFeeAuthority === "HOSPITAL") {
       throw new WonFlowApiError(403, "hospital-controls-fee", "This hospital manages doctor consultation services and fees.");
     }
     const existing = await database.serviceDefinition.findFirst({
@@ -194,6 +219,41 @@ export class DoctorFeeService {
     if (input.priceMinorUnits !== undefined && existing.billingOwner !== "DOCTOR") {
       throw new WonFlowApiError(403, "hospital-controls-fee", existing.billingOwner === "DEPARTMENT" ? "This fee is controlled by the department that owns the service." : "This fee is controlled by hospital administration.");
     }
+
+    // Approval-required mode: fee changes go through the approval workflow.
+    if (organization.doctorFeeAuthority === "APPROVAL_REQUIRED" && input.priceMinorUnits !== undefined && input.priceMinorUnits !== existing.priceMinorUnits) {
+      const feeRequest = await database.doctorFeeRequest.create({
+        data: {
+          tenantId: context.tenantId,
+          serviceId: existing.id,
+          doctorId: doctor.id,
+          requestedByMembershipId: context.membershipId!,
+          requestType: "UPDATE_FEE",
+          proposedName: existing.name,
+          proposedPriceMinorUnits: input.priceMinorUnits,
+          proposedCurrencyCode: existing.currencyCode,
+        },
+        include: { service: { include: { branch: true } }, doctor: { include: { staffProfile: { include: { membership: true } } } } },
+      });
+      await audit(context, "doctor.consultation-service.fee-request-created", feeRequest.id);
+
+      // Still apply non-fee changes directly (name, description, duration, etc.)
+      const nonFeeInput = { ...input };
+      delete nonFeeInput.priceMinorUnits;
+      if (Object.keys(nonFeeInput).length > 0) {
+        await database.serviceDefinition.update({
+          where: { id: existing.id, tenantId: context.tenantId },
+          data: {
+            ...nonFeeInput,
+            name: nonFeeInput.name?.trim(),
+            description: nonFeeInput.description === undefined ? undefined : nonFeeInput.description.trim() || null,
+          },
+        });
+      }
+      return { feeRequest, pendingApproval: true };
+    }
+
+    // Direct mode: apply all changes immediately.
     const entity = await database.$transaction(async (tx) => {
       const updated = await tx.serviceDefinition.update({
         where: { id: existing.id, tenantId: context.tenantId },
@@ -215,7 +275,7 @@ export class DoctorFeeService {
 
   async deleteService(requestContext: WonFlowRequestContext, serviceId: string) {
     const { context, doctor, organization } = await resolveDoctor(requestContext);
-    if (organization.doctorFeeAuthority !== "DOCTOR") {
+    if (organization.doctorFeeAuthority === "HOSPITAL") {
       throw new WonFlowApiError(403, "hospital-controls-fee", "This hospital manages doctor consultation services and fees.");
     }
     const existing = await database.serviceDefinition.findFirst({
@@ -228,6 +288,21 @@ export class DoctorFeeService {
     });
     await audit(context, "doctor.consultation-service.deleted", entity.id);
     return entity;
+  }
+
+  /** Returns the doctor's own fee requests (pending, approved, and declined). */
+  async getMyFeeRequests(requestContext: WonFlowRequestContext) {
+    const { context, doctor } = await resolveDoctor(requestContext);
+    return database.doctorFeeRequest.findMany({
+      where: { tenantId: context.tenantId, doctorId: doctor.id },
+      include: {
+        service: { select: { id: true, name: true, code: true } },
+        proposedBranch: { select: { id: true, name: true } },
+        reviewedBy: { select: { id: true, displayName: true } },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+    });
   }
 }
 

@@ -7,6 +7,7 @@ import type {
   CreateNutritionAssessmentInput,
   CreateNutritionPlanInput,
 } from "@wonflow/contracts";
+import { referralService } from "@/server/clinical/referral-service";
 import { WonFlowApiError } from "@/server/http/route-handler";
 
 export class NutritionService {
@@ -17,9 +18,21 @@ export class NutritionService {
     const context = requireTenantContext(requestContext);
     requirePermission(context, "referrals.read");
 
+
     if (!input.patientId?.trim()) {
       throw new WonFlowApiError(400, "missing-patient-id", "Patient ID is required.");
     }
+
+    // Per-patient authorization, AFTER the shape checks above.
+    //
+    // Order matters here. `referrals.read` only says this account is the kind
+    // of clinician that reads referrals; it says nothing about THIS patient,
+    // and without the line below a therapist could reach any record in the
+    // hospital by passing its id. But it runs after the input validation, not
+    // before: a request with no patientId at all is malformed rather than
+    // forbidden, and answering "you have no referral for this patient" to an
+    // empty id tells the caller nothing useful about what they got wrong.
+    await referralService.assertReferredPatient(requestContext, "NUTRITION", input.patientId);
 
     const staff = await database.staffProfile.findFirst({
       where: {
@@ -116,6 +129,18 @@ export class NutritionService {
     const context = requireTenantContext(requestContext);
     requirePermission(context, "referrals.read");
 
+    // Per-patient authorization, AFTER the shape checks above.
+    //
+    // Order matters here. `referrals.read` only says this account is the kind
+    // of clinician that reads referrals; it says nothing about THIS patient,
+    // and without the line below a therapist could reach any record in the
+    // hospital by passing its id. But it runs after the input validation, not
+    // before: a request with no patientId at all is malformed rather than
+    // forbidden, and answering "you have no referral for this patient" to an
+    // empty id tells the caller nothing useful about what they got wrong.
+    await referralService.assertReferredPatient(requestContext, "NUTRITION", patientId);
+
+
     return database.nutritionAssessment.findMany({
       where: {
         tenantId: context.tenantId,
@@ -146,6 +171,7 @@ export class NutritionService {
     const context = requireTenantContext(requestContext);
     requirePermission(context, "referrals.read");
 
+
     if (!input.patientId?.trim()) {
       throw new WonFlowApiError(400, "missing-patient-id", "Patient ID is required.");
     }
@@ -155,6 +181,17 @@ export class NutritionService {
     if (!input.phase?.trim()) {
       throw new WonFlowApiError(400, "missing-phase", "Dietary phase is required.");
     }
+
+    // Per-patient authorization, AFTER the shape checks above.
+    //
+    // Order matters here. `referrals.read` only says this account is the kind
+    // of clinician that reads referrals; it says nothing about THIS patient,
+    // and without the line below a therapist could reach any record in the
+    // hospital by passing its id. But it runs after the input validation, not
+    // before: a request with no patientId at all is malformed rather than
+    // forbidden, and answering "you have no referral for this patient" to an
+    // empty id tells the caller nothing useful about what they got wrong.
+    await referralService.assertReferredPatient(requestContext, "NUTRITION", input.patientId);
 
     const staff = await database.staffProfile.findFirst({
       where: {
@@ -193,7 +230,15 @@ export class NutritionService {
       },
     });
 
-    // Locate active care plan if sync is requested
+    // Locate active care plan if sync is requested.
+    //
+    // Whether one exists decides whether ANY of this reaches the patient's
+    // phone, so the count of tasks actually written is returned to the
+    // caller. Without it the screen reported "published and synced to the
+    // Daily Action Centre" even when no care plan existed and not a single
+    // task had been created — a dietitian would leave believing the patient
+    // had their meal plan.
+    let syncedTaskCount = 0;
     let activeCarePlan = null;
     if (input.syncToCarePlan) {
       activeCarePlan = await database.carePlan.findFirst({
@@ -270,6 +315,7 @@ export class NutritionService {
               },
             });
             carePlanTaskId = task.id;
+            syncedTaskCount += 1;
           }
 
           await tx.nutritionPlanItem.create({
@@ -310,7 +356,7 @@ export class NutritionService {
         },
       });
 
-      return tx.nutritionPlan.findUnique({
+      const created = await tx.nutritionPlan.findUnique({
         where: { id: plan.id },
         include: {
           NutritionPlanItem: {
@@ -330,12 +376,33 @@ export class NutritionService {
           },
         },
       });
+
+      return {
+        ...created,
+        sync: {
+          requested: Boolean(input.syncToCarePlan),
+          carePlanFound: activeCarePlan !== null,
+          taskCount: syncedTaskCount,
+        },
+      };
     });
   }
 
   async getNutritionPlan(requestContext: WonFlowRequestContext, patientId: string) {
     const context = requireTenantContext(requestContext);
     requirePermission(context, "referrals.read");
+
+    // Per-patient authorization, AFTER the shape checks above.
+    //
+    // Order matters here. `referrals.read` only says this account is the kind
+    // of clinician that reads referrals; it says nothing about THIS patient,
+    // and without the line below a therapist could reach any record in the
+    // hospital by passing its id. But it runs after the input validation, not
+    // before: a request with no patientId at all is malformed rather than
+    // forbidden, and answering "you have no referral for this patient" to an
+    // empty id tells the caller nothing useful about what they got wrong.
+    await referralService.assertReferredPatient(requestContext, "NUTRITION", patientId);
+
 
     return database.nutritionPlan.findFirst({
       where: {

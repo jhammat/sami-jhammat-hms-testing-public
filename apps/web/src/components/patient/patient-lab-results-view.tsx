@@ -10,8 +10,10 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { StructuredLabResultItem } from "@wonflow/contracts";
+
+import { DonutChart, TrendLine, type DonutSlice } from "@/components/charts";
 import { STANDARD_LAB_TESTS } from "@wonflow/contracts";
 
 export function PatientLabResultsView() {
@@ -30,6 +32,88 @@ export function PatientLabResultsView() {
   );
   const [notesInput, setNotesInput] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+
+  /**
+   * A trend per analyte, each with its own reference range shaded behind
+   * it.
+   *
+   * Deliberately one chart per analyte rather than all of them on one
+   * plot: bilirubin, albumin and amylase span wildly different magnitudes,
+   * and forcing them onto a shared axis would flatten every line but the
+   * largest. Only analytes with at least two results get a chart — a
+   * single point is a number, not a trend.
+   */
+  const analyteTrends = useMemo(() => {
+    const byCode = new Map<string, StructuredLabResultItem[]>();
+
+    results.forEach((result) => {
+      const bucket = byCode.get(result.code) ?? [];
+      bucket.push(result);
+      byCode.set(result.code, bucket);
+    });
+
+    return [...byCode.entries()]
+      .map(([code, items]) => {
+        const ordered = [...items].sort(
+          (a, b) => new Date(a.collectedAt).getTime() - new Date(b.collectedAt).getTime(),
+        );
+
+        const newest = ordered.at(-1)!;
+
+        return {
+          code,
+          displayName: newest.displayName,
+          unit: newest.unit,
+          referenceLow: newest.referenceLow,
+          referenceHigh: newest.referenceHigh,
+          count: ordered.length,
+          series: [
+            {
+              id: code,
+              label: newest.displayName,
+              color: "var(--viz-1)",
+              band: { low: newest.referenceLow, high: newest.referenceHigh },
+              points: ordered.map((item) => ({
+                label: new Date(item.collectedAt).toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "short",
+                }),
+                value: item.value,
+              })),
+            },
+          ],
+        };
+      })
+      .filter((analyte) => analyte.count >= 2)
+      .slice(0, 4);
+  }, [results]);
+
+  /** Normal versus flagged, across every result on file. */
+  const flagMix = useMemo<DonutSlice[]>(() => {
+    const counts = new Map<string, number>();
+
+    results.forEach((result) => {
+      counts.set(result.abnormalFlag, (counts.get(result.abnormalFlag) ?? 0) + 1);
+    });
+
+    const tone: Record<string, string> = {
+      NORMAL: "var(--viz-good)",
+      LOW: "var(--viz-warning)",
+      HIGH: "var(--viz-warning)",
+      CRITICAL_LOW: "var(--viz-critical)",
+      CRITICAL_HIGH: "var(--viz-critical)",
+    };
+
+    return [...counts.entries()].map(([flag, value]) => ({
+      id: flag,
+      label: flag
+        .replace(/_/g, " ")
+        .toLowerCase()
+        .replace(/^./, (character) => character.toUpperCase()),
+      value,
+      color: tone[flag] ?? "var(--viz-mute-mark)",
+    }));
+  }, [results]);
 
   const loadResults = useCallback(async () => {
     try {
@@ -170,6 +254,44 @@ export function PatientLabResultsView() {
           {error}
         </div>
       )}
+
+      {results.length > 0 ? (
+        <div className="grid gap-5 lg:grid-cols-3">
+          <DonutChart
+            title="Results in and out of range"
+            subtitle="Across every result on file"
+            slices={flagMix}
+            centerValue={String(results.length)}
+            centerLabel="Results"
+            size={168}
+            thickness={20}
+            emptyMessage="No results yet"
+          />
+
+          {analyteTrends.length > 0 ? (
+            <div className="grid gap-5 lg:col-span-2 sm:grid-cols-2">
+              {analyteTrends.map((analyte) => (
+                <TrendLine
+                  key={analyte.code}
+                  title={analyte.displayName}
+                  subtitle={`Normal ${analyte.referenceLow}–${analyte.referenceHigh} ${analyte.unit}`}
+                  series={analyte.series}
+                  unit={analyte.unit}
+                  height={172}
+                  emptyMessage="Not enough results yet"
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/60 p-8 text-center lg:col-span-2">
+              <p className="max-w-[36ch] text-xs leading-5 text-slate-500">
+                Trend charts appear once you have two or more results for the same
+                test. One result is a number, not a trend.
+              </p>
+            </div>
+          )}
+        </div>
+      ) : null}
 
       {/* Lab Results Feed */}
       <div className="space-y-3">

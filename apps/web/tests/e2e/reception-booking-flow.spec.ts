@@ -77,11 +77,19 @@ async function giveDoctorAnOpenRoster(doctor: Practitioner) {
 async function clearDoctorConflicts(request: APIRequestContext, doctorId: string) {
   const today = new Date().toISOString().slice(0, 10);
   const feed = await (await request.get(`/api/v1/reception/appointments?date=${today}`)).json() as {
-    appointments: Array<{ id: string; doctorId: string | null; status: string; service: { consultationMode: string } | null }>;
+    appointments: Array<{ id: string; doctorId: string | null; status: string; consultationMode: string | null }>;
   };
   for (const appointment of feed.appointments) {
     if (appointment.doctorId !== doctorId) continue;
-    if (appointment.service?.consultationMode === "ONLINE") continue;
+    // The mode lives on the APPOINTMENT. This read `appointment.service
+    // ?.consultationMode`, which no payload carries -- the service row has
+    // `consultationModes` (plural, an array) instead -- so the expression
+    // was always undefined, the guard never fired, and this helper
+    // cancelled the seeded live video appointment that the comment above
+    // says it must protect. video-consultation.spec.ts then failed with
+    // "the seed did not leave a live online appointment", but only when the
+    // whole suite ran in one invocation.
+    if (appointment.consultationMode === "ONLINE") continue;
     if (!["PENDING", "CONFIRMED", "CHECKED_IN", "IN_QUEUE", "IN_PROGRESS"].includes(appointment.status)) continue;
     await request.patch(`/api/v1/appointments/${appointment.id}`, { data: { action: "cancel", reason: "Playwright test cleanup" } });
   }

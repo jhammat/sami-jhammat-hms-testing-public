@@ -10,6 +10,18 @@ const PUBLIC_PREFIXES = [
   "/patient/register",
   "/brand",
   "/favicon.ico",
+  // Everything the browser needs to install WonFlow as an app. All of it is
+  // static, none of it says anything about a patient or an account, and all
+  // of it is fetched before anyone has signed in.
+  //
+  // These were being redirected to /login, which is why installation never
+  // worked: the manifest came back as an HTML redirect rather than JSON, and
+  // a service worker served as text/html is rejected outright by the browser.
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/offline.html",
+  "/icon.png",
+  "/apple-icon.png",
   // Bearer-capability document links: the unguessable, short-lived, single-use
   // token in the path is the authorization, not the session cookie — see
   // consumePatientDocumentAccessToken in patient-document-service.ts.

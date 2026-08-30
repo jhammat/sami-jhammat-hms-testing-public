@@ -1872,7 +1872,9 @@ export function HospitalOperationsDashboard() {
                 "transition",
                 "hover:bg-violet-100",
               ].join(" ")}
-              href="/operations/queue"
+              // `/operations/queue` is not a route and answered 404. The live
+              // queue is the reception desk's own screen.
+              href="/operations/reception"
             >
               Live Queue
             </Link>

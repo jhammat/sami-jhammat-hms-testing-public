@@ -343,6 +343,18 @@ export const PLATFORM_MODULE_CATALOG:
       description: "Prescription and medication management.",
       group: "Clinical",
     },
+    {
+      code: "physiotherapy",
+      name: "Physiotherapy",
+      description: "Mobility assessments, therapy sessions and exercise plans.",
+      group: "Clinical",
+    },
+    {
+      code: "nutrition",
+      name: "Clinical nutrition",
+      description: "Nutrition assessments, PERT titration and dietary plans.",
+      group: "Clinical",
+    },
   ];
 
 

@@ -1,8 +1,8 @@
-import{database}from"@wonflow/database";import{requireBranchId,requirePermission,requireTenantContext}from"@wonflow/contracts";import type{WonFlowRequestContext}from"@wonflow/contracts";import{WonFlowApiError}from"@/server/http/route-handler";import{checkStartConsultationReadiness}from"@/server/readiness/readiness-service";
+import{database}from"@wonflow/database";import{requireBranchId,requirePermission,requireTenantContext}from"@wonflow/contracts";import type{WonFlowRequestContext}from"@wonflow/contracts";import{WonFlowApiError}from"@/server/http/route-handler";import{checkStartConsultationReadiness}from"@/server/readiness/readiness-service";import{dayFilterIn}from"@/server/time/business-day";
 /** Postgres SQLSTATE 40001 — a SERIALIZABLE transaction lost a write race and must be treated as "someone else won," not a server error. Prisma sometimes wraps this as P2034 and sometimes lets the driver adapter's own error through with the code nested under `cause`, so both shapes are checked. */
 function isSerializationFailure(error:unknown):boolean{if(!(error instanceof Error))return false;const code=(error as{code?:unknown}).code;if(code==="P2034")return true;const cause=(error as{cause?:{originalCode?:unknown;kind?:unknown}}).cause;return cause?.originalCode==="40001"||cause?.kind==="TransactionWriteConflict";}
 export class DoctorService{private async resolveDoctor(rc:WonFlowRequestContext){const context=requireTenantContext(rc);if(!context.membershipId)throw new WonFlowApiError(403,"doctor-membership-required","A doctor membership is required.");const doctor=await database.doctorProfile.findFirst({where:{tenantId:context.tenantId,staffProfile:{membershipId:context.membershipId,status:"ACTIVE"}}});if(!doctor)throw new WonFlowApiError(403,"doctor-profile-required","A valid doctor profile is required.");return{context,doctor};}
-async getDashboard(rc:WonFlowRequestContext,date:string){const{context:c,doctor}=await this.resolveDoctor(rc);requirePermission(c,"appointments.read");const appointments=await database.appointment.findMany({where:{tenantId:c.tenantId,branchId:requireBranchId(c),doctorId:doctor.id,startsAt:{gte:new Date(`${date}T00:00:00.000Z`),lte:new Date(`${date}T23:59:59.999Z`)}},include:{patient:true,queueEntry:true,service:true,encounter:true},orderBy:{startsAt:"asc"}});return{doctorId:doctor.id,appointments,metrics:{appointments:appointments.length,waiting:appointments.filter(a=>a.queueEntry?.status==="WAITING").length,inProgress:appointments.filter(a=>a.status==="IN_PROGRESS").length,completed:appointments.filter(a=>a.status==="COMPLETED").length}};}
+async getDashboard(rc:WonFlowRequestContext,date:string){const{context:c,doctor}=await this.resolveDoctor(rc);requirePermission(c,"appointments.read");const appointments=await database.appointment.findMany({where:{tenantId:c.tenantId,branchId:requireBranchId(c),doctorId:doctor.id,startsAt:dayFilterIn(date,c.timezone)},include:{patient:true,queueEntry:true,service:true,encounter:true},orderBy:{startsAt:"asc"}});return{doctorId:doctor.id,appointments,metrics:{appointments:appointments.length,waiting:appointments.filter(a=>a.queueEntry?.status==="WAITING").length,inProgress:appointments.filter(a=>a.status==="IN_PROGRESS").length,completed:appointments.filter(a=>a.status==="COMPLETED").length}};}
 private async getAppointmentDetail(tenantId:string,doctorId:string,appointmentId:string){const appointment=await database.appointment.findFirst({where:{id:appointmentId,tenantId,doctorId},include:{patient:true,queueEntry:true,service:true,encounter:true}});if(!appointment)throw new WonFlowApiError(404,"appointment-not-found","The appointment could not be found.");return appointment;}
 /** Calls a waiting patient forward in the doctor's real queue. */
 async callQueueEntry(rc:WonFlowRequestContext,appointmentId:string){const{context:c,doctor}=await this.resolveDoctor(rc);requirePermission(c,"queues.manage");const appointment=await this.getAppointmentDetail(c.tenantId,doctor.id,appointmentId);if(!appointment.queueEntry)throw new WonFlowApiError(409,"queue-entry-missing","This appointment has not been checked in to a queue.");if(appointment.queueEntry.status!=="WAITING")throw new WonFlowApiError(409,"queue-entry-not-waiting","Only a waiting patient can be called.");await database.queueEntry.update({where:{id:appointment.queueEntry.id},data:{status:"CALLED",calledAt:new Date()}});return this.getAppointmentDetail(c.tenantId,doctor.id,appointmentId);}
@@ -60,6 +60,55 @@ async pauseEncounter(rc:WonFlowRequestContext,encounterId:string){const{context:
 async resumeEncounter(rc:WonFlowRequestContext,encounterId:string){const{context:c,doctor}=await this.resolveDoctor(rc);requirePermission(c,"encounters.manage");const encounter=await database.encounter.findFirst({where:{id:encounterId,tenantId:c.tenantId,doctorId:doctor.id}});if(!encounter)throw new WonFlowApiError(404,"encounter-not-found","The encounter could not be found.");if(encounter.status!=="PAUSED")throw new WonFlowApiError(409,"encounter-not-paused","Only a paused consultation can be resumed.");const activeElsewhere=await database.encounter.findFirst({where:{tenantId:c.tenantId,doctorId:doctor.id,status:"IN_PROGRESS",id:{not:encounter.id}}});if(activeElsewhere)throw new WonFlowApiError(409,"another-consultation-active","Finish or pause the current consultation before resuming another.");const updated=await database.encounter.update({where:{id:encounter.id},data:{status:"IN_PROGRESS"}});await database.auditEvent.create({data:{tenantId:c.tenantId,branchId:encounter.branchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"encounter.resumed",entityType:"encounter",entityId:encounter.id,severity:"INFORMATION",sourceApplication:c.sourceApplication}});return updated;}
 /** Cancels an encounter with a mandatory reason. When the patient was checked in through a queue, they return to WAITING rather than being dropped; otherwise the appointment itself is marked cancelled/abandoned. */
 async cancelEncounter(rc:WonFlowRequestContext,encounterId:string,reason:string){const{context:c,doctor}=await this.resolveDoctor(rc);requirePermission(c,"encounters.manage");const trimmedReason=reason?.trim();if(!trimmedReason)throw new WonFlowApiError(400,"cancellation-reason-required","A reason is required to cancel a consultation.");const encounter=await database.encounter.findFirst({where:{id:encounterId,tenantId:c.tenantId,doctorId:doctor.id},include:{appointment:{include:{queueEntry:true}}}});if(!encounter)throw new WonFlowApiError(404,"encounter-not-found","The encounter could not be found.");if(encounter.status==="COMPLETED"||encounter.status==="CANCELLED")throw new WonFlowApiError(409,"encounter-not-cancellable","This consultation has already ended and cannot be cancelled.");const now=new Date();return database.$transaction(async tx=>{const updated=await tx.encounter.update({where:{id:encounter.id},data:{status:"CANCELLED",endedAt:now}});if(encounter.appointment?.queueEntry){await tx.queueEntry.update({where:{id:encounter.appointment.queueEntry.id},data:{status:"WAITING",startedAt:null,calledAt:null}});await tx.appointment.update({where:{id:encounter.appointment.id},data:{status:"IN_QUEUE"}});}else if(encounter.appointment){await tx.appointment.update({where:{id:encounter.appointment.id},data:{status:"CANCELLED",cancellationReason:trimmedReason,cancelledAt:now}});}await tx.auditEvent.create({data:{tenantId:c.tenantId,branchId:encounter.branchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"encounter.cancelled",entityType:"encounter",entityId:encounter.id,severity:"WARNING",reason:trimmedReason,sourceApplication:c.sourceApplication}});return updated;});}
+/**
+ * Notes waiting for THIS doctor's countersignature.
+ *
+ * A supervised clinician cannot sign their own note — `signNote` refuses it —
+ * so those notes sit as drafts until their assigned supervisor reviews them.
+ * Until this method existed there was no way for a supervisor to discover
+ * that a note was waiting: the countersignature page was a placeholder that
+ * told the signed-in consultant their session was invalid.
+ */
+async listPendingCountersignatures(rc:WonFlowRequestContext){const{context:c,doctor}=await this.resolveDoctor(rc);requirePermission(c,"encounters.read");
+  const notes=await database.encounterNote.findMany({
+    where:{
+      tenantId:c.tenantId,
+      status:"DRAFT",
+      // Scoped by supervision, not by branch: a supervisor is responsible for
+      // their trainee's notes wherever the trainee saw the patient.
+      encounter:{doctor:{requiresCountersignature:true,supervisorDoctorId:doctor.id}},
+    },
+    include:{
+      encounter:{
+        include:{
+          patient:{select:{id:true,patientNumber:true,givenName:true,familyName:true}},
+          doctor:{include:{staffProfile:{include:{membership:{select:{displayName:true}}}}}},
+        },
+      },
+    },
+    orderBy:{updatedAt:"asc"},
+    take:100,
+  });
+
+  return notes.map(note=>({
+    id:note.id,
+    noteType:note.noteType,
+    updatedAt:note.updatedAt.toISOString(),
+    createdAt:note.createdAt.toISOString(),
+    version:note.version,
+    content:note.content,
+    encounter:{
+      id:note.encounter.id,
+      reason:note.encounter.reason,
+      startedAt:note.encounter.startedAt?.toISOString()??null,
+      status:note.encounter.status,
+    },
+    patient:note.encounter.patient,
+    author:{
+      doctorId:note.encounter.doctorId,
+      displayName:note.encounter.doctor?.staffProfile?.membership?.displayName??"Supervised clinician",
+    },
+  }));}
 /** A doctor may reach an encounter as its treating clinician, or as the assigned supervisor of that clinician (to review and countersign). */
 private async requireEncounterAccess(tenantId:string,doctorId:string,encounterId:string){const encounter=await database.encounter.findFirst({where:{id:encounterId,tenantId,OR:[{doctorId},{doctor:{supervisorDoctorId:doctorId}}]}});if(!encounter)throw new WonFlowApiError(404,"encounter-not-found","The encounter could not be found.");return encounter;}
 async getEncounter(rc:WonFlowRequestContext,id:string){const{context:c,doctor}=await this.resolveDoctor(rc);requirePermission(c,"encounters.read");const encounter=await database.encounter.findFirst({where:{id,tenantId:c.tenantId,OR:[{doctorId:doctor.id},{doctor:{supervisorDoctorId:doctor.id}}]},include:{patient:{include:{identifiers:true,allergies:{where:{status:"ACTIVE"}},observations:{orderBy:{observedAt:"desc"},take:20}}},notes:{orderBy:{updatedAt:"desc"}},diagnoses:true,diagnosticOrders:{include:{results:true,specimens:true}},prescriptions:{include:{items:{include:{medication:true}}}}}});if(!encounter)throw new WonFlowApiError(404,"encounter-not-found","The encounter could not be found.");

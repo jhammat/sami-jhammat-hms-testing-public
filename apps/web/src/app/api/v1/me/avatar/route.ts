@@ -4,6 +4,7 @@ import { database } from "@wonflow/database";
 
 import { safeApiError } from "@/lib/api/route-helpers";
 import { readSession } from "@/lib/auth/session-server";
+import { findStaffAvatarByMembership } from "@/server/allied/allied-profile-service";
 import { findPatientAvatarByIdentity } from "@/server/patient/patient-avatar-service";
 
 /**
@@ -25,6 +26,21 @@ export async function GET(): Promise<NextResponse> {
       });
       if (doctor?.profileImageData) {
         return NextResponse.json({ avatarUrl: doctor.profileImageData }, { headers: { "cache-control": "private, no-store" } });
+      }
+
+      // Allied health staff (physiotherapists, dietitians) have no
+      // DoctorProfile, so their portrait lives on the membership itself and
+      // is streamed rather than inlined as a data URL.
+      const hasStaffPhoto = await findStaffAvatarByMembership(
+        session.membershipId,
+        session.tenantId ?? null,
+      );
+
+      if (hasStaffPhoto) {
+        return NextResponse.json(
+          { avatarUrl: "/api/v1/allied/profile/avatar/file" },
+          { headers: { "cache-control": "private, no-store" } },
+        );
       }
     }
     const patientAvatar = await findPatientAvatarByIdentity(session.identityId, session.tenantId ?? null);

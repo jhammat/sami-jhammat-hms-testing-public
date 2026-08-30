@@ -42,6 +42,9 @@
     "db:seed:dev": "pnpm exec tsx tooling/scripts/seed-development-logins.ts",
     "db:repair-access": "pnpm exec tsx tooling/scripts/repair-workspace-access.ts",
     "db:seed:demo": "pnpm exec tsx tooling/scripts/seed-demo-data.ts",
+    "db:seed:allied": "pnpm exec tsx tooling/scripts/populate-allied-and-patient-demo.ts",
+    "db:seed:hpb": "pnpm exec tsx tooling/scripts/seed-hpb-demo.ts",
+    "db:seed:sjh": "pnpm exec tsx tooling/scripts/seed-sami-jhammat-hospital.ts",
     "db:diagnose:booking": "pnpm exec tsx tooling/scripts/diagnose-patient-booking.ts",
     "db:reset:superadmin": "pnpm exec tsx tooling/scripts/reset-to-fresh-superadmin.ts"
   },

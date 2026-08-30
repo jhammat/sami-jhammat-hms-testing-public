@@ -6,8 +6,9 @@ import { requirePermission, requireTenantContext } from "@wonflow/contracts";
 import type { WonFlowRequestContext, WonFlowTenantRequestContext } from "@wonflow/contracts";
 import { hashPassword } from "@/lib/auth/password";
 import { ensureWorkspaceRoles } from "@/server/access/workspace-roles";
-import { isServiceCategoryCode } from "@/lib/services/service-categories";
+import { getServiceCategory, isServiceCategoryCode, isServiceCategoryEntitled } from "@/lib/services/service-categories";
 import { nextSequentialCode, nextServiceCode, normalizeServiceCode, serviceCodePrefix } from "@/lib/services/service-code";
+import { isWorkspaceEntitled, readEnabledModules } from "@/server/access/workspace-modules";
 import { WonFlowApiError } from "@/server/http/route-handler";
 
 const audit = (tx: Parameters<Parameters<typeof database.$transaction>[0]>[0], c: WonFlowTenantRequestContext, action: string, entityType: string, entityId: string, severity: "INFORMATION"|"WARNING"|"CRITICAL" = "INFORMATION") =>
@@ -107,7 +108,7 @@ export class HospitalAdministrationService {
     return database.$transaction(async tx=>{const entity=await tx.department.update({where:{id},data:{isActive:false,archivedAt:new Date()}});await audit(tx,c,"organization.department.deleted","department",entity.id,"WARNING");return entity;});
   }
   async listUsers(rc:WonFlowRequestContext){const c=this.context(rc);requirePermission(c,"organization.users.read");const memberships=await database.tenantMembership.findMany({where:{tenantId:c.tenantId,organizationId:c.organizationId,archivedAt:null},include:{identity:{select:{email:true,status:true}},primaryBranch:true,roles:{include:{role:true}},staffProfile:{select:{doctor:{select:{department:{select:{id:true,name:true,code:true}}}}}}},orderBy:{displayName:"asc"}});return memberships.map(({staffProfile,...membership})=>({...membership,doctorProfile:staffProfile?.doctor?{department:staffProfile.doctor.department}:null}));}
-  async inviteUser(rc:WonFlowRequestContext,input:{email:string;displayName:string;primaryBranchId?:string;departmentId?:string;department?:string;workspaceCodes?:Array<"ADMIN"|"RECEPTION"|"DOCTOR"|"PATIENT"|"LABORATORY"|"RADIOLOGY"|"PHARMACY"|"BILLING"|"MANAGEMENT">}){
+  async inviteUser(rc:WonFlowRequestContext,input:{email:string;displayName:string;primaryBranchId?:string;departmentId?:string;department?:string;workspaceCodes?:Array<"ADMIN"|"RECEPTION"|"DOCTOR"|"PATIENT"|"LABORATORY"|"RADIOLOGY"|"PHARMACY"|"BILLING"|"MANAGEMENT"|"PHYSIOTHERAPIST"|"NUTRITIONIST">}){
     const c=this.context(rc);requirePermission(c,"organization.users.manage");
     if(input.primaryBranchId&&!await database.branch.findFirst({where:{id:input.primaryBranchId,tenantId:c.tenantId,organizationId:c.organizationId}}))throw new Error("Branch does not belong to this organization.");
     // Doctors are attached to a configured department record, selected inline
@@ -116,6 +117,20 @@ export class HospitalAdministrationService {
     if(input.departmentId&&!selectedDepartment)throw new WonFlowApiError(400,"invalid-department","Select a department configured for this hospital.");
     const normalizedEmail=input.email.trim().toLowerCase();
     const workspaceCodes=input.workspaceCodes??[];
+
+    // The invite screen only OFFERS entitled workspaces, but hiding an option
+    // is not authorization -- this request can be replayed with any workspace
+    // code in it. A tenant that has not licensed a module must not be able to
+    // mint a login for it, so the entitlement is checked here as well.
+    const enabledModules=await readEnabledModules(c.tenantId);
+    const forbidden=workspaceCodes.filter(code=>!isWorkspaceEntitled(code,enabledModules));
+    if(forbidden.length>0){
+      throw new WonFlowApiError(
+        403,
+        "workspace-not-entitled",
+        `This hospital is not licensed for the ${forbidden.join(", ").toLowerCase()} workspace. Ask your platform administrator to enable that module, then invite this person again.`,
+      );
+    }
     const existingIdentity=await database.identity.findUnique({where:{normalizedEmail},select:{passwordHash:true}});
     if(existingIdentity?.passwordHash)throw new WonFlowApiError(409,"staff-account-exists","This email already has a WonFlow login. Add the existing account without replacing its password.");
     const result=await database.$transaction(async tx=>{
@@ -203,7 +218,7 @@ export class HospitalAdministrationService {
       orderBy:{displayName:"asc"},
     });
   }
-  async updateDoctorFeeAuthority(rc:WonFlowRequestContext,authority:"DOCTOR"|"HOSPITAL"){
+  async updateDoctorFeeAuthority(rc:WonFlowRequestContext,authority:"DOCTOR"|"HOSPITAL"|"APPROVAL_REQUIRED"){
     const c=this.context(rc);requirePermission(c,"organization.services.manage");
     return database.$transaction(async tx=>{const organization=await tx.organization.update({where:{id:c.organizationId,tenantId:c.tenantId},data:{doctorFeeAuthority:authority}});await audit(tx,c,"organization.doctor-fee-authority.updated","organization",organization.id,"WARNING");return organization;});
   }
@@ -215,7 +230,14 @@ export class HospitalAdministrationService {
   async createService(rc:WonFlowRequestContext,input:{branchId?:string;handlerWorkspace?:WorkspaceCode;handlerMembershipId?:string;doctorId?:string;code?:string;name:string;category:string;description?:string;durationMinutes:number;priceMinorUnits?:number;currencyCode?:string;publiclyBookable?:boolean;billingOwner?:ServiceBillingOwner;consultationModes?:("IN_PERSON"|"ONLINE")[]}){
     const c=this.context(rc);requirePermission(c,"organization.services.manage");
     if(!input.name?.trim()||!input.category?.trim())throw new WonFlowApiError(400,"service-details-required","Enter a service name and category.");
-    if(!isServiceCategoryCode(input.category))throw new WonFlowApiError(400,"invalid-service-category","Select a valid hospital service category.");
+    if (!isServiceCategoryCode(input.category)) throw new WonFlowApiError(400, "invalid-service-category", "Select a valid hospital service category.");
+    const enabledModules = await readEnabledModules(c.tenantId);
+    if (!isServiceCategoryEntitled(input.category, enabledModules)) {
+      throw new WonFlowApiError(403, "category-not-entitled", `The ${getServiceCategory(input.category)?.label ?? input.category} service category is not enabled for this hospital.`);
+    }
+    if (input.handlerWorkspace && !isWorkspaceEntitled(input.handlerWorkspace, enabledModules)) {
+      throw new WonFlowApiError(403, "workspace-not-entitled", "The selected handler workspace is not enabled for this hospital.");
+    }
     const requestedCode=input.code?.trim()?normalizeServiceCode(input.code):null;
     if(requestedCode!==null&&!/^[A-Z0-9][A-Z0-9-]{1,49}$/.test(requestedCode))throw new WonFlowApiError(400,"invalid-service-code","A custom service code uses 2-50 letters, digits and hyphens.");
     if(!Number.isInteger(input.durationMinutes)||input.durationMinutes<5||input.durationMinutes>480)throw new WonFlowApiError(400,"invalid-service-duration","Duration must be between 5 and 480 minutes.");
@@ -366,5 +388,77 @@ export class HospitalAdministrationService {
     return database.$transaction(async tx=>{const entity=await tx.policyDocument.update({where:{id:policy.id,tenantId:c.tenantId},data:archived?{status:"ARCHIVED",archivedAt:new Date()}:{status:"DRAFT",archivedAt:null}});await audit(tx,c,archived?"organization.policy.archived":"organization.policy.restored","policy",entity.id,"WARNING");return entity;});
   }
   async listAudit(rc:WonFlowRequestContext){const c=this.context(rc);requirePermission(c,"organization.audit.read");return database.auditEvent.findMany({where:{tenantId:c.tenantId},orderBy:{createdAt:"desc"},take:200});}
+  /** Returns all pending fee requests for the organization's doctors. */
+  async listFeeRequests(rc:WonFlowRequestContext){
+    const c=this.context(rc);requirePermission(c,"organization.services.manage");
+    return database.doctorFeeRequest.findMany({
+      where:{tenantId:c.tenantId},
+      include:{
+        doctor:{include:{staffProfile:{include:{membership:{select:{id:true,displayName:true}}}}}},
+        service:{select:{id:true,name:true,code:true,priceMinorUnits:true,currencyCode:true}},
+        proposedBranch:{select:{id:true,name:true}},
+        requestedBy:{select:{id:true,displayName:true}},
+        reviewedBy:{select:{id:true,displayName:true}},
+      },
+      orderBy:[{status:"asc"},{createdAt:"desc"}],
+      take:100,
+    });
+  }
+  /** Approve or decline a doctor fee request. When approved, creates the service or updates the fee. */
+  async reviewFeeRequest(rc:WonFlowRequestContext,requestId:string,input:{action:"APPROVE"|"DECLINE";rejectionReason?:string}){
+    const c=this.context(rc);requirePermission(c,"organization.services.manage");
+    const feeRequest=await database.doctorFeeRequest.findFirst({where:{id:requestId,tenantId:c.tenantId,status:"PENDING"}});
+    if(!feeRequest)throw new WonFlowApiError(404,"fee-request-not-found","The fee request could not be found or has already been reviewed.");
+    if(input.action==="DECLINE"){
+      if(!input.rejectionReason?.trim())throw new WonFlowApiError(400,"rejection-reason-required","Enter a reason for declining this fee request.");
+      return database.$transaction(async tx=>{
+        const updated=await tx.doctorFeeRequest.update({where:{id:feeRequest.id},data:{status:"DECLINED",reviewedByMembershipId:c.membershipId,rejectionReason:input.rejectionReason!.trim(),reviewedAt:new Date()}});
+        await audit(tx,c,"organization.fee-request.declined","doctor-fee-request",updated.id,"WARNING");
+        return updated;
+      });
+    }
+    // Approve
+    return database.$transaction(async tx=>{
+      if(feeRequest.requestType==="CREATE_SERVICE"){
+        const doctor=await tx.doctorProfile.findFirst({where:{id:feeRequest.doctorId,tenantId:c.tenantId},include:{staffProfile:{include:{membership:true}}}});
+        if(!doctor)throw new WonFlowApiError(404,"doctor-not-found","The doctor could not be found.");
+        // Generate a unique service code
+        const existingCodes=await tx.serviceDefinition.findMany({where:{tenantId:c.tenantId,code:{startsWith:"DR-"}},select:{code:true}});
+        const codeBase=`DR-${doctor.id.slice(0,8)}-CONSULT`.toUpperCase();
+        let code=codeBase;
+        let attempt=1;
+        while(existingCodes.some(s=>s.code===code)){code=`${codeBase}-${attempt}`;attempt++;}
+        const service=await tx.serviceDefinition.create({data:{
+          tenantId:c.tenantId,
+          branchId:feeRequest.proposedBranchId,
+          doctorId:doctor.id,
+          code,
+          name:feeRequest.proposedName??"Consultation",
+          category:"CONSULTATION",
+          description:feeRequest.proposedDescription,
+          durationMinutes:feeRequest.proposedDurationMinutes??15,
+          priceMinorUnits:feeRequest.proposedPriceMinorUnits,
+          currencyCode:feeRequest.proposedCurrencyCode,
+          publiclyBookable:feeRequest.proposedPubliclyBookable,
+          consultationModes:feeRequest.proposedConsultationModes.length?feeRequest.proposedConsultationModes:["IN_PERSON"],
+          handlerMembershipId:doctor.staffProfile.membershipId,
+          billingOwner:"DOCTOR",
+        }});
+        await tx.serviceFeeHistory.create({data:{tenantId:c.tenantId,serviceId:service.id,priceMinorUnits:feeRequest.proposedPriceMinorUnits,currencyCode:feeRequest.proposedCurrencyCode,changedByMembershipId:c.membershipId!}});
+        await tx.doctorFeeRequest.update({where:{id:feeRequest.id},data:{status:"APPROVED",serviceId:service.id,reviewedByMembershipId:c.membershipId,reviewedAt:new Date()}});
+        await audit(tx,c,"organization.fee-request.approved","doctor-fee-request",feeRequest.id);
+        return{feeRequest:{...feeRequest,status:"APPROVED"},service};
+      }
+      // UPDATE_FEE
+      if(!feeRequest.serviceId)throw new WonFlowApiError(400,"fee-request-missing-service","This fee request is not linked to an existing service.");
+      const service=await tx.serviceDefinition.findFirst({where:{id:feeRequest.serviceId,tenantId:c.tenantId}});
+      if(!service)throw new WonFlowApiError(404,"service-not-found","The service could not be found.");
+      await tx.serviceDefinition.update({where:{id:service.id,tenantId:c.tenantId},data:{priceMinorUnits:feeRequest.proposedPriceMinorUnits}});
+      await tx.serviceFeeHistory.create({data:{tenantId:c.tenantId,serviceId:service.id,priceMinorUnits:feeRequest.proposedPriceMinorUnits,currencyCode:feeRequest.proposedCurrencyCode,changedByMembershipId:c.membershipId!}});
+      await tx.doctorFeeRequest.update({where:{id:feeRequest.id},data:{status:"APPROVED",reviewedByMembershipId:c.membershipId,reviewedAt:new Date()}});
+      await audit(tx,c,"organization.fee-request.approved","doctor-fee-request",feeRequest.id);
+      return{feeRequest:{...feeRequest,status:"APPROVED"},service};
+    });
+  }
 }
 export const hospitalAdministrationService=new HospitalAdministrationService();

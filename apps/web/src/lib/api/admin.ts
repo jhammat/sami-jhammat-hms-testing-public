@@ -20,7 +20,7 @@ export interface OrganizationRecord {
   email: string | null;
   phone: string | null;
   website: string | null;
-  doctorFeeAuthority: "HOSPITAL" | "DOCTOR";
+  doctorFeeAuthority: "HOSPITAL" | "DOCTOR" | "APPROVAL_REQUIRED";
   branches: BranchRecord[];
 }
 
