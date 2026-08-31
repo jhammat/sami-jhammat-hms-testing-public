@@ -61,11 +61,26 @@ export async function GET() {
     );
   }
 
+  /*
+   * A migration that started and never finished is reported, but does not
+   * fail the check.
+   *
+   * It blocks the next `migrate deploy` and an operator needs to know, yet it
+   * says nothing about whether this instance can serve the request in front of
+   * it — a schema can be perfectly correct while its history table carries an
+   * unresolved row from an interrupted run. Answering 503 would pull a healthy
+   * instance out of a load balancer over a bookkeeping problem, which is a
+   * self-inflicted outage. Degraded is the honest answer: serving, needs
+   * attention.
+   */
   if (failedMigration) {
-    return NextResponse.json(
-      { status: "not-ready", database: "ok", failedMigration },
-      { status: 503 },
-    );
+    return NextResponse.json({
+      status: "degraded",
+      database: "ok",
+      failedMigration,
+      latestMigration,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   return NextResponse.json({

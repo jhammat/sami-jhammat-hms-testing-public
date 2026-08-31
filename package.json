@@ -23,6 +23,7 @@
     "db:migrate": "node tooling/scripts/check-env.mjs DATABASE_URL && pnpm --filter @wonflow/database db:migrate",
     "db:migrate:safe": "node tooling/scripts/check-env.mjs DATABASE_URL && node tooling/scripts/create-migration.mjs",
     "db:deploy": "node tooling/scripts/check-env.mjs DATABASE_URL && pnpm --filter @wonflow/database db:deploy",
+    "db:repair": "node tooling/scripts/db-repair.mjs",
     "db:studio": "node tooling/scripts/check-env.mjs DATABASE_URL && pnpm --filter @wonflow/database db:studio",
     "check": "pnpm lint && pnpm typecheck && pnpm db:validate && pnpm demo:strings:check && git diff --check",
     "check:full": "pnpm check && pnpm build",
