@@ -22,6 +22,13 @@ const PUBLIC_PREFIXES = [
   "/offline.html",
   "/icon.png",
   "/apple-icon.png",
+  // A health check that requires a session is not a health check. These are
+  // what a load balancer polls and what an engineer curls when the site is
+  // down — and "the site is down" is frequently "the database is unreachable",
+  // which is exactly when nobody can sign in to satisfy an auth redirect.
+  // `live` returns a timestamp; `ready` returns ready/not-ready after a
+  // `SELECT 1`. Neither says anything about a patient or an account.
+  "/api/health",
   // Bearer-capability document links: the unguessable, short-lived, single-use
   // token in the path is the authorization, not the session cookie — see
   // consumePatientDocumentAccessToken in patient-document-service.ts.

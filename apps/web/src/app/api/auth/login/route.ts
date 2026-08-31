@@ -14,7 +14,42 @@ import { checkRateLimit, clearRateLimit, clientAddress, recordFailure, rateLimit
 const LOGIN_FAILURE_LIMIT = Number(process.env.WONFLOW_LOGIN_FAILURE_LIMIT ?? 20);
 const LOGIN_WINDOW_MS = 5 * 60 * 1000;
 
+/**
+ * Every failure here has to answer in JSON.
+ *
+ * This route had no error handling, so anything that threw — an unreachable
+ * database above all, since `@wonflow/database` builds its client at module
+ * scope — became an empty 500 with no content-type. The sign-in screen parses
+ * the response body inside its `try`, so an unparseable body landed in the
+ * same `catch` as a genuine connection failure and the user was told
+ * "Network error. Please check your connection and try again."
+ *
+ * That sent people to look at their internet while the real fault was a
+ * server that could not reach its database. The message below says which of
+ * the two it is, and `/api/health/ready` says whether the database is the
+ * reason.
+ *
+ * The detail stays in the server log. This endpoint is unauthenticated, so
+ * the response says that the server is at fault and nothing further.
+ */
 export async function POST(request: Request): Promise<NextResponse | Response> {
+  try {
+    return await handleLogin(request);
+  } catch (error) {
+    console.error("WonFlow sign-in failure", error);
+
+    return NextResponse.json(
+      {
+        error:
+          "The server could not complete sign-in. This is not a problem with your connection — please tell whoever runs this system.",
+        code: "sign-in-unavailable",
+      },
+      { status: 503 },
+    );
+  }
+}
+
+async function handleLogin(request: Request): Promise<NextResponse | Response> {
   const throttleKey = `login:${clientAddress(request)}`;
   const limit = checkRateLimit(throttleKey, LOGIN_FAILURE_LIMIT, LOGIN_WINDOW_MS);
   if (!limit.allowed) return rateLimitResponse(limit);

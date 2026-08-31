@@ -132,6 +132,38 @@ function BackLink({ label, onClick }: { label: string; onClick: () => void }) {
   );
 }
 
+/**
+ * Read a JSON body without letting an unparseable one look like a dropped
+ * connection.
+ *
+ * `await response.json()` inside the same `try` as `fetch` was telling people
+ * their internet was broken whenever the server answered with something that
+ * was not JSON — an empty 500 from a crashed route, an HTML error page, a
+ * gateway's 502. Those are server faults, and sending the reader to check
+ * their wifi wastes everyone's time. A response that arrived at all proves the
+ * network works.
+ */
+async function readJsonBody<T>(response: Response): Promise<T | null> {
+  const text = await response.text().catch(() => "");
+
+  if (!text.trim()) return null;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    return null;
+  }
+}
+
+/** What to say when the server answered but the answer was not usable. */
+function serverFaultMessage(status: number): string {
+  if (status === 502 || status === 503 || status === 504) {
+    return "The server is not reachable right now. Your connection is fine — this is the hospital system itself. Please tell whoever runs it.";
+  }
+
+  return `The server returned an unexpected response (${status}). Your connection is fine — please tell whoever runs this system.`;
+}
+
 function LoginFlow() {
   const searchParams = useSearchParams();
 
@@ -185,14 +217,22 @@ function LoginFlow() {
         body: JSON.stringify({ email: email.trim(), password }),
       });
 
-      const data = (await response.json()) as {
+      const data = await readJsonBody<{
         error?: string;
         homePath?: string;
         passwordChangeRequired?: boolean;
         requiresContextSelection?: boolean;
         displayName?: string;
         contexts?: LoginContext[];
-      };
+      }>(response);
+
+      // The server answered, so the connection is not the problem. It just
+      // did not answer with anything this screen can read.
+      if (!data) {
+        setError(serverFaultMessage(response.status));
+        setBusy(false);
+        return;
+      }
 
       if (data.requiresContextSelection && data.contexts?.length) {
         // The password is accepted and held server-side for two minutes; it is
@@ -213,7 +253,9 @@ function LoginFlow() {
 
       go(data.homePath, data.passwordChangeRequired);
     } catch {
-      setError("Network error. Please check your connection and try again.");
+      // Only reached when the request never completed at all, which is the
+      // one case where the connection really is the thing to check.
+      setError("Could not reach the server. Please check your connection and try again.");
       setBusy(false);
     }
   }
@@ -234,11 +276,17 @@ function LoginFlow() {
         }),
       });
 
-      const data = (await response.json()) as {
+      const data = await readJsonBody<{
         error?: string;
         homePath?: string;
         passwordChangeRequired?: boolean;
-      };
+      }>(response);
+
+      if (!data) {
+        setError(serverFaultMessage(response.status));
+        setChoosing(null);
+        return;
+      }
 
       if (!response.ok || !data.homePath) {
         setError(data.error ?? "That portal could not be opened.");
@@ -248,7 +296,7 @@ function LoginFlow() {
 
       go(data.homePath, data.passwordChangeRequired);
     } catch {
-      setError("Network error. Please check your connection and try again.");
+      setError("Could not reach the server. Please check your connection and try again.");
       setChoosing(null);
     }
   }
