@@ -20,12 +20,71 @@
  * the same two copies at image build time.
  */
 
-import { cp, access } from "node:fs/promises";
+import { cp, access, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const webRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "apps", "web");
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const webRoot = join(repoRoot, "apps", "web");
+
+/**
+ * Load `.env.local` from the repository root.
+ *
+ * `packages/database/src/client.ts` reads it too, but by a path relative to
+ * its own module file. Under `next start` that module sits in
+ * `apps/web/.next/server`, and three levels up is the repository root. In a
+ * standalone build the same module is bundled at
+ * `.next/standalone/apps/web/.next/server/chunks`, where three levels up is
+ * not the root and the file is silently never found — so the server booted
+ * with no DATABASE_URL and answered every request with an unstyled
+ * "Internal Server Error".
+ *
+ * The launcher knows where the root is, so it reads the file and hands the
+ * values to the server. Anything already in the environment wins, which is
+ * how dotenv behaves and what a deployment that sets real variables through
+ * pm2, systemd or Docker expects.
+ */
+async function readEnvFile(path) {
+  let contents;
+
+  try {
+    contents = await readFile(path, "utf8");
+  } catch {
+    // No .env.local is normal. A real deployment sets variables properly.
+    return {};
+  }
+
+  const values = {};
+
+  for (const rawLine of contents.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+
+    const withoutExport = line.startsWith("export ") ? line.slice(7).trim() : line;
+    const separator = withoutExport.indexOf("=");
+    if (separator < 1) continue;
+
+    const key = withoutExport.slice(0, separator).trim();
+    let value = withoutExport.slice(separator + 1).trim();
+
+    const quoted =
+      (value.startsWith('"') && value.endsWith('"')) ||
+      (value.startsWith("'") && value.endsWith("'"));
+
+    if (quoted && value.length >= 2) {
+      value = value.slice(1, -1);
+    } else {
+      // An unquoted trailing comment is not part of the value.
+      const comment = value.indexOf(" #");
+      if (comment >= 0) value = value.slice(0, comment).trim();
+    }
+
+    values[key] = value;
+  }
+
+  return values;
+}
 
 const standalone = join(webRoot, ".next", "standalone", "apps", "web");
 const server = join(standalone, "server.js");
@@ -66,16 +125,32 @@ if (await exists(join(webRoot, "public"))) {
   });
 }
 
-// 3007 keeps the port this script replaced. PORT still wins, so a deployment
-// that sets it is unaffected.
-const child = spawn(process.execPath, [server], {
-  stdio: "inherit",
-  env: {
-    ...process.env,
-    PORT: process.env.PORT ?? "3007",
-    HOSTNAME: process.env.HOSTNAME ?? "0.0.0.0",
-  },
-});
+const fileEnv = await readEnvFile(join(repoRoot, ".env.local"));
+
+// Spread order is the contract: the file fills gaps, the real environment
+// wins. A deployment that sets DATABASE_URL through pm2 or systemd is never
+// overridden by a stale file someone left on the box.
+const env = {
+  ...fileEnv,
+  ...process.env,
+  PORT: process.env.PORT ?? "3007",
+  HOSTNAME: process.env.HOSTNAME ?? "0.0.0.0",
+};
+
+if (!env.DATABASE_URL) {
+  console.error(
+    [
+      "DATABASE_URL is not set.",
+      "",
+      "The server needs it to reach the database, and every request will fail",
+      "with an internal error without it. Set it in the environment, or in a",
+      `.env.local at ${repoRoot}`,
+    ].join("\n"),
+  );
+  process.exit(1);
+}
+
+const child = spawn(process.execPath, [server], { stdio: "inherit", env });
 
 child.on("exit", (code, signal) => {
   if (signal) process.kill(process.pid, signal);
