@@ -17,7 +17,7 @@ import { defineConfig, devices } from "@playwright/test";
  */
 export default defineConfig({
   testDir: "./tests/e2e",
-  testMatch: /(hpbsp-portal-sweep|login-flow|allied-shell-capture|responsive-integrity)\.spec\.ts/,
+  testMatch: /(hpbsp-portal-sweep|login-flow|allied-shell-capture|responsive-integrity|patient-registration)\.spec\.ts/,
   fullyParallel: false,
   workers: 1,
   retries: 0,
