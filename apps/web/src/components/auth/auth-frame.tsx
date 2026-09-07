@@ -30,7 +30,13 @@ export function AuthFrame({
       <div className="relative flex min-h-screen w-full items-center justify-center px-4 py-8 sm:px-6 sm:py-10">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 opacity-[0.28] bg-[linear-gradient(rgba(99,102,241,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(99,102,241,0.05)_1px,transparent_1px)] bg-size-[36px_36px] dark:opacity-[0.10]"
+          suppressHydrationWarning
+          className="pointer-events-none absolute inset-0 opacity-[0.28] dark:opacity-[0.10]"
+          style={{
+            backgroundImage:
+              "linear-gradient(rgba(99,102,241,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(99,102,241,0.05) 1px, transparent 1px)",
+            backgroundSize: "36px 36px",
+          }}
         />
 
         <svg

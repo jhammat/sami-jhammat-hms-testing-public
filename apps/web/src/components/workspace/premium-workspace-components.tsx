@@ -127,7 +127,11 @@ export function WonFlowPageHeader({
     <header className="wf-page-header relative isolate overflow-hidden rounded-[24px] border border-white/80 dark:border-slate-800 bg-gradient-to-br from-white via-indigo-50/45 to-cyan-50/70 dark:from-slate-900 dark:via-slate-800/90 dark:to-slate-900 shadow-[0_18px_50px_rgba(37,99,235,0.10)] dark:shadow-none ring-1 ring-indigo-100/70 dark:ring-slate-800">
       <div className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-violet-400/15 dark:bg-violet-500/10 blur-3xl" />
       <div className="pointer-events-none absolute -bottom-28 left-1/3 h-52 w-52 rounded-full bg-cyan-400/15 dark:bg-cyan-500/10 blur-3xl" />
-      <div className="pointer-events-none absolute inset-0 opacity-[0.20] [background-image:radial-gradient(circle_at_1px_1px,rgba(99,102,241,0.28)_1px,transparent_0)] dark:[background-image:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.15)_1px,transparent_0)] [background-size:18px_18px]" />
+      <div
+        aria-hidden="true"
+        suppressHydrationWarning
+        className="pointer-events-none absolute inset-0 opacity-[0.20] [background-image:radial-gradient(circle_at_1px_1px,rgba(99,102,241,0.28)_1px,transparent_0)] dark:[background-image:radial-gradient(circle_at_1px_1px,rgba(255,255,255,0.15)_1px,transparent_0)] [background-size:18px_18px]"
+      />
 
       <div className="relative px-4 py-4 sm:px-5 lg:px-6">
         {breadcrumbs !==
