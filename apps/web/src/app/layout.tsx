@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import Script from "next/script";
 import { Geist_Mono, Inter } from "next/font/google";
 
 import {
@@ -97,23 +98,23 @@ export default async function RootLayout({
       suppressHydrationWarning
     >
       <head>
-        <script
+        <Script
           id="wonflow-data-cleanup"
-          suppressHydrationWarning
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `try{const marker="wonflow-data-cleanup-v1";const stalePrefix="wonflow-demo"+"-";if(localStorage.getItem(marker)!=="complete"){for(let index=localStorage.length-1;index>=0;index-=1){const key=localStorage.key(index);if(key?.startsWith(stalePrefix)){localStorage.removeItem(key)}}for(let index=sessionStorage.length-1;index>=0;index-=1){const key=sessionStorage.key(index);if(key?.startsWith(stalePrefix)){sessionStorage.removeItem(key)}}localStorage.setItem(marker,"complete")}}catch{}`,
           }}
         />
-        <script
+        <Script
           id="wonflow-color-theme"
-          suppressHydrationWarning
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{
             __html: `try{if(localStorage.getItem("wonflow-color-theme")==="dark"){document.documentElement.classList.add("dark");document.documentElement.style.colorScheme="dark"}}catch{}`,
           }}
         />
-        <script
+        <Script
           id="wonflow-sw-register"
-          suppressHydrationWarning
+          strategy="afterInteractive"
           dangerouslySetInnerHTML={{
             __html: `if("serviceWorker"in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){})})}`,
           }}

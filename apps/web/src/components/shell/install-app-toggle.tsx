@@ -381,12 +381,7 @@ export function InstallAppToggle({ compact = false }: { compact?: boolean }) {
     <>
       <div
         suppressHydrationWarning
-        className={[
-          "wfg-well relative flex items-center gap-3 rounded-2xl px-3 py-2.5 transition-all duration-200",
-          compact ? "justify-center" : null,
-        ]
-          .filter(Boolean)
-          .join(" ")}
+        className={`wfg-well relative flex items-center gap-3 rounded-2xl px-3 py-2.5 transition-all duration-200${compact ? " justify-center" : ""}`}
       >
         <button
           type="button"
