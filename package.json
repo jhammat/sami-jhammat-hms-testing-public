@@ -35,6 +35,7 @@
     "phase:audit": "node tooling/scripts/phase-one-scope-audit.mjs",
     "test": "pnpm -r run --if-present test",
     "test:e2e": "pnpm --filter web test:e2e",
+    "test:integration:http": "pnpm exec tsx apps/web/tests/integration-http/cross-portal.ts",
     "test:coverage": "pnpm --filter web test:coverage",
     "db:backup": "node tooling/scripts/postgres-backup.mjs",
     "db:provision-roles": "pnpm exec tsx tooling/scripts/provision-database-roles.ts",

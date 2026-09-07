@@ -24,6 +24,14 @@ interface PatientRow {
   dateOfBirth?: string | null;
 }
 
+interface TemplateRow {
+  id: string;
+  title: string;
+  category: string;
+  durationDays: number;
+  taskTemplates?: unknown[];
+}
+
 interface AlliedStaffRow {
   id: string;
   staffType: string;
@@ -54,12 +62,35 @@ export function CreateCarePlanModal({
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<PatientRow | null>(null);
   const [allied, setAllied] = useState<AlliedStaffRow[]>([]);
+  /*
+   * Which saved plan to start the patient on.
+   *
+   * `instantiateCarePlan` accepted a `templateId` all along, but nothing sent
+   * one — so it silently fell back to the first template matching the
+   * category and every patient on a pathway received an identical task list
+   * nobody here had chosen. The doctor picks it now.
+   */
+  const [templates, setTemplates] = useState<TemplateRow[]>([]);
+  const [templateId, setTemplateId] = useState("");
   const [query, setQuery] = useState("");
   const [loadingPatients, setLoadingPatients] = useState(false);
 
   const [patientId, setPatientId] = useState("");
   const [category, setCategory] = useState(CATEGORIES[0]!.value);
-  const [durationDays, setDurationDays] = useState(CATEGORIES[0]!.defaultDays);
+  /*
+   * Held as text so the field can actually be emptied while typing.
+   *
+   * It was a number clamped on every keystroke — `Math.max(1, Number(value) || 1)`
+   * — so clearing it to type a new figure turned "" into 0 into 1, and the 1
+   * reappeared under the cursor. There was no way to select the field, delete,
+   * and type "30": the clamp fought every keystroke. Clamping now happens when
+   * the field is left and again on submit, which is where a range check
+   * belongs.
+   */
+  const [durationDays, setDurationDays] = useState(String(CATEGORIES[0]!.defaultDays));
+  const durationValue = Number.parseInt(durationDays, 10);
+  const clampDuration = (value: number, fallback: number) =>
+    Number.isFinite(value) ? Math.min(365, Math.max(1, Math.floor(value))) : fallback;
   const [title, setTitle] = useState("");
   const [startDate, setStartDate] = useState(() => todayLocalDate());
   const [therapistId, setTherapistId] = useState("");
@@ -116,12 +147,14 @@ export function CreateCarePlanModal({
 
     void (async () => {
       try {
-        const response = await fetch("/api/v1/allied/staff", {
-          credentials: "same-origin",
-          cache: "no-store",
-        });
-        const payload = await response.json().catch(() => null);
-        if (!cancelled && response.ok) setAllied(payload?.staff ?? []);
+        const [staffResponse, templateResponse] = await Promise.all([
+          fetch("/api/v1/allied/staff", { credentials: "same-origin", cache: "no-store" }),
+          fetch("/api/v1/clinical/careplans/templates", { credentials: "same-origin", cache: "no-store" }),
+        ]);
+        const payload = await staffResponse.json().catch(() => null);
+        if (!cancelled && staffResponse.ok) setAllied(payload?.staff ?? []);
+        const templatePayload = await templateResponse.json().catch(() => null);
+        if (!cancelled && templateResponse.ok) setTemplates(templatePayload?.templates ?? []);
       } catch {
         // Assignment stays optional
       }
@@ -138,7 +171,7 @@ export function CreateCarePlanModal({
     setCategory(newCategory);
     const catObj = CATEGORIES.find((c) => c.value === newCategory);
     if (catObj) {
-      setDurationDays(catObj.defaultDays);
+      setDurationDays(String(catObj.defaultDays));
     }
   }
 
@@ -175,7 +208,8 @@ export function CreateCarePlanModal({
         body: JSON.stringify({
           patientId,
           category,
-          durationDays: Math.max(1, Math.floor(durationDays || 14)),
+          templateId: templateId || undefined,
+          durationDays: clampDuration(durationValue, CATEGORIES.find((entry) => entry.value === category)?.defaultDays ?? 14),
           title:
             title.trim() ||
             `${CATEGORIES.find((entry) => entry.value === category)?.label ?? "Recovery"} — ${selectedPatient?.givenName ?? "Patient"}`,
@@ -401,7 +435,15 @@ export function CreateCarePlanModal({
                   min={1}
                   max={365}
                   value={durationDays}
-                  onChange={(e) => setDurationDays(Math.max(1, Number(e.target.value) || 1))}
+                  onChange={(e) => {
+                    // Digits only, and an empty box stays empty while typing.
+                    const next = e.target.value.replace(/[^\d]/g, "");
+                    setDurationDays(next);
+                  }}
+                  onBlur={() => {
+                    const fallback = CATEGORIES.find((entry) => entry.value === category)?.defaultDays ?? 14;
+                    setDurationDays(String(clampDuration(durationValue, fallback)));
+                  }}
                   className="w-16 rounded-xl border border-slate-300 bg-white px-2.5 py-1 text-center text-xs font-bold text-indigo-700 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:text-indigo-300"
                 />
                 <span className="text-xs font-semibold text-slate-600 dark:text-slate-400">days</span>
@@ -414,9 +456,9 @@ export function CreateCarePlanModal({
                 <button
                   key={days}
                   type="button"
-                  onClick={() => setDurationDays(days)}
+                  onClick={() => setDurationDays(String(days))}
                   className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
-                    durationDays === days
+                    durationValue === days
                       ? "bg-indigo-600 text-white shadow-xs"
                       : "bg-white text-slate-700 border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
                   }`}
@@ -426,6 +468,31 @@ export function CreateCarePlanModal({
               ))}
             </div>
           </div>
+
+          <PhaseOneField
+            label="Recovery plan"
+            htmlFor="cp-template"
+            hint={
+              templates.length
+                ? "Choose a saved plan, or leave on the pathway default. Build and edit these under “Recovery plans”."
+                : "No saved plans yet — build one under “Recovery plans” on the roster."
+            }
+          >
+            <PhaseOneSelect
+              id="cp-template"
+              onChange={(event) => setTemplateId(event.target.value)}
+              value={templateId}
+            >
+              <option value="">Default for this pathway</option>
+              {templates
+                .filter((template) => !category || template.category === category)
+                .map((template) => (
+                  <option key={template.id} value={template.id}>
+                    {template.title} — {template.taskTemplates?.length ?? 0} tasks · {template.durationDays} days
+                  </option>
+                ))}
+            </PhaseOneSelect>
+          </PhaseOneField>
 
           <PhaseOneField
             label="Plan Title"

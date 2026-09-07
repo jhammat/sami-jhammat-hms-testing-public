@@ -5,6 +5,31 @@ import { readSession } from "./session-server";
 
 const activeForTime = (from: Date | null, until: Date | null, now: Date) => (!from || from <= now) && (!until || until >= now);
 
+/**
+ * Whether a branch-scoped grant applies to the branch the caller is signed in to.
+ *
+ * A grant carrying no branch is organization-wide and always applies. A grant
+ * scoped to a branch applies when the caller is in that branch.
+ *
+ * The third case is the one that mattered: a caller whose session carries *no*
+ * branch at all. `session.branchId` comes from `membership.primaryBranchId`
+ * (account-service), and a membership can legitimately have none — an invitation
+ * that never set one, or an administrator clearing it — while its role
+ * assignments still carry the branch they were created against. Comparing a
+ * real branch against `null` then failed for every assignment the membership
+ * held, so the user kept their roles on paper and lost every permission behind
+ * them: a blanket 403 across their whole portal, with an error message naming a
+ * permission their role visibly grants.
+ *
+ * A missing branch is now read as "no branch filter to apply" rather than as a
+ * branch that matches nothing. This cannot be used to widen access: the value
+ * is derived server-side at sign-in and never accepted from the client
+ * (`/api/auth/switch-workspace` changes only `workspace`), and the grants
+ * considered are only ever the ones this membership already holds.
+ */
+const appliesToBranch = (grantBranchId: string | null, sessionBranchId: string | null) =>
+  !grantBranchId || !sessionBranchId || grantBranchId === sessionBranchId;
+
 export async function resolvePermissionCodes(input: { membershipId: string; tenantId: string; branchId: string | null }): Promise<string[]> {
   const now = new Date();
   const membership = await database.tenantMembership.findFirst({ where: { id: input.membershipId, tenantId: input.tenantId, status: "ACTIVE" },
@@ -13,14 +38,14 @@ export async function resolvePermissionCodes(input: { membershipId: string; tena
   if (!membership) return [];
   const allowed = new Set<string>(); const denied = new Set<string>();
   for (const assignment of membership.roles) {
-    if ((assignment.branchId && assignment.branchId !== input.branchId) || !activeForTime(assignment.validFrom, assignment.validUntil, now) || !assignment.role.isActive) continue;
+    if (!appliesToBranch(assignment.branchId, input.branchId) || !activeForTime(assignment.validFrom, assignment.validUntil, now) || !assignment.role.isActive) continue;
     for (const relation of assignment.role.permissions) {
       const code = relation.permission.code;
       if (relation.effect === "DENY") { denied.add(code); allowed.delete(code); } else if (!denied.has(code)) allowed.add(code);
     }
   }
   for (const grant of membership.directGrants) {
-    if ((grant.branchId && grant.branchId !== input.branchId) || !activeForTime(grant.validFrom, grant.validUntil, now)) continue;
+    if (!appliesToBranch(grant.branchId, input.branchId) || !activeForTime(grant.validFrom, grant.validUntil, now)) continue;
     const code = grant.permission.code;
     if (grant.effect === "DENY") { denied.add(code); allowed.delete(code); } else if (!denied.has(code)) allowed.add(code);
   }

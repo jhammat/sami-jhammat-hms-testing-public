@@ -1070,6 +1070,12 @@ export function ReceptionDeskWorkspace() {
     setPatientSaved,
   ] = useState(false);
 
+  /** Existing records that look like the patient just registered — see savePatient. */
+  const [
+    duplicateWarning,
+    setDuplicateWarning,
+  ] = useState<string[]>([]);
+
   const [
     patientError,
     setPatientError,
@@ -1987,7 +1993,7 @@ export function ReceptionDeskWorkspace() {
     const givenName = nameParts.shift() ?? "";
     const familyName = nameParts.length > 0 ? nameParts.pop()! : "";
     try {
-      const { patient: saved } = await registerReceptionPatient({
+      const { patient: saved, possibleDuplicates } = await registerReceptionPatient({
         givenName,
         familyName,
         middleName: nameParts.join(" ") || undefined,
@@ -2058,6 +2064,23 @@ export function ReceptionDeskWorkspace() {
 
     setPatientSaved(true);
     setPatientError("");
+    /*
+     * The server already works out whether this looks like somebody who is
+     * already registered — same phone, or same name and date of birth — and
+     * returns them as `possibleDuplicates`. That answer was being discarded
+     * here, so a patient re-registered under a second MR number with nothing
+     * shown to the receptionist and their history split across two records.
+     * The registration still goes through (the front desk is not the place to
+     * block on a maybe) but the match is now named, with the MR number needed
+     * to go and merge or switch to it.
+     */
+    setDuplicateWarning(
+      possibleDuplicates && possibleDuplicates.length > 0
+        ? possibleDuplicates
+            .slice(0, 3)
+            .map((match) => `${match.givenName ?? ""} ${match.familyName ?? ""}`.trim() + ` (MR ${match.patientNumber})`)
+        : [],
+    );
     } catch (caught) {
       setPatientError(
         caught instanceof Error
@@ -3374,6 +3397,31 @@ export function ReceptionDeskWorkspace() {
                         {
                           patientError
                         }
+                      </div>
+                    ) : null}
+
+                    {duplicateWarning.length > 0 ? (
+                      <div className="mt-2 rounded-lg bg-amber-50 px-2.5 py-2 text-[9px] font-bold text-amber-800">
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle size={12} />
+                          Possible duplicate — this person may already be registered
+                        </div>
+                        <ul className="mt-1 list-disc pl-6 font-semibold">
+                          {duplicateWarning.map((match) => (
+                            <li key={match}>{match}</li>
+                          ))}
+                        </ul>
+                        <p className="mt-1 font-semibold">
+                          The new record was still created. If it is the same person, use the existing MR number
+                          instead so their history stays in one place.
+                        </p>
+                        <button
+                          className="mt-1.5 rounded-md bg-amber-200/70 px-2 py-1 font-black text-amber-900 hover:bg-amber-200"
+                          onClick={() => setDuplicateWarning([])}
+                          type="button"
+                        >
+                          Dismiss
+                        </button>
                       </div>
                     ) : null}
                   </div>

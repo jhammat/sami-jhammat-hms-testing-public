@@ -1144,22 +1144,143 @@ export class HospitalAdministrationService {
       return updatedDoctor;
     });
   }
-  async createSchedule(rc:WonFlowRequestContext,input:{doctorId:string;branchId:string;serviceId?:string;weekday:number;startsMinute:number;endsMinute:number;capacity?:number;validFrom:string;validUntil?:string}){const c=this.context(rc);requirePermission(c,"organization.schedules.manage");if(!Number.isInteger(input.weekday)||input.weekday<0||input.weekday>6)throw new WonFlowApiError(400,"invalid-schedule-weekday","Select a valid weekday.");if(!Number.isInteger(input.startsMinute)||!Number.isInteger(input.endsMinute)||input.startsMinute<0||input.endsMinute>1440||input.endsMinute<=input.startsMinute)throw new WonFlowApiError(400,"invalid-schedule-time","End time must be later than start time.");if(input.capacity!==undefined&&(!Number.isInteger(input.capacity)||input.capacity<1))throw new WonFlowApiError(400,"invalid-schedule-capacity","Capacity must be at least one.");const validFrom=new Date(input.validFrom);const validUntil=input.validUntil?new Date(input.validUntil):null;if(Number.isNaN(validFrom.getTime())||(validUntil&&Number.isNaN(validUntil.getTime())))throw new WonFlowApiError(400,"invalid-schedule-date","Select a valid schedule date.");const [branch,doctor,selectedService]=await Promise.all([database.branch.findFirst({where:{id:input.branchId,tenantId:c.tenantId,organizationId:c.organizationId}}),database.doctorProfile.findFirst({where:{id:input.doctorId,tenantId:c.tenantId,staffProfile:{membership:{organizationId:c.organizationId}}}}),input.serviceId?database.serviceDefinition.findFirst({where:{id:input.serviceId,tenantId:c.tenantId}}):Promise.resolve(null)]);if(!branch||!doctor)throw new WonFlowApiError(400,"invalid-schedule-assignment","Doctor or branch is outside this hospital.");if(input.serviceId&&!selectedService)throw new WonFlowApiError(400,"invalid-schedule-service","Service is outside this hospital.");return database.$transaction(async tx=>{const entity=await tx.availabilityRule.create({data:{tenantId:c.tenantId,...input,serviceId:input.serviceId??null,capacity:input.capacity??1,validFrom,validUntil}});await audit(tx,c,"organization.schedule.created","availability-rule",entity.id);return entity;});}
-  async updateSchedule(rc:WonFlowRequestContext,id:string,input:{doctorId?:string;branchId?:string;serviceId?:string|null;weekday?:number;startsMinute?:number;endsMinute?:number;capacity?:number;validFrom?:string;validUntil?:string|null;isActive?:boolean}){
-    const c=this.context(rc);requirePermission(c,"organization.schedules.manage");
-    const schedule=await database.availabilityRule.findFirst({where:{id,tenantId:c.tenantId}});
-    if(!schedule)throw new WonFlowApiError(404,"schedule-not-found","The rostered hours could not be found.");
-    const weekday=input.weekday??schedule.weekday,startsMinute=input.startsMinute??schedule.startsMinute,endsMinute=input.endsMinute??schedule.endsMinute;
-    if(!Number.isInteger(weekday)||weekday<0||weekday>6)throw new WonFlowApiError(400,"invalid-schedule-weekday","Select a valid weekday.");
-    if(!Number.isInteger(startsMinute)||!Number.isInteger(endsMinute)||startsMinute<0||endsMinute>1440||endsMinute<=startsMinute)throw new WonFlowApiError(400,"invalid-schedule-time","End time must be later than start time.");
-    if(input.capacity!==undefined&&(!Number.isInteger(input.capacity)||input.capacity<1))throw new WonFlowApiError(400,"invalid-schedule-capacity","Capacity must be at least one.");
-    const validFrom=input.validFrom===undefined?undefined:new Date(input.validFrom);
-    const validUntil=input.validUntil===undefined?undefined:input.validUntil===null?null:new Date(input.validUntil);
-    if((validFrom&&Number.isNaN(validFrom.getTime()))||(validUntil&&Number.isNaN(validUntil.getTime())))throw new WonFlowApiError(400,"invalid-schedule-date","Select a valid schedule date.");
-    if(input.branchId&&!await database.branch.findFirst({where:{id:input.branchId,tenantId:c.tenantId,organizationId:c.organizationId}}))throw new WonFlowApiError(400,"invalid-schedule-assignment","Doctor or branch is outside this hospital.");
-    if(input.doctorId&&!await database.doctorProfile.findFirst({where:{id:input.doctorId,tenantId:c.tenantId,staffProfile:{membership:{organizationId:c.organizationId}}}}))throw new WonFlowApiError(400,"invalid-schedule-assignment","Doctor or branch is outside this hospital.");
-    if(input.serviceId&&!await database.serviceDefinition.findFirst({where:{id:input.serviceId,tenantId:c.tenantId}}))throw new WonFlowApiError(400,"invalid-schedule-service","Service is outside this hospital.");
-    return database.$transaction(async tx=>{const entity=await tx.availabilityRule.update({where:{id:schedule.id,tenantId:c.tenantId},data:{...input,weekday,startsMinute,endsMinute,serviceId:input.serviceId===undefined?undefined:input.serviceId||null,validFrom,validUntil}});await audit(tx,c,"organization.schedule.updated","availability-rule",entity.id);return entity;});
+  async createSchedule(rc: WonFlowRequestContext, input: { doctorId: string; branchId: string; serviceId?: string; weekday: number; startsMinute: number; endsMinute: number; capacity?: number; validFrom: string; validUntil?: string }) {
+    const c = this.context(rc);
+    requirePermission(c, "organization.schedules.manage");
+    if (!Number.isInteger(input.weekday) || input.weekday < 0 || input.weekday > 6)
+      throw new WonFlowApiError(400, "invalid-schedule-weekday", "Select a valid weekday.");
+    let endsMinute = input.endsMinute;
+    if (endsMinute === 0 && input.startsMinute > 0) {
+      endsMinute = 1440;
+    }
+    if (!Number.isInteger(input.startsMinute) || !Number.isInteger(endsMinute) || input.startsMinute < 0 || endsMinute > 1440)
+      throw new WonFlowApiError(400, "invalid-schedule-time", "Enter valid start and end times.");
+    if (endsMinute === input.startsMinute)
+      throw new WonFlowApiError(400, "invalid-schedule-time", "End time cannot be the same as start time.");
+    const isOvernight = endsMinute < input.startsMinute;
+    if (input.capacity !== undefined && (!Number.isInteger(input.capacity) || input.capacity < 1))
+      throw new WonFlowApiError(400, "invalid-schedule-capacity", "Capacity must be at least one.");
+    const validFrom = new Date(input.validFrom);
+    const validUntil = input.validUntil ? new Date(input.validUntil) : null;
+    if (Number.isNaN(validFrom.getTime()) || (validUntil && Number.isNaN(validUntil.getTime())))
+      throw new WonFlowApiError(400, "invalid-schedule-date", "Select a valid schedule date.");
+    const [branch, doctor, selectedService] = await Promise.all([
+      database.branch.findFirst({ where: { id: input.branchId, tenantId: c.tenantId, organizationId: c.organizationId } }),
+      database.doctorProfile.findFirst({ where: { id: input.doctorId, tenantId: c.tenantId, staffProfile: { membership: { organizationId: c.organizationId } } } }),
+      input.serviceId ? database.serviceDefinition.findFirst({ where: { id: input.serviceId, tenantId: c.tenantId } }) : Promise.resolve(null),
+    ]);
+    if (!branch || !doctor) throw new WonFlowApiError(400, "invalid-schedule-assignment", "Doctor or branch is outside this hospital.");
+    if (input.serviceId && !selectedService) throw new WonFlowApiError(400, "invalid-schedule-service", "Service is outside this hospital.");
+    return database.$transaction(async (tx) => {
+      if (isOvernight) {
+        const entity = await tx.availabilityRule.create({
+          data: {
+            tenantId: c.tenantId,
+            doctorId: input.doctorId,
+            branchId: input.branchId,
+            serviceId: input.serviceId ?? null,
+            weekday: input.weekday,
+            startsMinute: input.startsMinute,
+            endsMinute: 1440,
+            capacity: input.capacity ?? 1,
+            validFrom,
+            validUntil,
+          },
+        });
+        await tx.availabilityRule.create({
+          data: {
+            tenantId: c.tenantId,
+            doctorId: input.doctorId,
+            branchId: input.branchId,
+            serviceId: input.serviceId ?? null,
+            weekday: (input.weekday + 1) % 7,
+            startsMinute: 0,
+            endsMinute,
+            capacity: input.capacity ?? 1,
+            validFrom,
+            validUntil,
+          },
+        });
+        await audit(tx, c, "organization.schedule.created", "availability-rule", entity.id);
+        return entity;
+      }
+      const entity = await tx.availabilityRule.create({
+        data: {
+          tenantId: c.tenantId,
+          ...input,
+          endsMinute,
+          serviceId: input.serviceId ?? null,
+          capacity: input.capacity ?? 1,
+          validFrom,
+          validUntil,
+        },
+      });
+      await audit(tx, c, "organization.schedule.created", "availability-rule", entity.id);
+      return entity;
+    });
+  }
+  async updateSchedule(rc: WonFlowRequestContext, id: string, input: { doctorId?: string; branchId?: string; serviceId?: string | null; weekday?: number; startsMinute?: number; endsMinute?: number; capacity?: number; validFrom?: string; validUntil?: string | null; isActive?: boolean }) {
+    const c = this.context(rc);
+    requirePermission(c, "organization.schedules.manage");
+    const schedule = await database.availabilityRule.findFirst({ where: { id, tenantId: c.tenantId } });
+    if (!schedule) throw new WonFlowApiError(404, "schedule-not-found", "The rostered hours could not be found.");
+    const weekday = input.weekday ?? schedule.weekday;
+    const startsMinute = input.startsMinute ?? schedule.startsMinute;
+    let endsMinute = input.endsMinute ?? schedule.endsMinute;
+    if (endsMinute === 0 && startsMinute > 0) {
+      endsMinute = 1440;
+    }
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6)
+      throw new WonFlowApiError(400, "invalid-schedule-weekday", "Select a valid weekday.");
+    if (!Number.isInteger(startsMinute) || !Number.isInteger(endsMinute) || startsMinute < 0 || endsMinute > 1440)
+      throw new WonFlowApiError(400, "invalid-schedule-time", "Enter valid start and end times.");
+    if (endsMinute === startsMinute)
+      throw new WonFlowApiError(400, "invalid-schedule-time", "End time cannot be the same as start time.");
+    const isOvernight = endsMinute < startsMinute;
+    if (input.capacity !== undefined && (!Number.isInteger(input.capacity) || input.capacity < 1))
+      throw new WonFlowApiError(400, "invalid-schedule-capacity", "Capacity must be at least one.");
+    const validFrom = input.validFrom === undefined ? undefined : new Date(input.validFrom);
+    const validUntil = input.validUntil === undefined ? undefined : input.validUntil === null ? null : new Date(input.validUntil);
+    if ((validFrom && Number.isNaN(validFrom.getTime())) || (validUntil && Number.isNaN(validUntil.getTime())))
+      throw new WonFlowApiError(400, "invalid-schedule-date", "Select a valid schedule date.");
+    if (input.branchId && !await database.branch.findFirst({ where: { id: input.branchId, tenantId: c.tenantId, organizationId: c.organizationId } }))
+      throw new WonFlowApiError(400, "invalid-schedule-assignment", "Doctor or branch is outside this hospital.");
+    if (input.doctorId && !await database.doctorProfile.findFirst({ where: { id: input.doctorId, tenantId: c.tenantId, staffProfile: { membership: { organizationId: c.organizationId } } } }))
+      throw new WonFlowApiError(400, "invalid-schedule-assignment", "Doctor or branch is outside this hospital.");
+    if (input.serviceId && !await database.serviceDefinition.findFirst({ where: { id: input.serviceId, tenantId: c.tenantId } }))
+      throw new WonFlowApiError(400, "invalid-schedule-service", "Service is outside this hospital.");
+    return database.$transaction(async (tx) => {
+      const entity = await tx.availabilityRule.update({
+        where: { id: schedule.id, tenantId: c.tenantId },
+        data: {
+          ...input,
+          weekday,
+          startsMinute,
+          endsMinute: isOvernight ? 1440 : endsMinute,
+          serviceId: input.serviceId === undefined ? undefined : input.serviceId || null,
+          validFrom,
+          validUntil,
+        },
+      });
+      if (isOvernight) {
+        await tx.availabilityRule.create({
+          data: {
+            tenantId: c.tenantId,
+            doctorId: input.doctorId ?? schedule.doctorId,
+            branchId: input.branchId ?? schedule.branchId,
+            serviceId: (input.serviceId === undefined ? schedule.serviceId : input.serviceId) || null,
+            weekday: (weekday + 1) % 7,
+            startsMinute: 0,
+            endsMinute,
+            capacity: input.capacity ?? schedule.capacity,
+            validFrom: validFrom ?? schedule.validFrom,
+            validUntil: validUntil !== undefined ? validUntil : schedule.validUntil,
+          },
+        });
+      }
+      await audit(tx, c, "organization.schedule.updated", "availability-rule", entity.id);
+      return entity;
+    });
   }
   async deleteSchedule(rc:WonFlowRequestContext,id:string){
     const c=this.context(rc);requirePermission(c,"organization.schedules.manage");

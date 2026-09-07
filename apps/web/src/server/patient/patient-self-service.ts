@@ -189,10 +189,25 @@ export async function getPatientBookingCatalog(requestContext: WonFlowRequestCon
     where: { tenantId: context.tenantId, isActive: true, publiclyBookable: true },
     orderBy: [{ doctorId: "desc" }, { createdAt: "asc" }],
   });
-  const fallbackService = defaultServices[0] ?? null;
+  /*
+   * A clinic rostered without a service is priced from that doctor's own
+   * consultation service — and only ever from theirs.
+   *
+   * This used to fall back to `defaultServices[0]`, the first publicly
+   * bookable service in the whole hospital, whenever the doctor had none of
+   * their own. A patient booking Dr A's Tuesday clinic could then be quoted
+   * and charged against a service belonging to Dr B, at Dr B's price, with
+   * Dr B's duration and consultation modes deciding what the patient was
+   * offered. Attaching this doctor's own service is a helpful convenience;
+   * attaching somebody else's is a pricing error wearing the same clothes.
+   *
+   * With no service of their own the rule is dropped below, and
+   * `diagnoseEmptyCatalog` explains it as `schedule-has-no-service` rather
+   * than leaving the patient with an empty screen.
+   */
   for (const candidate of candidateRules) {
     if (!candidate.serviceId || !candidate.service) {
-      const matched = defaultServices.find((s) => s.doctorId === candidate.doctorId) ?? fallbackService;
+      const matched = defaultServices.find((service) => service.doctorId === candidate.doctorId);
       if (matched) {
         candidate.serviceId = matched.id;
         candidate.service = matched;

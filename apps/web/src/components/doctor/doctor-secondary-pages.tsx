@@ -600,16 +600,33 @@ const REFERRAL_SOURCE_LABELS: Record<string, string> = {
 function useMyConnectedPatients() {
   const [patients, setPatients] = useState<RealConnectedPatient[]>([]);
   const [loading, setLoading] = useState(true);
+  /*
+   * With no term this returns the doctor's own caseload. A term (two
+   * characters or more) searches the whole hospital directory, so a patient
+   * another clinician registered is still one search away — it is simply no
+   * longer everyone's default view.
+   */
+  const [directoryTerm, setDirectoryTerm] = useState("");
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (term?: string) => {
+    const query = (term ?? "").trim();
     try {
-      const response = await fetch("/api/v1/doctor/patients", { cache: "no-store" });
+      const response = await fetch(
+        query.length >= 2 ? `/api/v1/doctor/patients?search=${encodeURIComponent(query)}` : "/api/v1/doctor/patients",
+        { cache: "no-store" },
+      );
       const body = await response.json() as { patients?: RealConnectedPatient[] };
       if (response.ok && body.patients) setPatients(body.patients);
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const searchDirectory = useCallback(async (term: string) => {
+    setDirectoryTerm(term);
+    setLoading(true);
+    await reload(term);
+  }, [reload]);
 
   const removePatient = useCallback(async (patientId: string) => {
     const res = await fetch(`/api/v1/doctor/patients/${patientId}`, { method: "DELETE" });
@@ -624,7 +641,7 @@ function useMyConnectedPatients() {
     queueMicrotask(() => { void reload(); });
   }, [reload]);
 
-  return { patients, loading, reload, removePatient };
+  return { patients, loading, reload, removePatient, searchDirectory, directoryTerm };
 }
 
 function DoctorPatientDetailsModal({
@@ -1219,7 +1236,7 @@ function DoctorPatientPortalModal({
 }
 
 export function DoctorPatientsPage() {
-  const { patients, loading, removePatient } = useMyConnectedPatients();
+  const { patients, loading, removePatient, reload, searchDirectory } = useMyConnectedPatients();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<PatientFilter>("all");
   const [selectedPatientDetails, setSelectedPatientDetails] = useState<RealConnectedPatient | null>(null);
@@ -1230,6 +1247,22 @@ export function DoctorPatientsPage() {
 
   const today = todayValue();
   const normalizedQuery = query.trim().toLocaleLowerCase();
+
+  /*
+   * The list holds this doctor's own caseload. Typing a search also asks the
+   * server for hospital-wide matches, so a patient registered by another
+   * clinician is still reachable — debounced, because this runs on every
+   * keystroke and each directory search is recorded on the audit trail.
+   */
+  useEffect(() => {
+    const term = query.trim();
+    const timer = setTimeout(() => {
+      if (term.length >= 2) void searchDirectory(term);
+      else if (term.length === 0) void reload();
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [query, searchDirectory, reload]);
+
   const visiblePatients = patients.filter((patient) => {
     const searchText = [
       patient.displayName,
@@ -3137,11 +3170,11 @@ export function DoctorAppointmentsPage() {
       </section>
       <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-linear-to-r from-indigo-50 via-white to-cyan-50 px-5 py-4"><div><h2 className="text-sm font-black text-slate-950">My appointment schedule</h2><p className="mt-1 text-[10px] text-slate-500">Appointments assigned to your practitioner profile.</p></div><div className="flex rounded-xl bg-slate-100 p-1">{(["today", "upcoming", "all"] as const).map((item) => <button className={`rounded-lg px-3 py-2 text-[10px] font-black capitalize ${view === item ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`} key={item} onClick={() => setView(item)} type="button">{item}</button>)}</div></div>
-        {visible.length === 0 ? <div className="m-5"><EmptyState action={<Link className="wf-button-secondary" href="/doctor/queue">Open patient queue</Link>} description={view === "today" ? "No appointments are assigned to you for today." : "No appointments match this view."} icon={<CalendarClock size={20} />} title="No appointments found" /></div> : <div className="divide-y divide-slate-100">{visible.map((appointment) => {
+        {visible.length === 0 ? <div className="m-5"><EmptyState action={<Link className="wf-button-secondary" href="/doctor">Open patient queue</Link>} description={view === "today" ? "No appointments are assigned to you for today." : "No appointments match this view."} icon={<CalendarClock size={20} />} title="No appointments found" /></div> : <div className="divide-y divide-slate-100">{visible.map((appointment) => {
           const patient = patients.get(appointment.patientId);
           const queueEntry = data.queueEntries.find((entry) => entry.appointmentId === appointment.id);
           const statusTone = appointment.status === "completed" ? "emerald" : appointment.status === "cancelled" || appointment.status === "no-show" ? "rose" : appointment.appointmentDate === today ? "indigo" : "amber";
-          return <article className="grid gap-4 p-5 transition hover:bg-slate-50/70 lg:grid-cols-[110px_minmax(0,1fr)_180px] lg:items-center" key={appointment.id}><div><p className="text-lg font-black text-indigo-700">{appointment.slotStart}</p><p className="text-[10px] font-semibold text-slate-500">{formatDate(appointment.appointmentDate)}</p></div><div className="flex min-w-0 items-center gap-3"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-linear-to-br from-indigo-100 to-violet-100 text-xs font-black text-indigo-700">{getInitials(patient?.displayName ?? "Patient")}</span><div className="min-w-0"><h3 className="truncate text-sm font-black text-slate-950">{patient?.displayName ?? "Patient record"}</h3><p className="mt-1 text-[10px] font-semibold text-slate-500">{patient?.mrNumber ?? appointment.patientId} · {appointment.serviceName} · {appointment.durationMinutes} min</p><p className="mt-1 truncate text-[10px] text-slate-600">{appointment.reasonForVisit || "No appointment reason recorded."}</p></div></div><div className="flex items-center justify-between gap-2 lg:justify-end"><StatusPill tone={statusTone}>{humanize(queueEntry?.status ?? appointment.status)}</StatusPill><Link className="rounded-xl bg-indigo-600 px-3 py-2 text-[10px] font-black text-white hover:bg-indigo-700" href={queueEntry ? `/doctor/consultations?queueEntryId=${encodeURIComponent(queueEntry.id)}` : "/doctor/queue"}>{queueEntry?.status === "serving" ? "Continue" : queueEntry ? "Open patient" : "View queue"}</Link></div></article>;
+          return <article className="grid gap-4 p-5 transition hover:bg-slate-50/70 lg:grid-cols-[110px_minmax(0,1fr)_180px] lg:items-center" key={appointment.id}><div><p className="text-lg font-black text-indigo-700">{appointment.slotStart}</p><p className="text-[10px] font-semibold text-slate-500">{formatDate(appointment.appointmentDate)}</p></div><div className="flex min-w-0 items-center gap-3"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-linear-to-br from-indigo-100 to-violet-100 text-xs font-black text-indigo-700">{getInitials(patient?.displayName ?? "Patient")}</span><div className="min-w-0"><h3 className="truncate text-sm font-black text-slate-950">{patient?.displayName ?? "Patient record"}</h3><p className="mt-1 text-[10px] font-semibold text-slate-500">{patient?.mrNumber ?? appointment.patientId} · {appointment.serviceName} · {appointment.durationMinutes} min</p><p className="mt-1 truncate text-[10px] text-slate-600">{appointment.reasonForVisit || "No appointment reason recorded."}</p></div></div><div className="flex items-center justify-between gap-2 lg:justify-end"><StatusPill tone={statusTone}>{humanize(queueEntry?.status ?? appointment.status)}</StatusPill><Link className="rounded-xl bg-indigo-600 px-3 py-2 text-[10px] font-black text-white hover:bg-indigo-700" href={queueEntry ? `/doctor/consultations?queueEntryId=${encodeURIComponent(queueEntry.id)}` : "/doctor"}>{queueEntry?.status === "serving" ? "Continue" : queueEntry ? "Open patient" : "View queue"}</Link></div></article>;
         })}</div>}
       </section>
     </div>

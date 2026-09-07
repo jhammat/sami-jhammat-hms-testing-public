@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" width="100%" height="100%" fill="none">
+  <defs>
+    <linearGradient id="iosBg1" x1="0" y1="0" x2="680" y2="340" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="50%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="shareGlow" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0ea5e9"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <filter id="iosGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <rect width="680" height="340" rx="16" fill="url(#iosBg1)"/>
+  <rect width="678" height="338" x="1" y="1" rx="15" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- iPhone Frame Mockup (Centered) -->
+  <g transform="translate(190, 20)">
+    <!-- Phone Outer Body -->
+    <rect width="300" height="300" rx="36" fill="#090d16" stroke="#334155" stroke-width="2.5"/>
+    
+    <!-- Dynamic Island / Top Notch -->
+    <rect x="105" y="10" width="90" height="22" rx="11" fill="#000000"/>
+    <circle cx="175" cy="21" r="5" fill="#1e293b"/>
+
+    <!-- Web Page Mockup Inside Screen -->
+    <rect x="12" y="38" width="276" height="195" rx="4" fill="#0f172a"/>
+    <!-- App Header in mobile -->
+    <rect x="22" y="48" width="256" height="36" rx="8" fill="#1e293b"/>
+    <rect x="32" y="56" width="20" height="20" rx="5" fill="#3b82f6"/>
+    <text x="60" y="70" fill="#ffffff" font-size="11" font-weight="700">WonFlow Clinical</text>
+    
+    <!-- Mobile Content Cards -->
+    <rect x="22" y="92" width="256" height="50" rx="8" fill="#172033" stroke="#1e293b"/>
+    <text x="34" y="112" fill="#38bdf8" font-size="10.5" font-weight="600">Active Consultations</text>
+    <text x="34" y="128" fill="#64748b" font-size="9.5">Patient clinical encounter deck</text>
+
+    <!-- Safari Bottom Toolbar (iOS) -->
+    <rect x="12" y="233" width="276" height="55" rx="2" fill="#182234" stroke="#1e293b" stroke-width="1"/>
+    
+    <!-- Back Button -->
+    <path d="M 40 260 L 32 253 M 40 246 L 32 253" stroke="#60a5fa" stroke-width="2" stroke-linecap="round"/>
+    <!-- Forward Button (disabled) -->
+    <path d="M 85 246 L 93 253 M 85 260 L 93 253" stroke="#475569" stroke-width="2" stroke-linecap="round"/>
+
+    <!-- ★ HIGHLIGHTED SHARE BUTTON (Square with Arrow Up) ★ -->
+    <!-- Glow Ring -->
+    <circle cx="150" cy="253" r="24" fill="url(#shareGlow)" fill-opacity="0.25" filter="url(#iosGlow)"/>
+    <circle cx="150" cy="253" r="20" fill="#1d4ed8" stroke="#60a5fa" stroke-width="1.8"/>
+    
+    <!-- Share Icon Path -->
+    <path d="M 144 250 L 144 260 Q 144 262 146 262 L 154 262 Q 156 262 156 260 L 156 250" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round"/>
+    <line x1="150" y1="243" x2="150" y2="255" stroke="#ffffff" stroke-width="2" stroke-linecap="round"/>
+    <path d="M 146 247 L 150 243 L 154 247" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- Bookmarks Icon -->
+    <path d="M 205 246 L 210 249 L 215 246 L 215 261 L 210 258 L 205 261 Z" stroke="#60a5fa" stroke-width="1.5" fill="none"/>
+
+    <!-- Tabs Icon -->
+    <rect x="250" y="246" width="14" height="14" rx="3" stroke="#60a5fa" stroke-width="1.5" fill="none"/>
+
+    <!-- Home Indicator Bar -->
+    <rect x="95" y="291" width="110" height="4" rx="2" fill="#94a3b8"/>
+  </g>
+
+  <!-- Left Side Callout Banner -->
+  <g transform="translate(30, 110)">
+    <rect width="140" height="90" rx="10" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>
+    <circle cx="28" cy="28" r="12" fill="#38bdf8"/>
+    <text x="24" y="33" fill="#020617" font-size="13" font-weight="900">1</text>
+    <text x="48" y="32" fill="#f8fafc" font-size="12" font-weight="700">Tap Share</text>
+    <text x="14" y="58" fill="#94a3b8" font-size="10.5" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Tap the Share icon at the bottom of Safari.</text>
+  </g>
+
+  <!-- Right Side Urdu / Note Banner -->
+  <g transform="translate(510, 110)">
+    <rect width="140" height="90" rx="10" fill="#0f172a" stroke="#10b981" stroke-width="1.5"/>
+    <text x="14" y="32" fill="#a7f3d0" font-size="11" font-weight="700">iOS Safari</text>
+    <text x="14" y="54" fill="#cbd5e1" font-size="10.5">Bottom navigation</text>
+    <text x="14" y="72" fill="#94a3b8" font-size="10">Centered square icon with up arrow.</text>
+  </g>
+</svg>

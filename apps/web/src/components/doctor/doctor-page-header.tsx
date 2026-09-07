@@ -120,10 +120,13 @@ export function DoctorPageHeader({
     businessDate,
     sitting,
     loading,
+    branches,
+    roster,
   } = useDoctorPortalContext();
   const {
     selectedLocation,
     selectedLocationId,
+    locations,
   } = usePracticeLocation();
 
   return (
@@ -208,10 +211,15 @@ export function DoctorPageHeader({
               />
 
               {branchName ??
-                selectedLocation?.name ??
+                (selectedLocationId !== ALL_PRACTICE_LOCATIONS && (selectedLocation?.name || branches.find((b) => b.id === selectedLocationId)?.name)) ??
+                branches.find((b) => b.id === doctor?.primaryBranchId)?.name ??
+                locations.find((l) => l.linkedBranchId === doctor?.primaryBranchId || l.id === doctor?.primaryBranchId)?.name ??
+                roster?.[0]?.branch?.name ??
+                branches[0]?.name ??
+                locations[0]?.name ??
                 (selectedLocationId === ALL_PRACTICE_LOCATIONS
                   ? "All locations"
-                  : "No location selected")}
+                  : "Main Location")}
             </span>
 
             {showDate ? (

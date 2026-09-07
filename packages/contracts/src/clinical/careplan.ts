@@ -176,6 +176,9 @@ export interface CarePlanSummary {
   id: string;
   tenantId: string;
   patientId: string;
+  /** Present on the single-plan detail response so the screen can name the patient. */
+  patientName?: string | null;
+  patientNumber?: string | null;
   templateId?: string | null;
   category: string;
   title: string;

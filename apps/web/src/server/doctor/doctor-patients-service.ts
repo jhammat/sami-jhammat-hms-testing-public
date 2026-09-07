@@ -36,16 +36,73 @@ function calculateAge(dateOfBirth: Date | null): number | undefined {
   return age;
 }
 
-export async function listMyConnectedPatients(requestContext: WonFlowRequestContext) {
-  const { context } = await resolveDoctor(requestContext);
+export async function listMyConnectedPatients(
+  requestContext: WonFlowRequestContext,
+  options: { search?: string } = {},
+) {
+  const { context, doctor } = await resolveDoctor(requestContext);
 
-  // Fetch all active hospital patients for this tenant (most recently registered first)
+  /*
+   * "My Patients" now means this doctor's patients.
+   *
+   * This screen used to return every active patient in the tenant, capped at
+   * 300 — the name, phone, identifier, address, blood group, guardian and
+   * emergency contact of every person the hospital had ever registered, to
+   * every doctor who opened the page. In a multi-consultant hospital that is
+   * other clinicians' patients, and the enrichment below then pulled every
+   * appointment and encounter belonging to all of them.
+   *
+   * The default is the caller's own caseload: anyone they have an appointment
+   * or an encounter with. Nobody becomes unreachable — a search term looks
+   * across the hospital directory as before, which is the deliberate act of
+   * looking someone up rather than the passive act of opening a page, and is
+   * recorded as one.
+   */
+  const search = options.search?.trim() ?? "";
+  const isDirectorySearch = search.length >= 2;
+
   const patients = await database.patient.findMany({
-    where: { tenantId: context.tenantId, archivedAt: null },
+    where: {
+      tenantId: context.tenantId,
+      archivedAt: null,
+      ...(isDirectorySearch
+        ? {
+            OR: [
+              { givenName: { contains: search, mode: "insensitive" } },
+              { familyName: { contains: search, mode: "insensitive" } },
+              { patientNumber: { contains: search, mode: "insensitive" } },
+              { phone: { contains: search, mode: "insensitive" } },
+              { identifiers: { some: { normalizedValue: { contains: search.toLowerCase() } } } },
+            ],
+          }
+        : {
+            OR: [
+              { appointments: { some: { doctorId: doctor.id } } },
+              { encounters: { some: { doctorId: doctor.id } } },
+            ],
+          }),
+    },
     include: { identifiers: { where: { isPrimary: true }, take: 1 } },
     orderBy: { createdAt: "desc" },
     take: 300,
   });
+
+  if (isDirectorySearch) {
+    await database.auditEvent.create({
+      data: {
+        tenantId: context.tenantId,
+        actorMembershipId: context.membershipId,
+        sessionId: context.sessionId,
+        requestId: context.requestId,
+        action: "patient.directory.searched",
+        entityType: "patient",
+        entityId: null,
+        severity: "INFORMATION",
+        reason: `Doctor searched the patient directory for "${search}" (${patients.length} match(es)).`,
+        sourceApplication: context.sourceApplication,
+      },
+    }).catch(() => { /* a logging failure must not break the search */ });
+  }
 
   if (patients.length === 0) return { patients: [] };
 

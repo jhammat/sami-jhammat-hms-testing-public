@@ -45,6 +45,13 @@ export interface DiagnosticAttachment {
   createdAt: string;
 }
 
+/** What the worklist reports is waiting outside the current branch view. */
+export interface OtherBranchCount {
+  branchId: string | null;
+  name: string;
+  count: number;
+}
+
 export interface DiagnosticOrder {
   id: string;
   accessionNumber: string | null;
@@ -300,22 +307,35 @@ export function DiagnosticsWorkspace({ type, view = "all" }: { type: DiagnosticT
   const [orders, setOrders] = useState<DiagnosticOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  /*
+   * A department normally works its own branch. Orders raised at another
+   * branch used to be invisible here and 404 on any action, so a day's work
+   * could disappear with nothing said. `otherBranches` reports what is waiting
+   * outside the current view, and the scope switch opens it.
+   */
+  const [branchScope, setBranchScope] = useState<"mine" | "all">("mine");
+  const [otherBranches, setOtherBranches] = useState<OtherBranchCount[]>([]);
   const [busyId, setBusyId] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
     try {
-      const response = await fetch(`/api/v1/diagnostics/worklist?type=${type}&date=${encodeURIComponent(date)}`, { credentials: "same-origin", cache: "no-store" });
+      const query = new URLSearchParams({ type, date });
+      if (branchScope === "all") query.set("branchId", "all");
+      const response = await fetch(`/api/v1/diagnostics/worklist?${query.toString()}`, { credentials: "same-origin", cache: "no-store" });
       if (!response.ok) throw new Error(await readApiError(response));
-      setOrders((await response.json() as { orders: DiagnosticOrder[] }).orders);
+      const body = await response.json() as { orders: DiagnosticOrder[]; otherBranches?: OtherBranchCount[] };
+      setOrders(body.orders);
+      setOtherBranches(body.otherBranches ?? []);
     } catch (cause) {
       setOrders([]);
+      setOtherBranches([]);
       setError(cause instanceof Error ? cause.message : "The worklist could not be loaded.");
     } finally {
       setLoading(false);
     }
-  }, [date, type]);
+  }, [date, type, branchScope]);
 
   useEffect(() => { queueMicrotask(() => { void load(); }); }, [load]);
 
@@ -384,6 +404,37 @@ export function DiagnosticsWorkspace({ type, view = "all" }: { type: DiagnosticT
           );
         })}
       </div>
+
+      {branchScope === "mine" && otherBranches.some((branch) => branch.count > 0) ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm font-bold text-amber-800">
+          <AlertTriangle aria-hidden className="size-4 shrink-0" />
+          <span>
+            Also waiting at{" "}
+            {otherBranches.filter((branch) => branch.count > 0).map((branch) => `${branch.name} (${branch.count})`).join(", ")}
+            {" "}— not shown in this branch&apos;s list.
+          </span>
+          <button
+            className="rounded-lg bg-amber-200/70 px-2.5 py-1 font-black text-amber-900 underline-offset-4 hover:bg-amber-200"
+            onClick={() => setBranchScope("all")}
+            type="button"
+          >
+            Show all branches
+          </button>
+        </div>
+      ) : null}
+
+      {branchScope === "all" ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-blue-100 bg-blue-50 p-4 text-sm font-bold text-blue-800">
+          Showing every branch in this hospital.
+          <button
+            className="rounded-lg bg-blue-100 px-2.5 py-1 font-black text-blue-900 hover:bg-blue-200"
+            onClick={() => setBranchScope("mine")}
+            type="button"
+          >
+            Back to my branch
+          </button>
+        </div>
+      ) : null}
 
       {error ? (
         <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-red-50 p-4 text-sm font-bold text-red-700">

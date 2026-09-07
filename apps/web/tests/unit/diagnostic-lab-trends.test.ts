@@ -159,7 +159,10 @@ describe("Results Ledger & Lab Trends (Task C-07)", () => {
       locale: "en",
       timezone: "UTC",
       currencyCode: "PKR",
-      permissionCodes: [],
+      // A real doctor's session carries the permissions resolved from their
+      // role. Recording a result as clinician-confirmed now requires one of
+      // them, so an empty list here would no longer represent a clinician.
+      permissionCodes: ["encounters.manage"],
       sourceApplication: "web",
     };
 

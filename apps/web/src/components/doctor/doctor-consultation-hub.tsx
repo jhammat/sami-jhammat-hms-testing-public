@@ -576,7 +576,7 @@ export function DoctorConsultationHub({
       action={
         <Link
           className="inline-flex h-9 items-center gap-2 rounded-xl bg-indigo-600 px-3 text-[11px] font-black text-white shadow-sm transition hover:bg-indigo-700"
-          href="/doctor/queue"
+          href="/doctor"
         >
           <ListOrdered size={14} />
           Today&apos;s Queue

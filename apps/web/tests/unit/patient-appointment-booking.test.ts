@@ -212,12 +212,54 @@ describe("patient appointment booking", () => {
     await database.serviceDefinition.update({ where: { id: serviceId }, data: { publiclyBookable: true } });
   });
 
-  it("names a rostered clinic that has no consultation service attached", async () => {
+  it("prices a clinic rostered without a service from that doctor's own service", async () => {
+    // A convenience the product deliberately provides: the administrator
+    // forgot to attach the service, but this doctor has exactly one bookable
+    // consultation, so it is used — at that doctor's price and duration.
     await database.availabilityRule.update({ where: { id: ruleId }, data: { serviceId: null } });
+    const catalog = await getPatientBookingCatalog(patientContext, BOOKING_DATE);
+    expect(catalog.options).toHaveLength(1);
+    expect(catalog.options[0]?.serviceId).toBe(serviceId);
+    expect(catalog.options[0]?.priceMinorUnits).toBe(500_000);
+    await database.availabilityRule.update({ where: { id: ruleId }, data: { serviceId } });
+  });
+
+  it("never prices one doctor's clinic from another doctor's service", async () => {
+    // The rostered doctor has no bookable service of their own. A second
+    // doctor's service exists and must not be borrowed to fill the gap: the
+    // clinic is reported as unbookable instead of quoted at someone else's
+    // price.
+    const otherDoctorIdentity = await database.identity.create({
+      data: { email: `other-${suffix()}@example.test`, normalizedEmail: `other-${suffix()}@example.test`, status: "ACTIVE" },
+    });
+    const otherMembership = await database.tenantMembership.create({
+      data: { tenantId, organizationId, identityId: otherDoctorIdentity.id, displayName: "Dr Other", status: "ACTIVE", workspaceCodes: ["DOCTOR"] },
+    });
+    const otherStaff = await database.staffProfile.create({
+      data: { tenantId, membershipId: otherMembership.id, branchId, employeeNumber: `E-${suffix()}`, staffType: "DOCTOR", status: "ACTIVE" },
+    });
+    const otherDoctor = await database.doctorProfile.create({
+      data: { tenantId, staffProfileId: otherStaff.id, specialty: "General", publiclyBookable: true },
+    });
+    const otherService = await database.serviceDefinition.create({
+      data: { tenantId, branchId, doctorId: otherDoctor.id, code: `SVC-${suffix()}`, name: "Other Consultation", category: "CONSULTATION", durationMinutes: 30, priceMinorUnits: 999_000, currencyCode: "PKR", publiclyBookable: true, isActive: true, consultationModes: ["IN_PERSON"] },
+    });
+
+    // Take the rostered doctor's own service out of the picture entirely.
+    await database.availabilityRule.update({ where: { id: ruleId }, data: { serviceId: null } });
+    await database.serviceDefinition.update({ where: { id: serviceId }, data: { publiclyBookable: false } });
+
     const catalog = await getPatientBookingCatalog(patientContext, BOOKING_DATE);
     expect(catalog.options).toHaveLength(0);
     expect(catalog.blockers.map((blocker) => blocker.code)).toContain("schedule-has-no-service");
+
+    await database.serviceDefinition.update({ where: { id: serviceId }, data: { publiclyBookable: true } });
     await database.availabilityRule.update({ where: { id: ruleId }, data: { serviceId } });
+    await database.serviceDefinition.delete({ where: { id: otherService.id } });
+    await database.doctorProfile.delete({ where: { id: otherDoctor.id } });
+    await database.staffProfile.delete({ where: { id: otherStaff.id } });
+    await database.tenantMembership.delete({ where: { id: otherMembership.id } });
+    await database.identity.delete({ where: { id: otherDoctorIdentity.id } });
   });
 
   it("honours a doctor sitting that shortens the day and changes the consultation length", async () => {

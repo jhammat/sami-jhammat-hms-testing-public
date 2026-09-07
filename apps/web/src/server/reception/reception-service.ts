@@ -1,4 +1,4 @@
-import{dayFilterIn,dayWindowIn}from"@/server/time/business-day";
+import{dayFilterIn,dayWindowIn,todayIn}from"@/server/time/business-day";
 import{randomBytes}from"node:crypto";import{database}from"@wonflow/database";import type{Prisma}from"@wonflow/database";import{requireBranchId,requirePermission,requireTenantContext}from"@wonflow/contracts";import type{WonFlowRequestContext}from"@wonflow/contracts";import{WonFlowApiError}from"@/server/http/route-handler";import{checkDoctorBookable}from"@/server/scheduling/effective-availability";import{listBookableSlots}from"@/server/scheduling/appointment-slots";
 const normalizeOptional=(v?:string)=>v?.trim().toLowerCase()||null;const trimOrUndefined=(v?:string)=>{const t=v?.trim();return t?t:undefined;};const patientNumber=()=>`P-${new Date().toISOString().slice(0,10).replaceAll("-","")}-${randomBytes(3).toString("hex").toUpperCase()}`;const isUniqueConstraintError=(caught:unknown)=>typeof caught==="object"&&caught!==null&&(caught as{code?:string}).code==="P2002";
 
@@ -371,12 +371,41 @@ async bookAppointment(rc:WonFlowRequestContext,input:{patientId:string;doctorId?
     throw caught;
   }
 }
-async checkIn(rc:WonFlowRequestContext,id:string,input:{queueDate:string;priority?:number;notes?:string;branchId?:string}){
+async checkIn(rc:WonFlowRequestContext,id:string,input:{queueDate?:string;priority?:number;notes?:string;branchId?:string}){
   const c=requireTenantContext(rc);requirePermission(c,"queues.manage");
-  const branchId=input.branchId||(c.branchId?c.branchId:null),queueDate=new Date(`${input.queueDate}T00:00:00.000Z`);
+  /*
+   * A missing or malformed queueDate used to reach Prisma as `new
+   * Date("undefinedT00:00:00.000Z")` — an Invalid Date — and came back to the
+   * front desk as a bare 500 "The request could not be completed." Checking a
+   * patient in is the one action a receptionist repeats all day, and the
+   * failure said nothing about what to do.
+   *
+   * The queue day now defaults to today in the hospital's own timezone, which
+   * is what checking someone in means, and a date that is genuinely malformed
+   * is refused with a message that names the field.
+   */
+  const requestedQueueDate=input.queueDate?.trim()||todayIn(c.timezone);
+  const queueDate=new Date(`${requestedQueueDate}T00:00:00.000Z`);
+  if(!Number.isFinite(queueDate.getTime()))throw new WonFlowApiError(400,"invalid-queue-date",`"${requestedQueueDate}" is not a valid queue date. Use YYYY-MM-DD.`);
+  /*
+   * The caller's own branch is NOT a filter on which appointment can be found.
+   *
+   * It used to be: the lookup below filtered by `input.branchId || c.branchId`,
+   * so a receptionist whose membership sits at one branch got a bare 404 —
+   * "The appointment could not be found" — for a patient standing in front of
+   * them who was booked at another branch of the same hospital. Booking never
+   * had that restriction (`bookAppointment` takes `input.branchId` and happily
+   * books across branches), so the desk could create a visit it could not then
+   * check in, and the message named nothing that would explain why.
+   *
+   * An explicit `input.branchId` is still honoured as a deliberate filter. The
+   * queue itself is always opened at the appointment's OWN branch, which is
+   * where the patient is actually being seen.
+   */
+  const branchFilter=input.branchId??null;
   try{
     return await database.$transaction(async tx=>{
-      const a=await tx.appointment.findFirst({where:{id,tenantId:c.tenantId,...(branchId?{branchId}:{})},include:{queueEntry:{include:{patient:true,appointment:true}}}});
+      const a=await tx.appointment.findFirst({where:{id,tenantId:c.tenantId,...(branchFilter?{branchId:branchFilter}:{})},include:{queueEntry:{include:{patient:true,appointment:true}}}});
       if(!a)throw new WonFlowApiError(404,"appointment-not-found","The appointment could not be found.");
       if(a.status==="IN_QUEUE"||a.status==="CHECKED_IN"||a.queueEntry){
         if(a.queueEntry)return{appointment:a,queueEntry:a.queueEntry};
@@ -384,7 +413,11 @@ async checkIn(rc:WonFlowRequestContext,id:string,input:{queueDate:string;priorit
         if(existingEntry)return{appointment:a,queueEntry:existingEntry};
       }
       if(a.status!=="PENDING"&&a.status!=="CONFIRMED")throw new WonFlowApiError(409,"appointment-not-checkable",`An appointment that is ${a.status.toLowerCase().replaceAll("_"," ")} cannot be checked in.`);
-      const effectiveBranchId=branchId||a.branchId;
+      // The queue always belongs to the branch the appointment is at; the
+      // caller's own branch is only a fallback for a legacy appointment that
+      // was stored without one.
+      const effectiveBranchId=a.branchId||branchFilter||c.branchId;
+      if(!effectiveBranchId)throw new WonFlowApiError(400,"branch-required","This appointment has no branch recorded, so it cannot be placed in a queue. Set a branch on the appointment first.");
       const q=await tx.queue.upsert({where:{tenantId_branchId_queueDate:{tenantId:c.tenantId,branchId:effectiveBranchId,queueDate}},create:{tenantId:c.tenantId,branchId:effectiveBranchId,queueDate},update:{}}),counter=await tx.queue.update({where:{id:q.id},data:{nextTokenNumber:{increment:1}}}),tokenNumber=counter.nextTokenNumber-1,queueEntry=await tx.queueEntry.create({data:{tenantId:c.tenantId,queueId:q.id,patientId:a.patientId,appointmentId:a.id,tokenNumber,priority:input.priority??0,notes:input.notes?.trim()||null},include:{patient:true,appointment:true}}),appointment=await tx.appointment.update({where:{id:a.id},data:{status:"IN_QUEUE",checkedInAt:new Date(),tokenNumber,queueStatus:"waiting"}});
       await tx.auditEvent.create({data:{tenantId:c.tenantId,branchId:effectiveBranchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"appointment.checked-in",entityType:"appointment",entityId:a.id,severity:"INFORMATION",sourceApplication:c.sourceApplication}});
       return{appointment,queueEntry};

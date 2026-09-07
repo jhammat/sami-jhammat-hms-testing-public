@@ -3871,52 +3871,35 @@ export function NutritionWorkspace() {
   return (
     <div className="wfg-pt w-full space-y-5 px-3.5 py-4 sm:px-6 sm:py-6 lg:px-8">
       <AuroraHero
-        eyebrow="Allied health · Clinical nutrition and dietetics"
+        eyebrow="Clinical Nutrition · Dietetics"
         title="Dietetics workspace"
-        description="General dietetics and the HPB surgical service in one place — screen, set targets, dose enzymes and publish a plan, always against a patient you have chosen."
+        description="Caseload, nutritional screening, enzymes & meal plans"
+        icon={<Apple size={15} />}
         chips={[
-          { label: "referrals in your caseload", value: String(referrals.length), solid: true },
-          { label: "waiting to be accepted", value: String(pendingCount) },
-          { label: "meal templates", value: String(MEAL_TEMPLATES.length) },
-          { label: "diet phases", value: String(DIET_PHASES.length) },
+          { label: "in caseload", value: String(referrals.length), solid: true },
+          { label: "pending", value: String(pendingCount) },
+          { label: "active plans", value: String(roster.length) },
+          { label: "templates", value: String(MEAL_TEMPLATES.length) },
         ]}
         actions={
           <>
             <GlassButton
               variant="onAurora"
-              icon={<RefreshCw size={13} className={isLoadingCaseload ? "animate-spin" : ""} />}
+              size="sm"
+              icon={<RefreshCw size={12} className={isLoadingCaseload ? "animate-spin" : ""} />}
               onClick={refreshCaseload}
               disabled={isLoadingCaseload}
             >
-              Refresh caseload
+              Refresh
             </GlassButton>
 
             <Link
               href="/operations/nutrition/profile"
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-[rgb(255_255_255/0.15)] px-4 py-2 text-xs font-semibold text-white backdrop-blur transition hover:bg-[rgb(255_255_255/0.25)]"
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-[rgb(255_255_255/0.15)] px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur transition hover:bg-[rgb(255_255_255/0.25)]"
             >
-              <Compass size={14} /> Preferences
+              <Compass size={13} /> Preferences
             </Link>
           </>
-        }
-        aside={
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-2">
-            {[
-              { label: "HPB templates", value: MEAL_TEMPLATES.filter((t) => t.band === "HPB").length, icon: HeartPulse },
-              { label: "General templates", value: MEAL_TEMPLATES.filter((t) => t.band === "GENERAL").length, icon: Apple },
-              { label: "Counselling sets", value: COUNSELLING_SETS.length, icon: ClipboardList },
-              { label: "Active plans", value: roster.length, icon: Users },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="rounded-2xl border border-white/15 bg-[rgb(255_255_255/0.10)] px-3.5 py-3 backdrop-blur"
-              >
-                <item.icon aria-hidden size={14} className="text-emerald-200" />
-                <p className="mt-1.5 text-lg font-semibold tabular-nums text-white">{item.value}</p>
-                <p className="text-[10px] text-indigo-100/75">{item.label}</p>
-              </div>
-            ))}
-          </div>
         }
       />
 

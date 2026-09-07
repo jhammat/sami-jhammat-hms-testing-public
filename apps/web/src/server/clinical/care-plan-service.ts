@@ -9,6 +9,7 @@ import type {
   CarePlanSummary,
   CarePlanTaskSummary,
   CarePlanTaskTemplate,
+  CarePlanTaskType,
   CarePlanTemplateSummary,
   CompleteCarePlanTaskInput,
   CreateCarePlanTemplateInput,
@@ -163,6 +164,114 @@ export class CarePlanService {
       createdAt: t.createdAt.toISOString(),
       updatedAt: t.updatedAt.toISOString(),
     }));
+  }
+
+  /**
+   * Edits a saved plan. Only the fields sent are touched, so a doctor can
+   * rename a template without resending its whole task list.
+   *
+   * `version` is bumped on every edit: plans already running were built from
+   * the tasks as they stood, and it should be possible to tell which revision
+   * a given patient's plan came from.
+   */
+  async updateTemplate(
+    requestContext: WonFlowRequestContext,
+    id: string,
+    input: Partial<CreateCarePlanTemplateInput>,
+  ): Promise<CarePlanTemplateSummary> {
+    const context = requireTenantContext(requestContext);
+    if (!context.membershipId) {
+      throw new WonFlowApiError(403, "membership-required", "Staff membership is required to manage care plan templates.");
+    }
+
+    const existing = await database.carePlanTemplate.findFirst({
+      where: { id, tenantId: context.tenantId },
+    });
+    if (!existing) {
+      throw new WonFlowApiError(404, "care-plan-template-not-found", "The care plan template could not be found.");
+    }
+
+    if (input.title !== undefined && !input.title.trim()) {
+      throw new WonFlowApiError(400, "missing-title", "Care plan template title is required.");
+    }
+
+    const updated = await database.carePlanTemplate.update({
+      where: { id: existing.id },
+      data: {
+        ...(input.title !== undefined ? { title: input.title.trim() } : {}),
+        ...(input.description !== undefined ? { description: input.description?.trim() || null } : {}),
+        ...(input.category !== undefined ? { category: input.category || "GENERAL" } : {}),
+        ...(input.durationDays !== undefined ? { durationDays: Math.max(1, input.durationDays || 14) } : {}),
+        ...(input.stages !== undefined ? { stages: input.stages as unknown as Prisma.InputJsonValue } : {}),
+        ...(input.taskTemplates !== undefined ? { taskTemplates: input.taskTemplates as unknown as Prisma.InputJsonValue } : {}),
+        ...(input.alertRules !== undefined ? { alertRules: input.alertRules as unknown as Prisma.InputJsonValue } : {}),
+        version: { increment: 1 },
+      },
+    });
+
+    await database.auditEvent.create({
+      data: {
+        tenantId: context.tenantId,
+        branchId: toUuid(context.branchId),
+        actorMembershipId: toUuid(context.membershipId),
+        sessionId: toUuid(context.sessionId),
+        requestId: context.requestId,
+        action: "clinical.careplan_template.updated",
+        entityType: "careplan-template",
+        entityId: updated.id,
+        severity: "INFORMATION",
+        sourceApplication: context.sourceApplication,
+      },
+    });
+
+    return this.getTemplate(requestContext, updated.id);
+  }
+
+  /**
+   * Retires a template.
+   *
+   * Deliberately a soft retire rather than a delete: `CarePlan.templateId`
+   * points here, and a patient's running plan must not lose the record of what
+   * it was built from. A retired template stops appearing when starting a new
+   * plan and leaves existing ones untouched.
+   */
+  async archiveTemplate(
+    requestContext: WonFlowRequestContext,
+    id: string,
+  ): Promise<{ id: string; isActive: boolean }> {
+    const context = requireTenantContext(requestContext);
+    if (!context.membershipId) {
+      throw new WonFlowApiError(403, "membership-required", "Staff membership is required to manage care plan templates.");
+    }
+
+    const existing = await database.carePlanTemplate.findFirst({
+      where: { id, tenantId: context.tenantId },
+    });
+    if (!existing) {
+      throw new WonFlowApiError(404, "care-plan-template-not-found", "The care plan template could not be found.");
+    }
+
+    const archived = await database.carePlanTemplate.update({
+      where: { id: existing.id },
+      data: { isActive: false },
+    });
+
+    await database.auditEvent.create({
+      data: {
+        tenantId: context.tenantId,
+        branchId: toUuid(context.branchId),
+        actorMembershipId: toUuid(context.membershipId),
+        sessionId: toUuid(context.sessionId),
+        requestId: context.requestId,
+        action: "clinical.careplan_template.archived",
+        entityType: "careplan-template",
+        entityId: archived.id,
+        severity: "WARNING",
+        sourceApplication: context.sourceApplication,
+      },
+    });
+
+    return { id: archived.id, isActive: archived.isActive };
   }
 
   async getTemplate(
@@ -350,6 +459,10 @@ export class CarePlanService {
     const plan = await database.carePlan.findFirst({
       where: { id, tenantId: context.tenantId },
       include: {
+        // The screen needs a name to put at the top of the plan. Without this
+        // it fell back to "Patient #" plus the first eight characters of a
+        // UUID, which tells a clinician nothing about who they are looking at.
+        patient: { select: { givenName: true, middleName: true, familyName: true, patientNumber: true } },
         tasks: {
           orderBy: [{ scheduledFor: "asc" }, { dayNumber: "asc" }],
         },
@@ -404,6 +517,10 @@ export class CarePlanService {
       id: plan.id,
       tenantId: plan.tenantId,
       patientId: plan.patientId,
+      patientName: [plan.patient?.givenName, plan.patient?.middleName, plan.patient?.familyName]
+        .filter(Boolean)
+        .join(" ") || null,
+      patientNumber: plan.patient?.patientNumber ?? null,
       templateId: plan.templateId,
       category: plan.category,
       title: plan.title,
@@ -501,6 +618,320 @@ export class CarePlanService {
       createdAt: plan.createdAt.toISOString(),
       updatedAt: plan.updatedAt.toISOString(),
     }));
+  }
+
+  /**
+   * Edits a plan that is already running.
+   *
+   * A plan could be created and then never touched again — no rename, no
+   * pause, no way to stop it. A recovery plan is a living document: the
+   * surgeon extends it, pauses it while the patient is readmitted, or closes
+   * it when recovery is done.
+   */
+  async updatePlan(
+    requestContext: WonFlowRequestContext,
+    carePlanId: string,
+    input: { title?: string; status?: "ACTIVE" | "PAUSED" | "COMPLETED" | "DISCONTINUED"; endDate?: string | null; assignedTherapistId?: string | null; assignedNutritionistId?: string | null },
+  ): Promise<CarePlanSummary> {
+    const context = requireTenantContext(requestContext);
+    if (!context.membershipId) {
+      throw new WonFlowApiError(403, "membership-required", "Staff membership is required to change a care plan.");
+    }
+
+    const plan = await database.carePlan.findFirst({ where: { id: carePlanId, tenantId: context.tenantId } });
+    if (!plan) throw new WonFlowApiError(404, "care-plan-not-found", "Care plan not found.");
+    if (input.title !== undefined && !input.title.trim()) {
+      throw new WonFlowApiError(400, "missing-title", "The care plan needs a title.");
+    }
+
+    await database.carePlan.update({
+      where: { id: plan.id },
+      data: {
+        ...(input.title !== undefined ? { title: input.title.trim() } : {}),
+        ...(input.status !== undefined ? { status: input.status } : {}),
+        ...(input.endDate !== undefined ? { endDate: input.endDate ? new Date(input.endDate) : null } : {}),
+        ...(input.assignedTherapistId !== undefined ? { assignedTherapistId: input.assignedTherapistId || null } : {}),
+        ...(input.assignedNutritionistId !== undefined ? { assignedNutritionistId: input.assignedNutritionistId || null } : {}),
+      },
+    });
+
+    await database.auditEvent.create({
+      data: {
+        tenantId: context.tenantId,
+        branchId: toUuid(context.branchId),
+        actorMembershipId: toUuid(context.membershipId),
+        sessionId: toUuid(context.sessionId),
+        requestId: context.requestId,
+        action: input.status ? `clinical.careplan.${input.status.toLowerCase()}` : "clinical.careplan.updated",
+        entityType: "careplan",
+        entityId: plan.id,
+        severity: input.status === "DISCONTINUED" ? "WARNING" : "INFORMATION",
+        sourceApplication: context.sourceApplication,
+      },
+    });
+
+    return this.getPlan(requestContext, plan.id);
+  }
+
+  /**
+   * Stops a care plan.
+   *
+   * Discontinued rather than deleted: the plan records what a patient was
+   * asked to do and what they did, and a completed task is part of their
+   * clinical history. A plan with nothing recorded against it has no history
+   * to protect, so that one is removed outright — which is what a doctor
+   * means when they start a plan by mistake and want it gone.
+   */
+  async discontinuePlan(
+    requestContext: WonFlowRequestContext,
+    carePlanId: string,
+    reason?: string,
+  ): Promise<{ id: string; deleted: boolean; status: string }> {
+    const context = requireTenantContext(requestContext);
+    if (!context.membershipId) {
+      throw new WonFlowApiError(403, "membership-required", "Staff membership is required to stop a care plan.");
+    }
+
+    const plan = await database.carePlan.findFirst({ where: { id: carePlanId, tenantId: context.tenantId } });
+    if (!plan) throw new WonFlowApiError(404, "care-plan-not-found", "Care plan not found.");
+
+    const recorded = await database.carePlanTask.count({
+      where: { carePlanId: plan.id, status: { in: ["COMPLETED", "SKIPPED"] } },
+    });
+
+    const result = await database.$transaction(async (tx) => {
+      if (recorded === 0) {
+        await tx.carePlanAlert.deleteMany({ where: { carePlanId: plan.id } });
+        await tx.carePlanTask.deleteMany({ where: { carePlanId: plan.id } });
+        await tx.carePlan.delete({ where: { id: plan.id } });
+        return { id: plan.id, deleted: true, status: "DELETED" };
+      }
+      const stopped = await tx.carePlan.update({
+        where: { id: plan.id },
+        data: { status: "DISCONTINUED", endDate: new Date() },
+      });
+      return { id: stopped.id, deleted: false, status: stopped.status };
+    });
+
+    await database.auditEvent.create({
+      data: {
+        tenantId: context.tenantId,
+        branchId: toUuid(context.branchId),
+        actorMembershipId: toUuid(context.membershipId),
+        sessionId: toUuid(context.sessionId),
+        requestId: context.requestId,
+        action: result.deleted ? "clinical.careplan.deleted" : "clinical.careplan.discontinued",
+        entityType: "careplan",
+        entityId: plan.id,
+        severity: "WARNING",
+        reason: reason?.trim() || null,
+        sourceApplication: context.sourceApplication,
+      },
+    });
+
+    return result;
+  }
+
+  /** Adds a single task to a plan that is already running. */
+  async addTask(
+    requestContext: WonFlowRequestContext,
+    carePlanId: string,
+    input: { title: string; taskType: CarePlanTaskType; dayNumber?: number; scheduleTimeOfDay?: string; instructions?: string },
+  ): Promise<CarePlanTaskSummary> {
+    const context = requireTenantContext(requestContext);
+    if (!context.membershipId) {
+      throw new WonFlowApiError(403, "membership-required", "Staff membership is required to add a task.");
+    }
+    if (!input.title?.trim()) {
+      throw new WonFlowApiError(400, "missing-title", "The task needs a name.");
+    }
+
+    const plan = await database.carePlan.findFirst({ where: { id: carePlanId, tenantId: context.tenantId } });
+    if (!plan) throw new WonFlowApiError(404, "care-plan-not-found", "Care plan not found.");
+
+    const dayNumber = Math.max(1, Math.floor(input.dayNumber || 1));
+    const scheduledFor = new Date(plan.startDate);
+    scheduledFor.setDate(scheduledFor.getDate() + (dayNumber - 1));
+    const [hours, minutes] = (input.scheduleTimeOfDay || "09:00").split(":").map(Number);
+    scheduledFor.setHours(hours || 9, minutes || 0, 0, 0);
+    const dueBy = new Date(scheduledFor);
+    dueBy.setHours(23, 59, 59, 999);
+
+    const task = await database.carePlanTask.create({
+      data: {
+        tenantId: context.tenantId,
+        carePlanId: plan.id,
+        taskType: input.taskType,
+        stageNumber: 1,
+        dayNumber,
+        scheduledFor,
+        dueBy,
+        title: input.title.trim(),
+        instructions: input.instructions?.trim() || null,
+        status: "PENDING",
+      },
+    });
+
+    await database.auditEvent.create({
+      data: {
+        tenantId: context.tenantId,
+        branchId: toUuid(context.branchId),
+        actorMembershipId: toUuid(context.membershipId),
+        sessionId: toUuid(context.sessionId),
+        requestId: context.requestId,
+        action: "clinical.careplan_task.added",
+        entityType: "careplan-task",
+        entityId: task.id,
+        severity: "INFORMATION",
+        sourceApplication: context.sourceApplication,
+      },
+    });
+
+    return this.serializeTask(task);
+  }
+
+  /** Edits a task that has not been actioned yet. */
+  async updateTask(
+    requestContext: WonFlowRequestContext,
+    taskId: string,
+    input: { title?: string; taskType?: CarePlanTaskType; dayNumber?: number; scheduleTimeOfDay?: string; instructions?: string | null },
+  ): Promise<CarePlanTaskSummary> {
+    const context = requireTenantContext(requestContext);
+    if (!context.membershipId) {
+      throw new WonFlowApiError(403, "membership-required", "Staff membership is required to change a task.");
+    }
+
+    const task = await database.carePlanTask.findFirst({
+      where: { id: taskId, tenantId: context.tenantId },
+      include: { carePlan: true },
+    });
+    if (!task) throw new WonFlowApiError(404, "task-not-found", "Care plan task not found.");
+
+    /*
+     * A task the patient has already completed or skipped is a record of what
+     * happened, not a plan any more. Rewriting its title or time afterwards
+     * would change the meaning of an entry someone already acted on.
+     */
+    if (task.status === "COMPLETED" || task.status === "SKIPPED") {
+      throw new WonFlowApiError(
+        409,
+        "task-already-actioned",
+        "This task has already been completed or skipped and can no longer be edited. Add a new task instead.",
+      );
+    }
+    if (input.title !== undefined && !input.title.trim()) {
+      throw new WonFlowApiError(400, "missing-title", "The task needs a name.");
+    }
+
+    let scheduledFor = task.scheduledFor;
+    if (input.dayNumber !== undefined || input.scheduleTimeOfDay !== undefined) {
+      const dayNumber = Math.max(1, Math.floor(input.dayNumber ?? task.dayNumber ?? 1));
+      scheduledFor = new Date(task.carePlan.startDate);
+      scheduledFor.setDate(scheduledFor.getDate() + (dayNumber - 1));
+      const source = input.scheduleTimeOfDay
+        ?? `${String(task.scheduledFor.getHours()).padStart(2, "0")}:${String(task.scheduledFor.getMinutes()).padStart(2, "0")}`;
+      const [hours, minutes] = source.split(":").map(Number);
+      scheduledFor.setHours(hours || 9, minutes || 0, 0, 0);
+    }
+
+    const updated = await database.carePlanTask.update({
+      where: { id: task.id },
+      data: {
+        ...(input.title !== undefined ? { title: input.title.trim() } : {}),
+        ...(input.taskType !== undefined ? { taskType: input.taskType } : {}),
+        ...(input.dayNumber !== undefined ? { dayNumber: Math.max(1, Math.floor(input.dayNumber)) } : {}),
+        ...(input.instructions !== undefined ? { instructions: input.instructions?.trim() || null } : {}),
+        scheduledFor,
+      },
+    });
+
+    await database.auditEvent.create({
+      data: {
+        tenantId: context.tenantId,
+        branchId: toUuid(context.branchId),
+        actorMembershipId: toUuid(context.membershipId),
+        sessionId: toUuid(context.sessionId),
+        requestId: context.requestId,
+        action: "clinical.careplan_task.updated",
+        entityType: "careplan-task",
+        entityId: updated.id,
+        severity: "INFORMATION",
+        sourceApplication: context.sourceApplication,
+      },
+    });
+
+    return this.serializeTask(updated);
+  }
+
+  /** Removes a task that was never actioned. */
+  async deleteTask(
+    requestContext: WonFlowRequestContext,
+    taskId: string,
+  ): Promise<{ id: string }> {
+    const context = requireTenantContext(requestContext);
+    if (!context.membershipId) {
+      throw new WonFlowApiError(403, "membership-required", "Staff membership is required to remove a task.");
+    }
+
+    const task = await database.carePlanTask.findFirst({ where: { id: taskId, tenantId: context.tenantId } });
+    if (!task) throw new WonFlowApiError(404, "task-not-found", "Care plan task not found.");
+
+    if (task.status === "COMPLETED" || task.status === "SKIPPED") {
+      throw new WonFlowApiError(
+        409,
+        "task-already-actioned",
+        "This task has already been completed or skipped, so it stays on the record.",
+      );
+    }
+
+    await database.$transaction(async (tx) => {
+      await tx.carePlanTask.delete({ where: { id: task.id } });
+    });
+
+    await database.auditEvent.create({
+      data: {
+        tenantId: context.tenantId,
+        branchId: toUuid(context.branchId),
+        actorMembershipId: toUuid(context.membershipId),
+        sessionId: toUuid(context.sessionId),
+        requestId: context.requestId,
+        action: "clinical.careplan_task.removed",
+        entityType: "careplan-task",
+        entityId: task.id,
+        severity: "WARNING",
+        sourceApplication: context.sourceApplication,
+      },
+    });
+
+    return { id: task.id };
+  }
+
+  /** Shared row -> summary mapping for the single-task endpoints. */
+  private serializeTask(t: {
+    id: string; tenantId: string; carePlanId: string; taskType: string; stageNumber: number;
+    dayNumber: number; scheduledFor: Date; dueBy: Date | null; title: string; instructions: string | null;
+    requiredSource: string | null; status: string; completedAt: Date | null; completedByIdentityId: string | null;
+    resultData: unknown; skipReason: string | null; createdAt: Date;
+  }): CarePlanTaskSummary {
+    return {
+      id: t.id,
+      tenantId: t.tenantId,
+      carePlanId: t.carePlanId,
+      taskType: t.taskType,
+      stageNumber: t.stageNumber,
+      dayNumber: t.dayNumber,
+      scheduledFor: t.scheduledFor.toISOString(),
+      dueBy: t.dueBy?.toISOString() ?? null,
+      title: t.title,
+      instructions: t.instructions,
+      requiredSource: t.requiredSource,
+      status: t.status,
+      completedAt: t.completedAt?.toISOString() ?? null,
+      completedByIdentityId: t.completedByIdentityId,
+      resultData: t.resultData,
+      skipReason: t.skipReason,
+      createdAt: t.createdAt.toISOString(),
+    } as unknown as CarePlanTaskSummary;
   }
 
   async completeTask(

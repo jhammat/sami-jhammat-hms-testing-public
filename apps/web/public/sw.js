@@ -73,6 +73,9 @@ self.addEventListener("fetch", (event) => {
   // Another origin's caching is its own business.
   if (url.origin !== self.location.origin) return;
 
+  // Never cache or intercept anything on localhost during development
+  if (url.hostname === "localhost" || url.hostname === "127.0.0.1") return;
+
   // Never touch the API. Every response there is account-scoped.
   if (url.pathname.startsWith("/api/")) return;
 

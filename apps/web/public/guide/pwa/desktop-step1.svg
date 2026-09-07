@@ -1,0 +1,122 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" width="100%" height="100%" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="680" y2="340" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#090d16"/>
+    </linearGradient>
+    <linearGradient id="barGrad" x1="0" y1="0" x2="600" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#334155"/>
+    </linearGradient>
+    <linearGradient id="glowPulse" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="680" height="340" rx="16" fill="url(#bgGrad)"/>
+  <rect width="678" height="338" x="1" y="1" rx="15" stroke="#334155" stroke-opacity="0.4" stroke-width="1"/>
+
+  <!-- Browser Window Container -->
+  <g filter="url(#shadow)">
+    <rect x="30" y="35" width="620" height="270" rx="12" fill="#0b0f19" stroke="#1e293b" stroke-width="1.5"/>
+    
+    <!-- Titlebar & Tabs -->
+    <path d="M 30 47 Q 30 35 42 35 L 638 35 Q 650 35 650 47 L 650 78 L 30 78 Z" fill="#131927"/>
+    
+    <!-- Window Controls (Red, Yellow, Green) -->
+    <circle cx="52" cy="56" r="5.5" fill="#ef4444"/>
+    <circle cx="70" cy="56" r="5.5" fill="#f59e0b"/>
+    <circle cx="88" cy="56" r="5.5" fill="#10b981"/>
+
+    <!-- Active Tab -->
+    <path d="M 112 78 L 120 45 Q 123 43 128 43 L 260 43 Q 265 43 268 45 L 276 78 Z" fill="#1e293b"/>
+    <!-- Tab Icon (W Logo) -->
+    <rect x="134" y="50" width="16" height="16" rx="4" fill="#3b82f6"/>
+    <path d="M 137 54 L 140 62 L 142 57 L 144 62 L 147 54" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- Tab Title -->
+    <text x="156" y="62" fill="#e2e8f0" font-size="11" font-weight="600" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">WonFlow Hospital</text>
+    <path d="M 252 53 L 258 59 M 258 53 L 252 59" stroke="#64748b" stroke-width="1.5" stroke-linecap="round"/>
+
+    <!-- Browser Controls Bar -->
+    <rect x="30" y="78" width="620" height="52" fill="#182234" stroke="#1e293b" stroke-width="1"/>
+    
+    <!-- Back / Forward / Refresh -->
+    <path d="M 52 104 L 60 97 M 52 104 L 60 111 M 52 104 L 66 104" stroke="#64748b" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 76 104 L 84 104 M 80 97 L 88 104 M 80 111 L 88 104" stroke="#475569" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M 104 98 A 6 6 0 1 1 98 104" stroke="#64748b" stroke-width="1.8" fill="none" stroke-linecap="round"/>
+    <path d="M 104 95 L 104 99 L 100 99" fill="#64748b"/>
+
+    <!-- Address Bar (Omnibox) -->
+    <rect x="122" y="86" width="460" height="36" rx="18" fill="#0f172a" stroke="#334155" stroke-width="1.2"/>
+    
+    <!-- SSL Lock -->
+    <rect x="138" y="101" width="10" height="9" rx="2" fill="#10b981"/>
+    <path d="M 140 101 L 140 98 A 3 3 0 0 1 146 98 L 146 101" stroke="#10b981" stroke-width="1.5" fill="none"/>
+    
+    <!-- URL Text -->
+    <text x="156" y="109" fill="#94a3b8" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">https://</text>
+    <text x="198" y="109" fill="#f8fafc" font-size="12" font-weight="600" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">wonflow.hospital</text>
+    <text x="296" y="109" fill="#64748b" font-size="12" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">/doctor/consultations</text>
+
+    <!-- Address Bar Right Icons -->
+    <!-- Star Favorite -->
+    <path d="M 488 104 L 489.5 100.5 L 493 100 L 490.5 97.5 L 491 94 L 488 95.8 L 485 94 L 485.5 97.5 L 483 100 L 486.5 100.5 Z" fill="#64748b"/>
+
+    <!-- ★ HIGHLIGHTED INSTALL APP ICON ★ -->
+    <!-- Glow Backdrop -->
+    <rect x="510" y="90" width="62" height="28" rx="8" fill="url(#glowPulse)" fill-opacity="0.25" stroke="#38bdf8" stroke-width="1.8" filter="url(#glow)"/>
+    <rect x="510" y="90" width="62" height="28" rx="8" fill="#1e1b4b" stroke="#60a5fa" stroke-width="1.5"/>
+    
+    <!-- Monitor / Down Arrow Icon -->
+    <rect x="518" y="96" width="15" height="11" rx="2" stroke="#38bdf8" stroke-width="1.5" fill="none"/>
+    <line x1="522" y1="110" x2="529" y2="110" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="525.5" y1="107" x2="525.5" y2="110" stroke="#38bdf8" stroke-width="1.5"/>
+    <!-- Down Arrow -->
+    <path d="M 525.5 99 L 525.5 104 M 523 102 L 525.5 104.5 L 528 102" stroke="#ffffff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <text x="538" y="108" fill="#38bdf8" font-size="10" font-weight="700" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">Install</text>
+
+    <!-- Browser Menu (3 Dots) -->
+    <circle cx="604" cy="104" r="2" fill="#94a3b8"/>
+    <circle cx="612" cy="104" r="2" fill="#94a3b8"/>
+    <circle cx="620" cy="104" r="2" fill="#94a3b8"/>
+
+    <!-- Page Content Preview Area -->
+    <rect x="30" y="130" width="620" height="175" fill="#090d16"/>
+    
+    <!-- Web Page Mock Header -->
+    <rect x="55" y="150" width="570" height="38" rx="8" fill="#131b2e"/>
+    <rect x="68" y="160" width="85" height="18" rx="5" fill="#3b82f6" fill-opacity="0.3"/>
+    <text x="76" y="173" fill="#60a5fa" font-size="10" font-weight="600">WonFlow Clinical</text>
+    <rect x="165" y="163" width="110" height="12" rx="4" fill="#1e293b"/>
+    <rect x="285" y="163" width="80" height="12" rx="4" fill="#1e293b"/>
+
+    <!-- Step 1 Explanatory Callout Pointer -->
+    <g filter="url(#shadow)">
+      <!-- Pointer Line -->
+      <path d="M 541 120 L 541 190 Q 541 200 531 200 L 460 200" stroke="#38bdf8" stroke-width="2" stroke-dasharray="4 3" fill="none"/>
+      <circle cx="541" cy="120" r="4" fill="#38bdf8"/>
+      
+      <!-- Callout Badge -->
+      <rect x="210" y="176" width="245" height="54" rx="10" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>
+      <circle cx="232" cy="203" r="12" fill="#38bdf8"/>
+      <text x="228" y="208" fill="#0f172a" font-size="13" font-weight="900" font-family="-apple-system, BlinkMacSystemFont, sans-serif">1</text>
+      <text x="252" y="196" fill="#f8fafc" font-size="12" font-weight="700" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Click the "Install" Icon</text>
+      <text x="252" y="213" fill="#94a3b8" font-size="10" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Located on right side of address bar</text>
+    </g>
+
+    <!-- Additional Hint Bar -->
+    <rect x="55" y="246" width="570" height="42" rx="8" fill="#1e293b" fill-opacity="0.6" stroke="#334155" stroke-width="1"/>
+    <text x="75" y="271" fill="#cbd5e1" font-size="11" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">💡 <tspan font-weight="600" fill="#ffffff">Step 1:</tspan> Look at the far-right end of your Chrome or Microsoft Edge address bar for the install icon.</text>
+  </g>
+</svg>

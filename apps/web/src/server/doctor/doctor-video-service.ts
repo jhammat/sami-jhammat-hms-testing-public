@@ -252,21 +252,33 @@ export async function saveVideoConsultationChart(
 ) {
   const { context, doctor } = await resolveDoctor(requestContext);
 
+  /*
+   * Scoped to the calling doctor, not just the tenant.
+   *
+   * This looked the appointment up by id and tenant alone, so any clinician
+   * holding a doctor profile in the tenant could post a chart against any
+   * other doctor's appointment — writing a diagnosis, vitals, a prescription
+   * and a signed note onto a patient they had never seen, and marking the
+   * visit complete. The read path beside it (`listDoctorVideoConsultations`)
+   * had always filtered by `doctorId`; only the write path did not.
+   *
+   * A doctor who is not on the appointment gets the same 404 as one that does
+   * not exist: whether another clinician has a patient booked is not theirs
+   * to learn by probing identifiers.
+   */
   const appointment = await database.appointment.findFirst({
-    where: { id: input.appointmentId, tenantId: context.tenantId },
+    where: {
+      id: input.appointmentId,
+      tenantId: context.tenantId,
+      // The appointment is the caller's own, or it belongs to a clinician they
+      // supervise — the same reach `requireEncounterAccess` grants in
+      // doctor-service. Anything else is not theirs to chart.
+      OR: [{ doctorId: doctor.id }, { doctor: { supervisorDoctorId: doctor.id } }],
+    },
     include: { patient: true },
   });
   if (!appointment) {
     throw new WonFlowApiError(404, "appointment-not-found", "Appointment was not found.");
-  }
-
-  if (appointment.doctorId && appointment.doctorId !== doctor.id) {
-    const treatingDoc = await database.doctorProfile.findFirst({
-      where: { id: appointment.doctorId, tenantId: context.tenantId },
-    });
-    if (treatingDoc?.supervisorDoctorId !== doctor.id) {
-      throw new WonFlowApiError(403, "forbidden", "You do not have permission to chart this consultation.");
-    }
   }
 
   // Ensure valid branchId
@@ -283,151 +295,188 @@ export async function saveVideoConsultationChart(
 
   const now = new Date();
 
-  // Find or create Encounter
-  let encounter = await database.encounter.findFirst({
+  /*
+   * Charting a video consultation is one unit of work, and a retry must not
+   * write it twice.
+   *
+   * These writes ran one after another outside any transaction: a diagnosis,
+   * the vitals, a prescription, a signed note, then two updates. On the
+   * intermittent connections this product is built for, a client that timed
+   * out and retried — or a doctor who pressed "Save & Issue" again because
+   * nothing had happened yet — produced a second diagnosis, a second set of
+   * vitals and, worst of all, a second live prescription for the same visit.
+   * A partial failure halfway through left the encounter half-charted with no
+   * way to tell.
+   *
+   * An encounter already completed for this appointment is treated as already
+   * charted and returned as-is, and everything below now commits or rolls back
+   * together.
+   */
+  const existing = await database.encounter.findFirst({
     where: { tenantId: context.tenantId, appointmentId: appointment.id },
+    select: { id: true, status: true },
   });
+  if (existing?.status === "COMPLETED") {
+    return {
+      success: true,
+      encounterId: existing.id,
+      patientName: `${appointment.patient.givenName} ${appointment.patient.familyName}`.trim(),
+      completedAt: now.toISOString(),
+      alreadyCharted: true,
+    };
+  }
 
-  if (!encounter) {
-    encounter = await database.encounter.create({
-      data: {
-        tenantId: context.tenantId,
-        patientId: appointment.patientId,
-        doctorId: doctor.id,
-        branchId: resolvedBranchId,
-        appointmentId: appointment.id,
-        status: "IN_PROGRESS",
-        startedAt: now,
-        reason: input.chiefComplaints || appointment.reason || "Video Consultation",
-      },
+  const encounter = await database.$transaction(async (tx) => {
+
+    // Find or create Encounter
+      let encounter = await tx.encounter.findFirst({
+      where: { tenantId: context.tenantId, appointmentId: appointment.id },
     });
-  }
 
-  // 1. Save Diagnosis
-  if (input.primaryDiagnosis?.trim()) {
-    await database.encounterDiagnosis.create({
-      data: {
-        tenantId: context.tenantId,
-        encounterId: encounter.id,
-        patientId: appointment.patientId,
-        display: input.primaryDiagnosis.trim(),
-        codeSystem: "ICD-10",
-        code: "UNSPECIFIED",
-        recordedByMembershipId: context.membershipId!,
-        isPrimary: true,
-      },
-    });
-  }
-
-  // 2. Save Clinical Observations (Vitals)
-  if (input.vitals) {
-    const vitalsEntries = Object.entries(input.vitals).filter(([, val]) => Boolean(val?.trim()));
-    for (const [key, value] of vitalsEntries) {
-      if (value) {
-        await database.clinicalObservation.create({
-          data: {
-            tenantId: context.tenantId,
-            patientId: appointment.patientId,
-            encounterId: encounter.id,
-            code: key,
-            display: key.replace(/([A-Z])/g, " $1").trim(),
-            valueText: String(value),
-            observedAt: now,
-            status: "FINAL",
-          },
-        });
-      }
-    }
-  }
-
-  // 3. Save Prescriptions if entered
-  if (input.prescriptions && input.prescriptions.length > 0) {
-    const validItems = input.prescriptions.filter((p) => p.medicineName.trim());
-    if (validItems.length > 0) {
-      const rx = await database.prescription.create({
+    if (!encounter) {
+      encounter = await tx.encounter.create({
         data: {
           tenantId: context.tenantId,
           patientId: appointment.patientId,
           doctorId: doctor.id,
-          encounterId: encounter.id,
-          status: "ACTIVE",
-          instructions: input.followUpPlan || "Take medications as prescribed.",
+          branchId: resolvedBranchId,
+          appointmentId: appointment.id,
+          status: "IN_PROGRESS",
+          startedAt: now,
+          reason: input.chiefComplaints || appointment.reason || "Video Consultation",
         },
       });
+    }
 
-      for (const item of validItems) {
-        // Find or create Medication
-        let medication = await database.medication.findFirst({
-          where: { tenantId: context.tenantId, genericName: item.medicineName.trim() },
-        });
-        if (!medication) {
-          medication = await database.medication.create({
+    // 1. Save Diagnosis
+    if (input.primaryDiagnosis?.trim()) {
+      await tx.encounterDiagnosis.create({
+        data: {
+          tenantId: context.tenantId,
+          encounterId: encounter.id,
+          patientId: appointment.patientId,
+          display: input.primaryDiagnosis.trim(),
+          codeSystem: "ICD-10",
+          code: "UNSPECIFIED",
+          recordedByMembershipId: context.membershipId!,
+          isPrimary: true,
+        },
+      });
+    }
+
+    // 2. Save Clinical Observations (Vitals)
+    if (input.vitals) {
+      const vitalsEntries = Object.entries(input.vitals).filter(([, val]) => Boolean(val?.trim()));
+      for (const [key, value] of vitalsEntries) {
+        if (value) {
+          await tx.clinicalObservation.create({
             data: {
               tenantId: context.tenantId,
-              code: `MED-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`,
-              genericName: item.medicineName.trim(),
-              unit: "tablets",
+              patientId: appointment.patientId,
+              encounterId: encounter.id,
+              code: key,
+              display: key.replace(/([A-Z])/g, " $1").trim(),
+              valueText: String(value),
+              observedAt: now,
+              status: "FINAL",
             },
           });
         }
-
-        await database.prescriptionItem.create({
-          data: {
-            prescriptionId: rx.id,
-            medicationId: medication.id,
-            dose: item.dosage.trim() || "As directed",
-            frequency: item.frequency.trim() || "As directed",
-            duration: item.duration?.trim() || null,
-            instructions: item.instructions?.trim() || null,
-          },
-        });
       }
     }
-  }
 
-  // 4. Save Clinical Note
-  const noteBody = [
-    input.chiefComplaints ? `Chief Complaints: ${input.chiefComplaints}` : "",
-    input.clinicalNotes ? `Clinical Assessment: ${input.clinicalNotes}` : "",
-    input.followUpPlan ? `Follow-up: ${input.followUpPlan}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+    // 3. Save Prescriptions if entered
+    if (input.prescriptions && input.prescriptions.length > 0) {
+      const validItems = input.prescriptions.filter((p) => p.medicineName.trim());
+      if (validItems.length > 0) {
+        const rx = await tx.prescription.create({
+          data: {
+            tenantId: context.tenantId,
+            patientId: appointment.patientId,
+            doctorId: doctor.id,
+            encounterId: encounter.id,
+            status: "ACTIVE",
+            instructions: input.followUpPlan || "Take medications as prescribed.",
+          },
+        });
 
-  if (noteBody) {
-    const isSupervised = Boolean(doctor.requiresCountersignature);
-    await database.encounterNote.create({
+        for (const item of validItems) {
+          // Find or create Medication
+          let medication = await tx.medication.findFirst({
+            where: { tenantId: context.tenantId, genericName: item.medicineName.trim() },
+          });
+          if (!medication) {
+            medication = await tx.medication.create({
+              data: {
+                tenantId: context.tenantId,
+                code: `MED-${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 1000)}`,
+                genericName: item.medicineName.trim(),
+                unit: "tablets",
+              },
+            });
+          }
+
+          await tx.prescriptionItem.create({
+            data: {
+              prescriptionId: rx.id,
+              medicationId: medication.id,
+              dose: item.dosage.trim() || "As directed",
+              frequency: item.frequency.trim() || "As directed",
+              duration: item.duration?.trim() || null,
+              instructions: item.instructions?.trim() || null,
+            },
+          });
+        }
+      }
+    }
+
+    // 4. Save Clinical Note
+    const noteBody = [
+      input.chiefComplaints ? `Chief Complaints: ${input.chiefComplaints}` : "",
+      input.clinicalNotes ? `Clinical Assessment: ${input.clinicalNotes}` : "",
+      input.followUpPlan ? `Follow-up: ${input.followUpPlan}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+
+    if (noteBody) {
+      const isSupervised = Boolean(doctor.requiresCountersignature);
+      await tx.encounterNote.create({
+        data: {
+          tenantId: context.tenantId,
+          encounterId: encounter.id,
+          authorMembershipId: context.membershipId!,
+          noteType: "consultation_summary",
+          content: { text: noteBody },
+          status: isSupervised ? "DRAFT" : "SIGNED",
+          signedAt: isSupervised ? null : now,
+        },
+      });
+    }
+
+    // Update encounter to COMPLETED
+    await tx.encounter.update({
+      where: { id: encounter.id },
       data: {
-        tenantId: context.tenantId,
-        encounterId: encounter.id,
-        authorMembershipId: context.membershipId!,
-        noteType: "consultation_summary",
-        content: { text: noteBody },
-        status: isSupervised ? "DRAFT" : "SIGNED",
-        signedAt: isSupervised ? null : now,
+        status: "COMPLETED",
+        endedAt: now,
+        clinicalData: {
+          vitals: input.vitals ?? {},
+          diagnosis: input.primaryDiagnosis ?? "",
+          summary: noteBody,
+        },
       },
     });
-  }
 
-  // Update encounter to COMPLETED
-  await database.encounter.update({
-    where: { id: encounter.id },
-    data: {
-      status: "COMPLETED",
-      endedAt: now,
-      clinicalData: {
-        vitals: input.vitals ?? {},
-        diagnosis: input.primaryDiagnosis ?? "",
-        summary: noteBody,
-      },
-    },
+    // Mark appointment completed
+    await tx.appointment.update({
+      where: { id: appointment.id },
+      data: { status: "COMPLETED" },
+    });
+
+    return encounter;
   });
 
-  // Mark appointment completed
-  await database.appointment.update({
-    where: { id: appointment.id },
-    data: { status: "COMPLETED" },
-  });
 
   return {
     success: true,

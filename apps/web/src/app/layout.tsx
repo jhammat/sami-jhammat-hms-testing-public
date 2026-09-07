@@ -97,7 +97,7 @@ export default async function RootLayout({
       className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <head>
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
         <Script
           id="wonflow-data-cleanup"
           strategy="beforeInteractive"
@@ -112,15 +112,23 @@ export default async function RootLayout({
             __html: `try{if(localStorage.getItem("wonflow-color-theme")==="dark"){document.documentElement.classList.add("dark");document.documentElement.style.colorScheme="dark"}}catch{}`,
           }}
         />
-        <Script
-          id="wonflow-sw-register"
-          strategy="afterInteractive"
-          dangerouslySetInnerHTML={{
-            __html: `if("serviceWorker"in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){})})}`,
-          }}
-        />
-      </head>
-      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        {process.env.NODE_ENV === "production" ? (
+          <Script
+            id="wonflow-sw-register"
+            strategy="afterInteractive"
+            dangerouslySetInnerHTML={{
+              __html: `if("serviceWorker"in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){})})}`,
+            }}
+          />
+        ) : (
+          <Script
+            id="wonflow-sw-dev-cleanup"
+            strategy="afterInteractive"
+            dangerouslySetInnerHTML={{
+              __html: `if("serviceWorker"in navigator){navigator.serviceWorker.getRegistrations().then(function(regs){for(var r of regs){r.unregister()}});if(window.caches){caches.keys().then(function(keys){for(var k of keys){caches.delete(k)}})}}`,
+            }}
+          />
+        )}
         <ClientStorageGuard />
         <WonFlowApplicationProvider
           configuration={configuration}

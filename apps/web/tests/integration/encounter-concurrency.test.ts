@@ -80,7 +80,19 @@ beforeAll(async () => {
   });
   doctorId = doctor.id;
 
-  const today = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate()));
+  /*
+   * The sitting has to be dated in the hospital's own business day, not in UTC.
+   *
+   * This built the date from `getUTCFullYear/Month/Date` while the request
+   * context below declares `Asia/Karachi`, and `createEncounter` resolves
+   * "today" in the tenant's timezone. Between 00:00 and 05:00 in Karachi the
+   * two disagree — UTC is still on the previous date — so no sitting matched,
+   * the readiness check refused both starts, and this test failed for reasons
+   * that had nothing to do with concurrency. It is now deterministic at every
+   * hour of the day.
+   */
+  const businessDayInTenantTimezone = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Karachi" }).format(new Date());
+  const today = new Date(`${businessDayInTenantTimezone}T00:00:00.000Z`);
   await database.doctorSitting.create({
     data: {
       tenantId, doctorId, branchId, businessDate: today,

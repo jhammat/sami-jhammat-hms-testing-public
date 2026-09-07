@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" width="100%" height="100%" fill="none">
+  <defs>
+    <linearGradient id="andrBg3" x1="0" y1="0" x2="680" y2="340" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="50%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="andrBtnGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+    <filter id="andrModalShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="20" stdDeviation="22" flood-color="#000000" flood-opacity="0.9"/>
+    </filter>
+  </defs>
+
+  <rect width="680" height="340" rx="16" fill="url(#andrBg3)"/>
+  <rect width="678" height="338" x="1" y="1" rx="15" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Android Phone Mockup Frame (Centered) -->
+  <g transform="translate(190, 20)">
+    <rect width="300" height="300" rx="30" fill="#090d16" stroke="#334155" stroke-width="2.5"/>
+    
+    <!-- Screen Area with Dimmed Wallpaper / Page -->
+    <rect x="12" y="32" width="276" height="255" rx="4" fill="#050811"/>
+
+    <!-- ★ ANDROID SYSTEM INSTALL BOTTOM SHEET / DIALOG ★ -->
+    <g filter="url(#andrModalShadow)">
+      <path d="M 12 120 Q 12 105 26 105 L 274 105 Q 288 105 288 120 L 288 287 L 12 287 Z" fill="#1e293b"/>
+
+      <!-- App Icon and Name -->
+      <g transform="translate(32, 130)">
+        <rect width="48" height="48" rx="12" fill="#1e40af" stroke="#3b82f6" stroke-width="1.5"/>
+        <path d="M 11 16 L 18 32 L 24 22 L 30 32 L 37 16" stroke="#ffffff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+        
+        <text x="60" y="24" fill="#ffffff" font-size="14" font-weight="700">WonFlow</text>
+        <text x="60" y="42" fill="#94a3b8" font-size="11">wonflow.hospital</text>
+      </g>
+
+      <text x="32" y="202" fill="#cbd5e1" font-size="11.5">Install web application?</text>
+      <text x="32" y="218" fill="#64748b" font-size="10">Adds WonFlow icon to your home screen.</text>
+
+      <!-- Action Buttons -->
+      <g transform="translate(32, 235)">
+        <!-- Cancel -->
+        <rect width="105" height="36" rx="8" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+        <text x="36" y="22" fill="#94a3b8" font-size="12">Cancel</text>
+
+        <!-- ★ INSTALL BUTTON (Glowing Green) ★ -->
+        <g transform="translate(115, 0)">
+          <rect width="118" height="36" rx="8" fill="url(#andrBtnGrad)" stroke="#34d399" stroke-width="1.5"/>
+          <text x="40" y="23" fill="#ffffff" font-size="12.5" font-weight="700">Install</text>
+          
+          <!-- Tap Ripple -->
+          <circle cx="100" cy="18" r="7" fill="#ffffff" fill-opacity="0.3"/>
+        </g>
+      </g>
+    </g>
+  </g>
+
+  <!-- Left Callout -->
+  <g transform="translate(30, 110)">
+    <rect width="140" height="96" rx="10" fill="#0f172a" stroke="#10b981" stroke-width="1.5"/>
+    <circle cx="28" cy="28" r="12" fill="#10b981"/>
+    <text x="24" y="33" fill="#022c22" font-size="13" font-weight="900">3</text>
+    <text x="48" y="32" fill="#f8fafc" font-size="12" font-weight="700">Tap "Install"</text>
+    <text x="14" y="58" fill="#cbd5e1" font-size="10.5">Confirms installation.</text>
+    <text x="14" y="74" fill="#34d399" font-size="10.5">Opens in dedicated standalone app mode.</text>
+  </g>
+
+  <!-- Right Callout -->
+  <g transform="translate(510, 110)">
+    <rect width="140" height="96" rx="10" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>
+    <text x="14" y="28" fill="#38bdf8" font-size="11" font-weight="700">Zero App Store</text>
+    <text x="14" y="50" fill="#94a3b8" font-size="10">Direct install without Google Play login or storage overhead.</text>
+  </g>
+</svg>

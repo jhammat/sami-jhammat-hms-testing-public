@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" width="100%" height="100%" fill="none">
+  <defs>
+    <linearGradient id="iosBg3" x1="0" y1="0" x2="680" y2="340" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#020617"/>
+      <stop offset="50%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+    <linearGradient id="appIconGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#1e3a8a"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <filter id="iconGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <rect width="680" height="340" rx="16" fill="url(#iosBg3)"/>
+  <rect width="678" height="338" x="1" y="1" rx="15" stroke="#1e293b" stroke-width="1"/>
+
+  <!-- Center iPhone Mockup -->
+  <g transform="translate(190, 20)">
+    <rect width="300" height="300" rx="36" fill="#090d16" stroke="#334155" stroke-width="2.5"/>
+    
+    <!-- Screen -->
+    <rect x="12" y="38" width="276" height="250" rx="4" fill="#0b1120"/>
+
+    <!-- Top Confirmation Bar -->
+    <rect x="12" y="38" width="276" height="42" fill="#1e293b" stroke="#334155" stroke-width="0.8"/>
+    <text x="24" y="64" fill="#60a5fa" font-size="12">Cancel</text>
+    <text x="96" y="64" fill="#f8fafc" font-size="11.5" font-weight="600">Add to Home Screen</text>
+    
+    <!-- ★ HIGHLIGHTED "Add" BUTTON ★ -->
+    <rect x="236" y="47" width="44" height="25" rx="6" fill="#2563eb" stroke="#60a5fa" stroke-width="1"/>
+    <text x="248" y="63" fill="#ffffff" font-size="12" font-weight="700">Add</text>
+
+    <!-- iOS Home Screen Grid Preview -->
+    <g transform="translate(12, 95)">
+      <!-- Wallpaper simulation -->
+      <rect width="276" height="185" fill="#070d19"/>
+      
+      <!-- Dummy App Icons -->
+      <!-- App 1: Messages -->
+      <rect x="25" y="20" width="44" height="44" rx="10" fill="#22c55e"/>
+      <text x="26" y="75" fill="#cbd5e1" font-size="9" text-anchor="middle" cx="47">Messages</text>
+
+      <!-- App 2: Calendar -->
+      <rect x="85" y="20" width="44" height="44" rx="10" fill="#ffffff"/>
+      <rect x="85" y="20" width="44" height="12" rx="2" fill="#ef4444"/>
+      <text x="86" y="75" fill="#cbd5e1" font-size="9" text-anchor="middle" cx="107">Calendar</text>
+
+      <!-- App 3: Photos -->
+      <rect x="145" y="20" width="44" height="44" rx="10" fill="#f59e0b"/>
+      <text x="146" y="75" fill="#cbd5e1" font-size="9" text-anchor="middle" cx="167">Photos</text>
+
+      <!-- ★ WONFLOW INSTALLED APP ICON ★ -->
+      <rect x="205" y="20" width="44" height="44" rx="10" fill="url(#appIconGrad)" stroke="#38bdf8" stroke-width="1.8" filter="url(#iconGlow)"/>
+      <rect x="205" y="20" width="44" height="44" rx="10" fill="url(#appIconGrad)"/>
+      <path d="M 215 32 L 220 45 L 225 38 L 230 45 L 235 32" stroke="#ffffff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      
+      <text x="227" y="76" fill="#38bdf8" font-size="10" font-weight="700" text-anchor="middle">WonFlow</text>
+      
+      <!-- Indicator Arrow -->
+      <circle cx="227" cy="94" r="8" fill="#38bdf8"/>
+      <path d="M 227 100 L 227 88 M 224 92 L 227 88 L 230 92" stroke="#020617" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+
+      <!-- Dock at bottom -->
+      <rect x="18" y="125" width="240" height="52" rx="20" fill="#1e293b" fill-opacity="0.75" stroke="#334155" stroke-width="1"/>
+      <rect x="35" y="133" width="36" height="36" rx="8" fill="#10b981"/>
+      <rect x="95" y="133" width="36" height="36" rx="8" fill="#0284c7"/>
+      <rect x="155" y="133" width="36" height="36" rx="8" fill="#6366f1"/>
+      <rect x="215" y="133" width="36" height="36" rx="8" fill="#ec4899"/>
+    </g>
+
+    <!-- Home Indicator -->
+    <rect x="95" y="280" width="110" height="4" rx="2" fill="#94a3b8"/>
+  </g>
+
+  <!-- Left Callout -->
+  <g transform="translate(30, 110)">
+    <rect width="140" height="96" rx="10" fill="#0f172a" stroke="#10b981" stroke-width="1.5"/>
+    <circle cx="28" cy="28" r="12" fill="#10b981"/>
+    <text x="24" y="33" fill="#022c22" font-size="13" font-weight="900">3</text>
+    <text x="48" y="32" fill="#f8fafc" font-size="12" font-weight="700">Tap "Add"</text>
+    <text x="14" y="58" fill="#cbd5e1" font-size="10.5">Top-right corner.</text>
+    <text x="14" y="74" fill="#a7f3d0" font-size="10.5">Launches full-screen from Home Screen!</text>
+  </g>
+
+  <!-- Right Callout -->
+  <g transform="translate(510, 110)">
+    <rect width="140" height="96" rx="10" fill="#0f172a" stroke="#38bdf8" stroke-width="1.5"/>
+    <text x="14" y="28" fill="#38bdf8" font-size="11" font-weight="700">Standalone Mode</text>
+    <text x="14" y="50" fill="#94a3b8" font-size="10">Runs without browser bars, exactly like a native iPhone app.</text>
+  </g>
+</svg>

@@ -1,7 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { ReferralDiscipline, ReferralPriority } from "@wonflow/contracts";
+
+interface AlliedStaffRow {
+  id: string;
+  staffType: string;
+  title: string | null;
+  displayName: string;
+}
 
 interface ReferralManagerModalProps {
   isOpen: boolean;
@@ -29,7 +36,40 @@ export function ReferralManagerModal({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
+  /*
+   * Who the referral goes to.
+   *
+   * `createReferral` has always accepted and validated an `assignedToId`, but
+   * this dialog never offered one and never sent it, so every referral landed
+   * unassigned in a departmental pool. A surgeon who wants a named
+   * physiotherapist on a post-Whipple patient had no way to say so from here.
+   */
+  const [allied, setAllied] = useState<AlliedStaffRow[]>([]);
+  const [assignedToId, setAssignedToId] = useState("");
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/v1/allied/staff", { credentials: "same-origin", cache: "no-store" });
+        const payload = await response.json().catch(() => null);
+        if (!cancelled && response.ok) setAllied(payload?.staff ?? []);
+      } catch {
+        // Assignment stays optional — the referral can still go to the pool.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen]);
+
+  // Changing the discipline invalidates a person chosen from the other one.
+  useEffect(() => { setAssignedToId(""); }, [discipline]);
+
   if (!isOpen) return null;
+
+  const staffForDiscipline = allied.filter((staff) =>
+    discipline === "PHYSIOTHERAPY" ? staff.staffType === "PHYSIOTHERAPIST" : staff.staffType === "NUTRITIONIST",
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -49,6 +89,7 @@ export function ReferralManagerModal({
           patientId,
           specialty: discipline,
           discipline,
+          assignedToId: assignedToId || undefined,
           priority,
           reason: reason.trim(),
           goal: goal.trim() || undefined,
@@ -154,6 +195,33 @@ export function ReferralManagerModal({
                   <option value="EMERGENCY">Emergency (Immediate)</option>
                 </select>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                Assign to {discipline === "PHYSIOTHERAPY" ? "physiotherapist" : "dietitian"}
+              </label>
+              <select
+                value={assignedToId}
+                onChange={(e) => setAssignedToId(e.target.value)}
+                className="w-full px-3 py-2 text-sm bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 text-slate-900 dark:text-white"
+              >
+                <option value="">
+                  {staffForDiscipline.length
+                    ? "Any available — leave for the department to pick up"
+                    : "No one is set up in this department yet"}
+                </option>
+                {staffForDiscipline.map((staff) => (
+                  <option key={staff.id} value={staff.id}>
+                    {staff.displayName}
+                    {staff.title ? ` — ${staff.title}` : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                Optional. Naming someone sends it straight to their worklist; leaving it open puts it in the
+                department&apos;s queue.
+              </p>
             </div>
 
             <div>

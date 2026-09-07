@@ -634,7 +634,8 @@ function ConsultationWorkspace({
   encounter: EncounterRecord;
   reload: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"notes" | "rx" | "vitals" | "diagnoses" | "orders" | "history">("history");
+  // Opens on vitals — the first thing the consultation is meant to establish.
+  const [activeTab, setActiveTab] = useState<"notes" | "rx" | "vitals" | "diagnoses" | "orders" | "history">("vitals");
   const [actionMessage, setActionMessage] = useState<string | undefined>();
   const [completing, setCompleting] = useState(false);
   const [pausing, setPausing] = useState(false);
@@ -889,27 +890,24 @@ function ConsultationWorkspace({
         ) : null}
       </header>
 
-      {/* Navigation Glassmorphic Tabs — Clinically Ordered: History -> Vitals -> Notes -> Dx -> Orders -> Rx */}
+      {/*
+        The consultation follows the order a doctor actually works:
+        Vitals -> Diagnosis -> Medication -> Orders -> Note -> Patient History.
+
+        You read the observations the patient arrived with, decide what is
+        wrong, treat it, order what you still need to know, write the visit up,
+        and reach for the past record when something does not add up. The
+        earlier arrangement opened on the note and put the prescription pad
+        second — before any vitals had been read or any diagnosis recorded —
+        which is the reverse of the reasoning it is meant to support.
+      */}
       <nav className="flex items-center gap-1.5 overflow-x-auto rounded-2xl border border-white/40 bg-slate-100/60 p-1.5 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/60">
-        <TabButton
-          active={activeTab === "history"}
-          onClick={() => setActiveTab("history")}
-          icon={History}
-          label="Patient History"
-        />
         <TabButton
           active={activeTab === "vitals"}
           onClick={() => setActiveTab("vitals")}
           icon={Activity}
           label="Vitals & Observations"
           badge={patient.observations.length > 0 ? `${patient.observations.length}` : undefined}
-        />
-        <TabButton
-          active={activeTab === "notes"}
-          onClick={() => setActiveTab("notes")}
-          icon={FilePenLine}
-          label="Clinical Notes"
-          badge={encounter.notes.length > 0 ? `${encounter.notes.length}` : undefined}
         />
         <TabButton
           active={activeTab === "diagnoses"}
@@ -920,6 +918,13 @@ function ConsultationWorkspace({
           highlight
         />
         <TabButton
+          active={activeTab === "rx"}
+          onClick={() => setActiveTab("rx")}
+          icon={Pill}
+          label="Medications & Prescriptions"
+          badge={totalPrescriptions > 0 ? `${totalPrescriptions}` : undefined}
+        />
+        <TabButton
           active={activeTab === "orders"}
           onClick={() => setActiveTab("orders")}
           icon={FlaskConical}
@@ -927,24 +932,22 @@ function ConsultationWorkspace({
           badge={encounter.diagnosticOrders.length > 0 ? `${encounter.diagnosticOrders.length}` : undefined}
         />
         <TabButton
-          active={activeTab === "rx"}
-          onClick={() => setActiveTab("rx")}
-          icon={Pill}
-          label="Medications & Prescriptions"
-          badge={totalPrescriptions > 0 ? `${totalPrescriptions}` : undefined}
+          active={activeTab === "notes"}
+          onClick={() => setActiveTab("notes")}
+          icon={FilePenLine}
+          label="Clinical Notes"
+          badge={encounter.notes.length > 0 ? `${encounter.notes.length}` : undefined}
+        />
+        <TabButton
+          active={activeTab === "history"}
+          onClick={() => setActiveTab("history")}
+          icon={History}
+          label="Patient History"
         />
       </nav>
 
-      {/* Tab Panels */}
+      {/* Tab Panels — same order as the tabs above, so the DOM matches the flow. */}
       <main className="transition-all duration-300">
-        {activeTab === "notes" && (
-          <ConsultationNotePanel key={encounter.id} encounter={encounter} onSaved={reload} isEditable={isEditable} />
-        )}
-
-        {activeTab === "rx" && (
-          <GlassmorphicPrescriptionPanel encounter={encounter} onSaved={reload} isEditable={isEditable} />
-        )}
-
         {activeTab === "vitals" && (
           <ObservationsPanel encounter={encounter} onSaved={reload} isEditable={isEditable} />
         )}
@@ -953,8 +956,16 @@ function ConsultationWorkspace({
           <DiagnosesPanel encounter={encounter} onSaved={reload} isEditable={isEditable} />
         )}
 
+        {activeTab === "rx" && (
+          <GlassmorphicPrescriptionPanel encounter={encounter} onSaved={reload} isEditable={isEditable} />
+        )}
+
         {activeTab === "orders" && (
           <OrdersPanel encounter={encounter} onSaved={reload} isEditable={isEditable} />
+        )}
+
+        {activeTab === "notes" && (
+          <ConsultationNotePanel key={encounter.id} encounter={encounter} onSaved={reload} isEditable={isEditable} />
         )}
 
         {activeTab === "history" && (
@@ -2301,20 +2312,37 @@ function ObservationsPanel({
   onSaved: () => void;
   isEditable: boolean;
 }) {
-  const [systolic, setSystolic] = useState("120");
-  const [diastolic, setDiastolic] = useState("80");
-  const [pulse, setPulse] = useState("72");
-  const [spo2, setSpo2] = useState("98");
-  const [temperature, setTemperature] = useState("98.6");
-  const [respiratoryRate, setRespiratoryRate] = useState("16");
-  const [glucose, setGlucose] = useState("110");
-  const [weightKg, setWeightKg] = useState("70");
-  const [heightCm, setHeightCm] = useState("172");
+  /*
+   * Vitals start empty. They are measurements, not defaults.
+   *
+   * Every one of these fields used to open pre-filled with a healthy adult
+   * reading — 120/80, pulse 72, SpO2 98, 98.6°F, and a 70kg/172cm pair that
+   * silently produced a BMI. `handleRecordAllVitals` then wrote all nine to
+   * the chart whether or not anyone had touched them, so opening a
+   * consultation and pressing "Record Vitals Set" filed a complete set of
+   * normal observations for a patient nobody had examined. On a hypertensive
+   * or hypoxic patient that is a fabricated normal reading in the clinical
+   * record, and it is the reading the next clinician trusts.
+   *
+   * The expected value and unit now live in the placeholder, where they guide
+   * without being submitted, and only fields actually filled in are saved.
+   * This is the same correction already made to the prescribing fields.
+   */
+  const [systolic, setSystolic] = useState("");
+  const [diastolic, setDiastolic] = useState("");
+  const [pulse, setPulse] = useState("");
+  const [spo2, setSpo2] = useState("");
+  const [temperature, setTemperature] = useState("");
+  const [respiratoryRate, setRespiratoryRate] = useState("");
+  const [glucose, setGlucose] = useState("");
+  const [weightKg, setWeightKg] = useState("");
+  const [heightCm, setHeightCm] = useState("");
 
   // Custom observation dynamic field
   const [customObsName, setCustomObsName] = useState("");
   const [customObsValue, setCustomObsValue] = useState("");
   const [customObsUnit, setCustomObsUnit] = useState("");
+  const [vitalsError, setVitalsError] = useState("");
   const [deletingObsId, setDeletingObsId] = useState<string | null>(null);
   const [isDeletingBatch, setIsDeletingBatch] = useState(false);
 
@@ -2362,15 +2390,20 @@ function ObservationsPanel({
 
   async function handleRecordAllVitals(): Promise<void> {
     const now = new Date().toISOString();
+    // Only what was actually measured. A blank field is "not taken", and must
+    // not reach the chart as a reading — least of all as a normal one.
+    const filled = (value: string) => value.trim().length > 0;
     const vitalsToSave = [
-      { code: "BP", display: "Blood Pressure", valueText: `${systolic}/${diastolic} mmHg` },
-      { code: "PULSE", display: "Heart Rate", valueText: `${pulse} bpm` },
-      { code: "SPO2", display: "Oxygen Saturation (SpO2)", valueText: `${spo2} %` },
-      { code: "TEMP", display: "Body Temperature", valueText: `${temperature} °F` },
-      { code: "RR", display: "Respiratory Rate", valueText: `${respiratoryRate} /min` },
-      { code: "RBS", display: "Blood Glucose", valueText: `${glucose} mg/dL` },
-      { code: "WT", display: "Weight", valueText: `${weightKg} kg` },
-      { code: "HT", display: "Height", valueText: `${heightCm} cm` },
+      ...(filled(systolic) && filled(diastolic)
+        ? [{ code: "BP", display: "Blood Pressure", valueText: `${systolic.trim()}/${diastolic.trim()} mmHg` }]
+        : []),
+      ...(filled(pulse) ? [{ code: "PULSE", display: "Heart Rate", valueText: `${pulse.trim()} bpm` }] : []),
+      ...(filled(spo2) ? [{ code: "SPO2", display: "Oxygen Saturation (SpO2)", valueText: `${spo2.trim()} %` }] : []),
+      ...(filled(temperature) ? [{ code: "TEMP", display: "Body Temperature", valueText: `${temperature.trim()} °F` }] : []),
+      ...(filled(respiratoryRate) ? [{ code: "RR", display: "Respiratory Rate", valueText: `${respiratoryRate.trim()} /min` }] : []),
+      ...(filled(glucose) ? [{ code: "RBS", display: "Blood Glucose", valueText: `${glucose.trim()} mg/dL` }] : []),
+      ...(filled(weightKg) ? [{ code: "WT", display: "Weight", valueText: `${weightKg.trim()} kg` }] : []),
+      ...(filled(heightCm) ? [{ code: "HT", display: "Height", valueText: `${heightCm.trim()} cm` }] : []),
       ...(bmi ? [{ code: "BMI", display: "Body Mass Index (BMI)", valueText: `${bmi} kg/m²` }] : []),
     ];
 
@@ -2381,6 +2414,14 @@ function ObservationsPanel({
         valueText: `${customObsValue.trim()} ${customObsUnit.trim()}`.trim(),
       });
     }
+
+    // Nothing measured is not an empty save — it is a mistaken click, and
+    // saying so beats a success message for a record that gained nothing.
+    if (vitalsToSave.length === 0) {
+      setVitalsError("Enter at least one measurement before recording. Blank fields are not saved as readings.");
+      return;
+    }
+    setVitalsError("");
 
     for (const v of vitalsToSave) {
       await recordObs({
@@ -2444,6 +2485,7 @@ function ObservationsPanel({
                   type="number"
                   value={pulse}
                   onChange={(e) => setPulse(e.target.value)}
+                  placeholder="e.g. 72"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-center text-sm font-bold"
                 />
                 <span className="text-xs font-bold text-slate-400">BPM</span>
@@ -2456,6 +2498,7 @@ function ObservationsPanel({
                   type="number"
                   value={spo2}
                   onChange={(e) => setSpo2(e.target.value)}
+                  placeholder="e.g. 98"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-center text-sm font-bold"
                 />
                 <span className="text-xs font-bold text-slate-400">%</span>
@@ -2468,6 +2511,7 @@ function ObservationsPanel({
                   type="text"
                   value={temperature}
                   onChange={(e) => setTemperature(e.target.value)}
+                  placeholder="e.g. 98.6"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-center text-sm font-bold"
                 />
                 <span className="text-xs font-bold text-slate-400">°F</span>
@@ -2480,6 +2524,7 @@ function ObservationsPanel({
                   type="number"
                   value={respiratoryRate}
                   onChange={(e) => setRespiratoryRate(e.target.value)}
+                  placeholder="e.g. 16"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-center text-sm font-bold"
                 />
                 <span className="text-xs font-bold text-slate-400">/min</span>
@@ -2492,6 +2537,7 @@ function ObservationsPanel({
                   type="number"
                   value={glucose}
                   onChange={(e) => setGlucose(e.target.value)}
+                  placeholder="e.g. 110"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-center text-sm font-bold"
                 />
                 <span className="text-xs font-bold text-slate-400">mg/dL</span>
@@ -2504,6 +2550,7 @@ function ObservationsPanel({
                   type="number"
                   value={weightKg}
                   onChange={(e) => setWeightKg(e.target.value)}
+                  placeholder="e.g. 70"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-center text-sm font-bold"
                 />
                 <span className="text-xs font-bold text-slate-400">kg</span>
@@ -2516,6 +2563,7 @@ function ObservationsPanel({
                   type="number"
                   value={heightCm}
                   onChange={(e) => setHeightCm(e.target.value)}
+                  placeholder="e.g. 172"
                   className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-center text-sm font-bold"
                 />
                 <span className="text-xs font-bold text-slate-400">cm</span>
@@ -2552,6 +2600,13 @@ function ObservationsPanel({
               />
             </div>
           </div>
+
+          {vitalsError ? (
+            <div className="mt-4 flex items-center gap-2 rounded-xl bg-amber-50 px-3 py-2 text-[11px] font-bold text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              {vitalsError}
+            </div>
+          ) : null}
 
           <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-3 dark:border-slate-800">
             <SaveIndicator errorMessage={error?.message} state={saveState === "saved" ? "idle" : saveState} />

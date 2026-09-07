@@ -125,7 +125,23 @@ export class MedicationAdherenceService {
 
     const durationDays = input.durationDays || 7;
     let tasksCreated = 0;
-    const now = new Date();
+
+    /*
+     * The course is anchored to the prescription, not to the moment of sync.
+     *
+     * Day 1 used to be "today", so `scheduledFor` moved every time this ran.
+     * The duplicate check below compares that exact timestamp, so a second
+     * sync on a later day matched nothing and laid down a complete second
+     * course on top of the first. Re-running across several days is how one
+     * patient's plan ended up with the same tablet listed 28 times, and the
+     * timeline became unreadable.
+     *
+     * Anchoring to `prescribedAt` makes the whole schedule deterministic: the
+     * same prescription produces the same slots no matter when or how often
+     * this is called, so the duplicate check actually holds.
+     */
+    const courseStart = new Date(prescription.prescribedAt ?? new Date());
+    courseStart.setHours(0, 0, 0, 0);
 
     for (const item of prescription.items) {
       const medName = item.medication?.brandName
@@ -136,7 +152,7 @@ export class MedicationAdherenceService {
       const slots = resolveDoseSlots(item.frequency);
 
       for (let day = 1; day <= durationDays; day++) {
-        const baseDay = new Date(now);
+        const baseDay = new Date(courseStart);
         baseDay.setDate(baseDay.getDate() + (day - 1));
 
         for (const slot of slots) {

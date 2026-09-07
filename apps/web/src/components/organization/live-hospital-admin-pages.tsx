@@ -3389,6 +3389,11 @@ export function LiveHospitalServicesPage() {
 
 const weekdayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 function formatMinute(value: number): string { return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`; }
+function formatScheduleWindow(startsMinute: number, endsMinute: number): string {
+  const startStr = formatMinute(startsMinute);
+  const endStr = endsMinute === 1440 ? "24:00 (Midnight)" : formatMinute(endsMinute);
+  return `${startStr}–${endStr}`;
+}
 function timeToMinute(value: string): number { const [hours = "0", minutes = "0"] = value.split(":"); return Number(hours) * 60 + Number(minutes); }
 
 type ScheduleForm = { doctorId: string; branchId: string; serviceId: string; weekday: string; startsAt: string; endsAt: string; capacity: string; validFrom: string };
@@ -3439,7 +3444,7 @@ function scheduleToForm(schedule: ScheduleRecord): ScheduleForm {
     serviceId: schedule.service?.id ?? "",
     weekday: String(schedule.weekday),
     startsAt: formatMinute(schedule.startsMinute),
-    endsAt: formatMinute(schedule.endsMinute),
+    endsAt: schedule.endsMinute === 1440 ? "00:00" : formatMinute(schedule.endsMinute),
     capacity: String(schedule.capacity),
     validFrom: schedule.validFrom.slice(0, 10),
   };
@@ -3478,8 +3483,11 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const startsMinute = timeToMinute(form.startsAt);
-    const endsMinute = timeToMinute(form.endsAt);
-    if (endsMinute <= startsMinute) { setError("End time must be later than start time."); return; }
+    let endsMinute = timeToMinute(form.endsAt);
+    if (endsMinute === 0 && startsMinute > 0) {
+      endsMinute = 1440;
+    }
+    if (endsMinute === startsMinute) { setError("End time cannot be the same as start time."); return; }
     setSaving(true);
     setError("");
     const body = JSON.stringify({ doctorId: form.doctorId, branchId: form.branchId, serviceId: form.serviceId || (editingId ? null : undefined), weekday: Number(form.weekday), startsMinute, endsMinute, capacity: Number(form.capacity), validFrom: form.validFrom });
@@ -3585,7 +3593,7 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
                       const isEditing = schedule.id === editingId;
                       return (
                         <li className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border px-3 py-2 transition ${isEditing ? "border-indigo-500 bg-indigo-50 dark:border-indigo-500/50 dark:bg-indigo-950/60" : "border-slate-100 dark:border-slate-800 hover:border-indigo-200 dark:hover:border-indigo-500/30"}`} key={schedule.id}>
-                          <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">{weekdayNames[schedule.weekday] ?? `Day ${schedule.weekday}`} · {formatMinute(schedule.startsMinute)}–{formatMinute(schedule.endsMinute)}</span>
+                          <span className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">{weekdayNames[schedule.weekday] ?? `Day ${schedule.weekday}`} · {formatScheduleWindow(schedule.startsMinute, schedule.endsMinute)}</span>
                           <span className="flex items-center gap-2">
                             <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">{schedule.capacity} slot{schedule.capacity === 1 ? "" : "s"}</span>
                             <button className="min-h-8 rounded-lg border border-indigo-200 bg-white px-2.5 text-[11px] font-bold text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/30 dark:bg-slate-800 dark:text-indigo-300 dark:hover:bg-slate-700" onClick={() => void edit(schedule)} type="button">{isEditing ? "Editing" : "Edit"}</button>
@@ -3631,6 +3639,28 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
             <LabeledField label="Start time"><input className={fieldClass} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} required type="time" value={form.startsAt} /></LabeledField>
             <LabeledField label="End time"><input className={fieldClass} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} required type="time" value={form.endsAt} /></LabeledField>
           </div>
+          {(() => {
+            const sm = timeToMinute(form.startsAt);
+            const em = timeToMinute(form.endsAt);
+            if (form.startsAt && form.endsAt) {
+              if (em === 0 && sm > 0) {
+                return (
+                  <p className="rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-1.5 text-[11px] font-bold text-indigo-800 dark:border-indigo-500/30 dark:bg-indigo-950/40 dark:text-indigo-300">
+                    🌙 Shift runs until midnight (12:00 AM).
+                  </p>
+                );
+              }
+              if (em < sm) {
+                const nextDay = weekdayNames[(Number(form.weekday) + 1) % 7];
+                return (
+                  <p className="rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-1.5 text-[11px] font-bold text-indigo-800 dark:border-indigo-500/30 dark:bg-indigo-950/40 dark:text-indigo-300">
+                    🌙 Overnight shift: runs from {form.startsAt} through midnight to {form.endsAt} ({nextDay} morning).
+                  </p>
+                );
+              }
+            }
+            return null;
+          })()}
           <LabeledField label="Valid from"><input className={fieldClass} onChange={(event) => setForm({ ...form, validFrom: event.target.value })} required type="date" value={form.validFrom} /></LabeledField>
           <MutationMessage error={error} success="" />
           {editingId && isDirty ? <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300">Unsaved changes to these rostered hours.</p> : null}

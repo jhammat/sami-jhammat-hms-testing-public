@@ -9,7 +9,7 @@ import type {
   StructuredLabResultItem,
   WonFlowRequestContext,
 } from "@wonflow/contracts";
-import { STANDARD_LAB_TESTS } from "@wonflow/contracts";
+import { STANDARD_LAB_TESTS, hasPermission } from "@wonflow/contracts";
 
 function toUuid(val: string | null | undefined): string | null {
   if (!val) return null;
@@ -62,14 +62,43 @@ export class LabResultService {
 
     const isCritical = abnormalFlag === "CRITICAL_HIGH" || abnormalFlag === "CRITICAL_LOW";
 
+    /*
+     * `STAFF_ENTERED` is not a label the caller may choose for itself.
+     *
+     * It is the one value that sets `isConfirmedByClinician`, which stores the
+     * result as FINAL with a `verifiedBy` stamp — the state the patient's own
+     * screen renders as "Doctor Verified". Two things were wrong with taking
+     * it from the request body. A patient or caregiver could send it and have
+     * their self-reported number promoted to a clinician-verified result. And
+     * any authenticated member of the tenant — a receptionist, a billing
+     * clerk — fell into the `else` branch below and got the same promotion for
+     * free, because nothing here asked for a permission.
+     *
+     * The workspace decides the floor: a patient or caregiver can only ever
+     * self-report. Above that, confirming a result takes a clinical permission
+     * — the laboratory's own results permission, or `encounters.manage` for
+     * the clinician recording a value off an outside lab's report. Anyone else
+     * may still record the value; it is simply stored unconfirmed rather than
+     * being dressed up as verified.
+     */
+    const isPatientSide = rc.workspace === "PATIENT" || rc.workspace === "CAREGIVER";
+    const mayConfirmClinically =
+      !isPatientSide &&
+      (hasPermission(rc, "laboratory.results.manage") || hasPermission(rc, "encounters.manage"));
+
     let entryRoute = input.entryRoute;
+    if (entryRoute === "STAFF_ENTERED" && !mayConfirmClinically) {
+      entryRoute = undefined;
+    }
     if (!entryRoute) {
       if (input.documentId) {
         entryRoute = "DOCUMENT_ATTACHED";
-      } else if (rc.workspace === "PATIENT" || rc.workspace === "CAREGIVER") {
+      } else if (isPatientSide) {
         entryRoute = "PATIENT_REPORTED";
-      } else {
+      } else if (mayConfirmClinically) {
         entryRoute = "STAFF_ENTERED";
+      } else {
+        entryRoute = "PATIENT_REPORTED";
       }
     }
 
@@ -275,11 +304,23 @@ export class LabResultService {
 
   /**
    * Lists structured lab results for a patient.
+   *
+   * `releasedOnly` is what the patient's own portal passes. Without it this
+   * returned every row for the patient — `PRELIMINARY` drafts a technician was
+   * still typing, and results no clinician had verified or released — straight
+   * to the patient's phone. A patient reading an unverified, unmediated result
+   * before their doctor has seen it is the harm the release step exists to
+   * prevent, and the diagnostics module has always gated its own patient view
+   * this way (`diagnostics-service.getPatientResults`).
+   *
+   * Clinician callers pass nothing and keep full visibility, which is correct:
+   * reviewing a preliminary value is part of the job.
    */
   async listPatientLabResults(
     rc: WonFlowRequestContext,
     patientId: string,
     category?: string,
+    options?: { releasedOnly?: boolean },
   ): Promise<StructuredLabResultItem[]> {
     if (!rc.tenantId) {
       throw new WonFlowApiError(400, "tenant-required", "Tenant ID is required.");
@@ -289,6 +330,9 @@ export class LabResultService {
       where: {
         tenantId: rc.tenantId,
         order: { patientId },
+        ...(options?.releasedOnly
+          ? { status: { in: ["FINAL", "AMENDED", "CORRECTED"] }, releasedAt: { not: null } }
+          : {}),
       },
       include: { order: true },
       orderBy: { createdAt: "desc" },

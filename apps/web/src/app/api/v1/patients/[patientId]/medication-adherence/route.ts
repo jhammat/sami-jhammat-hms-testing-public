@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireRequestContext } from "@/lib/auth/permission-service";
 import { medicationAdherenceService } from "@/server/clinical/medication-adherence-service";
 import { handleApiRoute } from "@/server/http/route-handler";
+import { requireClinicalPatientAccess } from "@/server/clinical/clinical-access";
 
 export function GET(
   request: Request,
@@ -9,6 +10,7 @@ export function GET(
 ): Promise<NextResponse> {
   return handleApiRoute(async () => {
     const rc = await requireRequestContext();
+    requireClinicalPatientAccess(rc);
     const { patientId } = await params;
     const report = await medicationAdherenceService.getClinicianAdherenceReport(rc, patientId);
     return NextResponse.json({ report });

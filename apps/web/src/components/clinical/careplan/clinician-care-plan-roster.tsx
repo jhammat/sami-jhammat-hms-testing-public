@@ -9,6 +9,7 @@ import {
   Clock,
   Droplet,
   HeartPulse,
+  ListChecks,
   Plus,
   RefreshCw,
   Search,
@@ -21,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CarePlanRosterItem } from "@wonflow/contracts";
 
 import { CreateCarePlanModal } from "./create-care-plan-modal";
+import { CarePlanTemplateBuilder } from "./care-plan-template-builder";
 
 export function ClinicianCarePlanRoster({
   onSelectPlan,
@@ -35,6 +37,7 @@ export function ClinicianCarePlanRoster({
     "ALL" | "PANCREATIC" | "HEPATIC" | "BILIARY" | "ALERTS_ONLY" | "DRAINS_ACTIVE"
   >("ALL");
   const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [isBuilderOpen, setIsBuilderOpen] = useState(false);
 
   const loadRoster = useCallback(async () => {
     try {
@@ -193,6 +196,15 @@ export function ClinicianCarePlanRoster({
         </div>
 
         <div className="flex items-center space-x-3">
+          <button
+            onClick={() => setIsBuilderOpen(true)}
+            type="button"
+            className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200"
+          >
+            <ListChecks className="h-4 w-4" />
+            Recovery plans
+          </button>
+
           <button
             onClick={() => setIsCreateOpen(true)}
             type="button"
@@ -423,6 +435,10 @@ export function ClinicianCarePlanRoster({
       )}
 
       {/* Start Care Plan Modal */}
+      {isBuilderOpen ? (
+        <CarePlanTemplateBuilder onClose={() => { setIsBuilderOpen(false); void loadRoster(); }} />
+      ) : null}
+
       <CreateCarePlanModal
         isOpen={isCreateOpen}
         onClose={() => setIsCreateOpen(false)}

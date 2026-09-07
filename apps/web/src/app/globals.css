@@ -249,7 +249,7 @@ html.dark .wfg-tile:hover {
   border-radius: var(--wfg-r-xl);
   box-shadow:
     0 1px 0 0 rgb(255 255 255 / 0.22) inset,
-    0 40px 80px -32px rgb(46 40 140 / 0.70);
+    0 8px 24px -6px rgb(46 40 140 / 0.35);
   overflow: hidden;
   position: relative;
 }

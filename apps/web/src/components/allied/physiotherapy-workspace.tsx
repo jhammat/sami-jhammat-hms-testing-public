@@ -3338,63 +3338,47 @@ export function PhysiotherapyWorkspace() {
   return (
     <div className="wfg-pt w-full space-y-5 px-3.5 py-4 sm:px-6 sm:py-6 lg:px-8">
       <AuroraHero
-        eyebrow="Allied health · Physiotherapy and rehabilitation"
+        eyebrow="Physiotherapy · Rehabilitation"
         title="Physiotherapy workspace"
-        description="General physiotherapy and the HPB surgical service in one place — assess, prescribe, order and hand off, always against a patient you have chosen."
+        description="Caseload, exercise prescriptions, assessments & recovery"
+        icon={<Activity size={15} />}
         chips={[
-          { label: "referrals in your caseload", value: String(referrals.length), solid: true },
-          { label: "waiting to be accepted", value: String(pendingCount) },
+          { label: "in caseload", value: String(referrals.length), solid: true },
+          { label: "pending", value: String(pendingCount) },
+          { label: "active plans", value: String(roster.length) },
           {
-            label: "exercises available",
+            label: "exercises",
             value: String(EXERCISE_TEMPLATES.length + library.length),
           },
-          { label: "recovery pathways", value: String(RECOVERY_PATHWAYS.length) },
         ]}
         actions={
           <>
             <GlassButton
               variant="onAurora"
-              icon={<ListPlus size={14} />}
+              size="sm"
+              icon={<ListPlus size={13} />}
               onClick={() => setShowAuthorModal(true)}
             >
-              Author an exercise
+              Author exercise
             </GlassButton>
 
             <GlassButton
               variant="onAurora"
-              icon={<RefreshCw size={13} className={isLoadingCaseload ? "animate-spin" : ""} />}
+              size="sm"
+              icon={<RefreshCw size={12} className={isLoadingCaseload ? "animate-spin" : ""} />}
               onClick={refreshCaseload}
               disabled={isLoadingCaseload}
             >
-              Refresh caseload
+              Refresh
             </GlassButton>
 
             <Link
               href="/operations/physiotherapy/profile"
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-[rgb(255_255_255/0.15)] px-4 py-2 text-xs font-semibold text-white backdrop-blur transition hover:bg-[rgb(255_255_255/0.25)]"
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-[rgb(255_255_255/0.15)] px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur transition hover:bg-[rgb(255_255_255/0.25)]"
             >
-              <Compass size={14} /> Preferences
+              <Compass size={13} /> Preferences
             </Link>
           </>
-        }
-        aside={
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-2">
-            {[
-              { label: "HPB templates", value: EXERCISE_TEMPLATES.filter((t) => t.band === "HPB").length, icon: HeartPulse },
-              { label: "General templates", value: EXERCISE_TEMPLATES.filter((t) => t.band === "GENERAL").length, icon: Dumbbell },
-              { label: "Your library", value: library.length, icon: BookOpen },
-              { label: "Active plans", value: roster.length, icon: Users },
-            ].map((item) => (
-              <div
-                key={item.label}
-                className="rounded-2xl border border-white/15 bg-[rgb(255_255_255/0.10)] px-3.5 py-3 backdrop-blur"
-              >
-                <item.icon aria-hidden size={14} className="text-cyan-200" />
-                <p className="mt-1.5 text-lg font-semibold tabular-nums text-white">{item.value}</p>
-                <p className="text-[10px] text-indigo-100/75">{item.label}</p>
-              </div>
-            ))}
-          </div>
         }
       />
 

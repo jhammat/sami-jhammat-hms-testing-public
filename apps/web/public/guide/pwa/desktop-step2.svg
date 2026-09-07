@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 340" width="100%" height="100%" fill="none">
+  <defs>
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="680" y2="340" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="50%" stop-color="#1e1b4b"/>
+      <stop offset="100%" stop-color="#090d16"/>
+    </linearGradient>
+    <linearGradient id="menuGlow" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#4f46e5"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+    <filter id="glow2" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+    <filter id="shadow2" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="16" stdDeviation="20" flood-color="#000000" flood-opacity="0.65"/>
+    </filter>
+  </defs>
+
+  <!-- Background Canvas -->
+  <rect width="680" height="340" rx="16" fill="url(#bgGrad)"/>
+  <rect width="678" height="338" x="1" y="1" rx="15" stroke="#334155" stroke-opacity="0.4" stroke-width="1"/>
+
+  <!-- Browser Window Frame -->
+  <rect x="30" y="30" width="620" height="280" rx="12" fill="#0b0f19" stroke="#1e293b" stroke-width="1.5"/>
+  
+  <!-- Browser Header Bar -->
+  <path d="M 30 42 Q 30 30 42 30 L 638 30 Q 650 30 650 42 L 650 82 L 30 82 Z" fill="#141c2c"/>
+  
+  <!-- Window Dots -->
+  <circle cx="52" cy="56" r="5.5" fill="#ef4444"/>
+  <circle cx="70" cy="56" r="5.5" fill="#f59e0b"/>
+  <circle cx="88" cy="56" r="5.5" fill="#10b981"/>
+
+  <!-- Browser Address Bar (dimmed) -->
+  <rect x="122" y="44" width="410" height="26" rx="13" fill="#0f172a" stroke="#334155" stroke-width="1"/>
+  <text x="142" y="61" fill="#64748b" font-size="11" font-family="-apple-system, BlinkMacSystemFont, sans-serif">wonflow.hospital/doctor</text>
+
+  <!-- Top Right 3 Dots Button (Glowing) -->
+  <rect x="588" y="40" width="34" height="34" rx="8" fill="#3b82f6" fill-opacity="0.25" stroke="#60a5fa" stroke-width="1.5"/>
+  <circle cx="605" cy="49" r="2.5" fill="#ffffff"/>
+  <circle cx="605" cy="57" r="2.5" fill="#ffffff"/>
+  <circle cx="605" cy="65" r="2.5" fill="#ffffff"/>
+
+  <!-- Web Page In Background (Subtle) -->
+  <rect x="50" y="100" width="300" height="180" rx="8" fill="#111827" stroke="#1f2937"/>
+  <rect x="65" y="118" width="120" height="14" rx="4" fill="#1e293b"/>
+  <rect x="65" y="142" width="220" height="8" rx="3" fill="#1e293b"/>
+  <rect x="65" y="158" width="180" height="8" rx="3" fill="#1e293b"/>
+  
+  <rect x="65" y="185" width="260" height="75" rx="6" fill="#172033"/>
+  <text x="80" y="215" fill="#38bdf8" font-size="11" font-weight="600">Clinical Consultations Hub</text>
+  <text x="80" y="235" fill="#64748b" font-size="10">Active encounters and patient schedule</text>
+
+  <!-- ★ DROPDOWN MENU OPENED ★ -->
+  <g filter="url(#shadow2)">
+    <rect x="360" y="72" width="262" height="224" rx="10" fill="#0f172a" stroke="#334155" stroke-width="1.2"/>
+    
+    <!-- Menu Items -->
+    <!-- New Tab -->
+    <rect x="366" y="80" width="250" height="26" rx="6" fill="transparent"/>
+    <text x="382" y="97" fill="#cbd5e1" font-size="12" font-family="-apple-system, BlinkMacSystemFont, sans-serif">New tab</text>
+    <text x="575" y="97" fill="#64748b" font-size="10" font-family="monospace">Ctrl+T</text>
+    
+    <!-- New Window -->
+    <rect x="366" y="108" width="250" height="26" rx="6" fill="transparent"/>
+    <text x="382" y="125" fill="#cbd5e1" font-size="12" font-family="-apple-system, BlinkMacSystemFont, sans-serif">New window</text>
+    
+    <!-- Divider -->
+    <line x1="375" y1="138" x2="607" y2="138" stroke="#1e293b" stroke-width="1"/>
+    
+    <!-- Zoom / Print -->
+    <rect x="366" y="142" width="250" height="26" rx="6" fill="transparent"/>
+    <text x="382" y="159" fill="#cbd5e1" font-size="12" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Zoom &amp; Print</text>
+
+    <!-- ★ HIGHLIGHTED MENU ITEM: "Install WonFlow" ★ -->
+    <rect x="366" y="172" width="250" height="34" rx="8" fill="url(#menuGlow)" stroke="#60a5fa" stroke-width="1.5" filter="url(#glow2)"/>
+    <rect x="366" y="172" width="250" height="34" rx="8" fill="url(#menuGlow)"/>
+    
+    <!-- App Icon inside menu -->
+    <rect x="376" y="179" width="20" height="20" rx="5" fill="#ffffff"/>
+    <!-- Logo W -->
+    <path d="M 379 184 L 382 194 L 385 188 L 388 194 L 391 184" stroke="#2563eb" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+    
+    <text x="404" y="193" fill="#ffffff" font-size="12.5" font-weight="700" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Install WonFlow...</text>
+    <circle cx="598" cy="189" r="4" fill="#38bdf8"/>
+
+    <!-- Next Menu Item: Cast, save & share -->
+    <rect x="366" y="210" width="250" height="26" rx="6" fill="transparent"/>
+    <text x="382" y="227" fill="#cbd5e1" font-size="12" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Save and share</text>
+    <text x="590" y="227" fill="#64748b" font-size="12">&gt;</text>
+
+    <!-- Settings -->
+    <rect x="366" y="238" width="250" height="26" rx="6" fill="transparent"/>
+    <text x="382" y="255" fill="#94a3b8" font-size="12" font-family="-apple-system, BlinkMacSystemFont, sans-serif">Settings</text>
+  </g>
+
+  <!-- Step 2 Callout Indicator -->
+  <g filter="url(#shadow2)">
+    <rect x="65" y="225" width="265" height="58" rx="10" fill="#0f172a" stroke="#818cf8" stroke-width="1.5"/>
+    <circle cx="92" cy="254" r="13" fill="#6366f1"/>
+    <text x="88" y="259" fill="#ffffff" font-size="13" font-weight="900">2</text>
+    <text x="114" y="247" fill="#f8fafc" font-size="12" font-weight="700">Or Open 3-Dots Menu (⋮)</text>
+    <text x="114" y="264" fill="#94a3b8" font-size="10.5">Click "Install WonFlow" from list</text>
+  </g>
+</svg>

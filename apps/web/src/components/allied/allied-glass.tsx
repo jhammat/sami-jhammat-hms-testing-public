@@ -117,73 +117,92 @@ export function AuroraHero({
   chips,
   actions,
   aside,
+  icon,
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
-  description: string;
+  description?: string;
   chips?: { label: string; value?: string; solid?: boolean }[];
   actions?: ReactNode;
   aside?: ReactNode;
+  icon?: ReactNode;
 }) {
   return (
-    <div className="wfg-aurora px-6 py-7 sm:px-8">
+    <div className="wfg-aurora px-4 py-3 sm:px-6 sm:py-3.5 shadow-md">
+      {/* Subtle compact ambient glows (low visual weight) */}
       <span
         aria-hidden
-        className="wfg-aurora-blob"
-        style={{ background: "#22d3ee66", height: 300, width: 300, left: -60, top: -120 }}
+        className="wfg-aurora-blob opacity-40"
+        style={{ background: "#22d3ee", height: 130, width: 130, left: -20, top: -45 }}
       />
       <span
         aria-hidden
-        className="wfg-aurora-blob"
-        style={{ background: "#a78bfa55", height: 280, width: 280, right: -40, bottom: -140 }}
-      />
-      <span
-        aria-hidden
-        className="wfg-aurora-blob"
-        style={{ background: "#34d39944", height: 220, width: 220, right: "34%", top: -110 }}
+        className="wfg-aurora-blob opacity-30"
+        style={{ background: "#a78bfa", height: 110, width: 110, right: 30, top: -35 }}
       />
 
-      <div className="relative flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0 max-w-2xl">
-          <p className="wfg-aurora-eyebrow text-[11px] font-semibold uppercase tracking-[0.16em]">
-            {eyebrow}
-          </p>
+      <div className="relative flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            {eyebrow ? (
+              <p className="wfg-aurora-eyebrow text-[10px] font-bold uppercase tracking-[0.14em]">
+                {eyebrow}
+              </p>
+            ) : null}
+            {chips && chips.length > 0 ? (
+              <ul className="flex flex-wrap items-center gap-1.5">
+                {chips.map((chip) => (
+                  <li
+                    key={chip.label}
+                    className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[10px] font-medium ${
+                      chip.solid
+                        ? "border-white/25 bg-[rgb(255_255_255/0.20)] text-white font-semibold"
+                        : "border-white/15 bg-[rgb(255_255_255/0.08)] text-indigo-100/85"
+                    }`}
+                  >
+                    {chip.value ? (
+                      <span className="font-bold tabular-nums text-white">{chip.value}</span>
+                    ) : null}
+                    <span>{chip.label}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
 
-          {/* An h2, not an h1: the application shell already renders the page
-              title as this page's single h1. Two h1 elements with the same
-              accessible name give a screen-reader user two "top" headings and
-              no way to tell which is the page. The visual weight lives in the
-              class, so nothing about the design changes. */}
-          <h2 className="wfg-aurora-title mt-2 text-2xl font-semibold tracking-[-0.02em] sm:text-3xl">
-            {title}
-          </h2>
+          <div className="mt-1 flex flex-wrap items-center gap-2.5">
+            {icon ? (
+              <span
+                aria-hidden
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-cyan-200"
+              >
+                {icon}
+              </span>
+            ) : null}
+            <h2 className="wfg-aurora-title text-base sm:text-lg font-bold tracking-[-0.02em] text-white">
+              {title}
+            </h2>
+            {description ? (
+              <>
+                <span className="hidden sm:inline text-white/30 text-xs">·</span>
+                <p className="wfg-aurora-body hidden sm:inline text-xs text-indigo-100/75 truncate">
+                  {description}
+                </p>
+              </>
+            ) : null}
+          </div>
 
-          <p className="wfg-aurora-body mt-2 text-sm leading-6">{description}</p>
-
-          {chips && chips.length > 0 ? (
-            <ul className="mt-4 flex flex-wrap gap-2">
-              {chips.map((chip) => (
-                <li
-                  key={chip.label}
-                  className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium ${
-                    chip.solid
-                      ? "border-white/25 bg-[rgb(255_255_255/0.20)] text-white"
-                      : "border-white/15 bg-[rgb(255_255_255/0.08)] text-indigo-100/85"
-                  }`}
-                >
-                  {chip.value ? (
-                    <span className="font-semibold tabular-nums text-white">{chip.value}</span>
-                  ) : null}
-                  {chip.label}
-                </li>
-              ))}
-            </ul>
+          {description ? (
+            <p className="wfg-aurora-body sm:hidden mt-1 text-[11px] text-indigo-100/75 truncate">
+              {description}
+            </p>
           ) : null}
-
-          {actions ? <div className="mt-5 flex flex-wrap items-center gap-2">{actions}</div> : null}
         </div>
 
-        {aside ? <div className="shrink-0">{aside}</div> : null}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          {aside ? <div className="flex items-center gap-2">{aside}</div> : null}
+          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+        </div>
       </div>
     </div>
   );

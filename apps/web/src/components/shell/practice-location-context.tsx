@@ -151,22 +151,9 @@ export function PracticeLocationProvider({
 
   const selectLocation = useCallback(
     (locationId: PracticeLocationSelection): void => {
-      if (locations.length === 0) {
-        setSelectedLocationId(ALL_PRACTICE_LOCATIONS);
-        return;
-      }
-      if (locations.length === 1) {
-        setSelectedLocationId(locations[0]!.id);
-        return;
-      }
-      if (
-        locationId === ALL_PRACTICE_LOCATIONS ||
-        locations.some((location) => location.id === locationId)
-      ) {
-        setSelectedLocationId(locationId);
-      }
+      setSelectedLocationId(locationId);
     },
-    [locations],
+    [],
   );
 
   const matchesPracticeLocation = useCallback(
@@ -179,6 +166,7 @@ export function PracticeLocationProvider({
   const matchesLegacyBranch = useCallback(
     (branchId: WonFlowId): boolean => {
       if (selectedLocationId === ALL_PRACTICE_LOCATIONS) return true;
+      if (selectedLocationId === branchId) return true;
       return (
         selectedLocation?.linkedBranchId !== undefined &&
         selectedLocation.linkedBranchId === branchId

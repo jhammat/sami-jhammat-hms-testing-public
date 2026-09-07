@@ -65,7 +65,11 @@ export function GET(request: Request): Promise<NextResponse> {
     const url = new URL(request.url);
     const category = url.searchParams.get("category") || undefined;
 
-    const results = await labResultService.listPatientLabResults(rc, patient.id, category);
+    // The patient's own view shows only what a clinician has verified and
+    // released — never a preliminary draft still being typed in the lab.
+    const results = await labResultService.listPatientLabResults(rc, patient.id, category, {
+      releasedOnly: true,
+    });
     return NextResponse.json({ results });
   });
 }

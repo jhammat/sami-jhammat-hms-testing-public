@@ -73,8 +73,9 @@ import { DoctorProfileAvatar } from "./doctor-profile-avatar";
 import { useDoctorPortalContext } from "./doctor-portal-shell";
 import type { DoctorPortalIdentity } from "./doctor-portal-shell";
 
-import type {
-  PracticeLocationSelection,
+import {
+  usePracticeLocation,
+  type PracticeLocationSelection,
 } from "@/components/shell";
 
 const DAYS = [
@@ -240,8 +241,49 @@ function EmptyState({
 }
 
 function PortalFilters({ model }: { model: DoctorWorkflowModel }) {
+  const { locations, selectedLocationId, selectLocation } = usePracticeLocation();
+  const { branches, doctor } = useDoctorPortalContext();
+
+  const locationOptions = useMemo(() => {
+    const list: { id: string; name: string }[] = [];
+    const seen = new Set<string>();
+
+    for (const loc of locations) {
+      if (!seen.has(loc.id)) {
+        seen.add(loc.id);
+        list.push({ id: loc.id, name: loc.name });
+      }
+    }
+    for (const b of branches) {
+      if (!seen.has(b.id)) {
+        seen.add(b.id);
+        list.push({ id: b.id, name: b.name });
+      }
+    }
+    for (const r of model.roster) {
+      if (r.branch && !seen.has(r.branch.id)) {
+        seen.add(r.branch.id);
+        list.push({ id: r.branch.id, name: r.branch.name });
+      }
+    }
+    return list;
+  }, [locations, branches, model.roster]);
+
+  const activeLocationId = useMemo(() => {
+    if (selectedLocationId && selectedLocationId !== "all") {
+      return selectedLocationId;
+    }
+    if (doctor?.primaryBranchId && locationOptions.some((o) => o.id === doctor.primaryBranchId)) {
+      return doctor.primaryBranchId;
+    }
+    if (locationOptions.length === 1) {
+      return locationOptions[0]!.id;
+    }
+    return selectedLocationId ?? "all";
+  }, [selectedLocationId, doctor?.primaryBranchId, locationOptions]);
+
   return (
-    <div className="grid gap-2 sm:grid-cols-2">
+    <div className="grid gap-2 sm:grid-cols-3">
       <label className="text-[9px] font-black uppercase tracking-wide text-slate-500">
         Doctor
         <select
@@ -252,6 +294,24 @@ function PortalFilters({ model }: { model: DoctorWorkflowModel }) {
           {model.doctors.map((doctor) => (
             <option key={doctor.id} value={doctor.id}>
               {doctor.displayName}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="text-[9px] font-black uppercase tracking-wide text-slate-500">
+        Location
+        <select
+          className={fieldClass}
+          onChange={(event) => {
+            const val = event.target.value;
+            selectLocation(val === "all" ? "all" : val);
+          }}
+          value={activeLocationId}
+        >
+          <option value="all">All locations</option>
+          {locationOptions.map((loc) => (
+            <option key={loc.id} value={loc.id}>
+              {loc.name}
             </option>
           ))}
         </select>
@@ -796,52 +856,77 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
     : otherBlockers[0]?.reason;
 
   return (
-    <section className="rounded-2xl border border-slate-200/90 bg-white p-3 shadow-sm">
+    <section className="rounded-2xl border border-slate-200/90 bg-white p-4 sm:p-5 shadow-sm">
       {/* =========================================================
           STATE 1: SITTING NOT STARTED YET
-          Ultra-clean single bar:
-          [Daily Sitting · Shift Hours] [Room Dropdown] [Start Sitting] [Options ▾]
+          Spacious, beautifully aligned sitting bar with clear schedule details
           ========================================================= */}
       {isNotStarted ? (
         <div>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             {/* Left: Shift Hours & Capacity Summary */}
-            <div className="flex items-center gap-2.5">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-50 text-indigo-700">
-                <Stethoscope size={16} />
+            <div className="flex min-w-0 flex-1 items-center gap-3.5">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-indigo-200/60 bg-gradient-to-br from-indigo-50 to-indigo-100/70 text-indigo-700 shadow-2xs">
+                <Stethoscope size={20} />
               </span>
-              <div>
-                <div className="flex items-center gap-2">
-                  <h2 className="text-sm font-black text-slate-950">Daily Sitting</h2>
-                  <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                    <Check className="stroke-[3]" size={10} /> Official Roster
-                  </span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-sm sm:text-base font-black tracking-tight text-slate-950">Daily Sitting</h2>
+                  {activeRosterRule ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700 shadow-2xs">
+                      <Check className="stroke-[3]" size={11} /> Official Roster
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-semibold text-slate-600">
+                      <Clock size={11} className="text-slate-400" /> Standard Schedule
+                    </span>
+                  )}
                 </div>
-                <p className="text-xs text-slate-600">
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-600">
                   {activeRosterRule ? (
                     <>
-                      <span className="font-bold text-slate-900">
+                      <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 bg-slate-50/90 px-2.5 py-1 font-bold text-slate-900 shadow-2xs">
+                        <Clock3 className="text-indigo-600" size={13} />
                         {formatMinuteAmPm(activeRosterRule.startsMinute)} – {formatMinuteAmPm(activeRosterRule.endsMinute)}
                       </span>
-                      {" · "}
-                      <span className="font-semibold text-indigo-700">{activeRosterRule.capacity} slots</span>
-                      {" · "}
-                      <span className="text-slate-500">{activeRosterRule.branch.name}</span>
+                      <span className="inline-flex items-center gap-1 rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-1 font-semibold text-indigo-700">
+                        <Users size={12} />
+                        {activeRosterRule.capacity} slots
+                      </span>
+                      <span className="inline-flex items-center gap-1 font-medium text-slate-500">
+                        <MapPin size={12} className="text-slate-400" />
+                        {activeRosterRule.branch.name}
+                      </span>
                     </>
                   ) : (
-                    <span>Standard Hours ({startTime} – {endTime})</span>
+                    <>
+                      <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 bg-slate-50/90 px-2.5 py-1 font-bold text-slate-900 shadow-2xs">
+                        <Clock3 className="text-indigo-600" size={13} />
+                        Standard Hours ({startTime} – {endTime})
+                      </span>
+                      {slotCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 rounded-lg border border-indigo-100 bg-indigo-50/70 px-2.5 py-1 font-semibold text-indigo-700">
+                          <Users size={12} />
+                          ~{slotCount} slots ({minutes}m/slot)
+                        </span>
+                      ) : null}
+                      <span className="inline-flex items-center gap-1 font-medium text-slate-500">
+                        <MapPin size={12} className="text-slate-400" />
+                        {branches.find((b) => b.id === activeBranchId)?.name ?? "Hospital"}
+                      </span>
+                    </>
                   )}
-                </p>
+                </div>
               </div>
             </div>
 
             {/* Center & Right: Room Dropdown + Start Button + Options Dropdown */}
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
               {/* Consultation Room Dropdown */}
-              <div className="w-56 sm:w-64">
+              <div className="w-60 sm:w-68">
                 <select
                   aria-label="Consultation room"
-                  className={`${fieldClass} ${!roomLabel.trim() ? "border-amber-300 ring-1 ring-amber-200" : "border-emerald-300 bg-emerald-50/20 font-bold"}`}
+                  className={`${fieldClass} h-10 ${!roomLabel.trim() ? "border-amber-300 ring-1 ring-amber-200" : "border-emerald-300 bg-emerald-50/20 font-bold"}`}
                   id="sitting-consultation-room-select"
                   onChange={(event) => {
                     if (event.target.value === "__add_new_custom_room__") {
@@ -868,12 +953,12 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
               {/* Start Sitting Button */}
               <span title={startDisabled ? (startDisabledReason ?? "Checking readiness…") : undefined}>
                 <button
-                  className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-xs font-black text-white shadow-sm shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-10 items-center gap-2 rounded-xl bg-emerald-600 px-5 text-xs font-black text-white shadow-sm shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                   disabled={startDisabled}
                   onClick={() => void save(true)}
                   type="button"
                 >
-                  <Play size={13} />
+                  <Play size={14} />
                   <span>{roomLabel.trim() ? `Start in ${roomLabel}` : "Start Sitting"}</span>
                 </button>
               </span>
@@ -881,13 +966,13 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
               {/* Rest sent to dropdown: "Options ▾" */}
               <div className="relative">
                 <button
-                  className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
                   onClick={() => setShowOptionsDropdown(!showOptionsDropdown)}
                   type="button"
                 >
-                  <Settings2 className="text-slate-500" size={13} />
+                  <Settings2 className="text-slate-500" size={14} />
                   <span>Options</span>
-                  <ChevronDown className={`text-slate-400 transition-transform ${showOptionsDropdown ? "rotate-180" : ""}`} size={12} />
+                  <ChevronDown className={`text-slate-400 transition-transform ${showOptionsDropdown ? "rotate-180" : ""}`} size={13} />
                 </button>
 
                 {showOptionsDropdown ? (
@@ -1035,41 +1120,48 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
            [🟢 In Sitting · Room: 101 · Hours] [Break] [End] [Actions ▾]
            ========================================================= */
         <div>
-          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             {/* Left: Active Sitting info */}
-            <div className="flex items-center gap-2.5">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
-                <Stethoscope size={16} />
+            <div className="flex min-w-0 flex-1 items-center gap-3.5">
+              <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-emerald-200/60 bg-gradient-to-br from-emerald-50 to-emerald-100/70 text-emerald-700 shadow-2xs">
+                <Stethoscope size={20} />
               </span>
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-black text-slate-950">Daily Sitting</span>
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm sm:text-base font-black tracking-tight text-slate-950">Daily Sitting</span>
                   <StatusBadge label={statusLine.badgeLabel} tone={statusLine.tone} />
                 </div>
-                <p className="text-xs text-slate-600">
-                  <span className="font-bold text-slate-900">Room: {model.sitting?.roomLabel || "Unassigned"}</span>
-                  {" · "}
-                  <span>{model.sitting?.sittingStartTime} – {model.sitting?.sittingEndTime} ({model.sitting?.averageConsultationMinutes}m/slot)</span>
-                  {" · "}
-                  <span className="text-slate-500">{branches.find((b) => b.id === activeBranchId)?.name ?? "Hospital"}</span>
-                </p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-200/80 bg-emerald-50/80 px-2.5 py-1 font-bold text-emerald-950 shadow-2xs">
+                    <DoorOpen className="text-emerald-700" size={13} />
+                    Room: {model.sitting?.roomLabel || "Unassigned"}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200/80 bg-slate-50/90 px-2.5 py-1 font-bold text-slate-900 shadow-2xs">
+                    <Clock3 className="text-indigo-600" size={13} />
+                    {model.sitting?.sittingStartTime} – {model.sitting?.sittingEndTime} ({model.sitting?.averageConsultationMinutes}m/slot)
+                  </span>
+                  <span className="inline-flex items-center gap-1 font-medium text-slate-500">
+                    <MapPin size={12} className="text-slate-400" />
+                    {branches.find((b) => b.id === activeBranchId)?.name ?? "Hospital"}
+                  </span>
+                </div>
               </div>
             </div>
 
             {/* Right: Primary actions + "Sitting Actions ▾" Dropdown */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
               {model.sitting?.status === "available" ? (
                 <>
                   <button
-                    className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-amber-500 px-3 text-xs font-bold text-white shadow-xs hover:bg-amber-600 disabled:opacity-50"
+                    className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-amber-500 px-4 text-xs font-bold text-white shadow-xs hover:bg-amber-600 transition disabled:opacity-50"
                     disabled={busy}
                     onClick={() => void changeStatus("on-break")}
                     type="button"
                   >
-                    <Pause size={13} /> Take Break
+                    <Pause size={14} /> Take Break
                   </button>
                   <button
-                    className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-rose-50 px-3 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                    className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-rose-50 border border-rose-200 px-4 text-xs font-bold text-rose-700 hover:bg-rose-100 transition disabled:opacity-50"
                     disabled={busy}
                     onClick={() => void changeStatus("finished")}
                     type="button"
@@ -1082,15 +1174,15 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
               {model.sitting?.status === "on-break" ? (
                 <>
                   <button
-                    className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-emerald-600 px-3 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 disabled:opacity-50"
+                    className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 text-xs font-bold text-white shadow-xs hover:bg-emerald-700 transition disabled:opacity-50"
                     disabled={busy}
                     onClick={() => void changeStatus("available")}
                     type="button"
                   >
-                    <Play size={13} /> Resume
+                    <Play size={14} /> Resume
                   </button>
                   <button
-                    className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-rose-50 px-3 text-xs font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                    className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-rose-50 border border-rose-200 px-4 text-xs font-bold text-rose-700 hover:bg-rose-100 transition disabled:opacity-50"
                     disabled={busy}
                     onClick={() => void changeStatus("finished")}
                     type="button"
@@ -1103,13 +1195,13 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
               {/* Sitting Actions Dropdown */}
               <div className="relative">
                 <button
-                  className="inline-flex h-9 items-center gap-1 rounded-xl border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
                   onClick={() => setShowActiveMenu(!showActiveMenu)}
                   type="button"
                 >
-                  <Settings2 className="text-slate-500" size={13} />
+                  <Settings2 className="text-slate-500" size={14} />
                   <span>Actions</span>
-                  <ChevronDown className={`text-slate-400 transition-transform ${showActiveMenu ? "rotate-180" : ""}`} size={12} />
+                  <ChevronDown className={`text-slate-400 transition-transform ${showActiveMenu ? "rotate-180" : ""}`} size={13} />
                 </button>
 
                 {showActiveMenu ? (
@@ -1122,81 +1214,79 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
                       }}
                       type="button"
                     >
-                      <DoorClosed className="text-slate-500" size={13} /> Change Room
+                      <DoorClosed size={13} /> Change Room
                     </button>
                     <button
                       className="flex w-full items-center gap-2 rounded-lg p-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      disabled={busy}
                       onClick={() => {
                         setShowActiveMenu(false);
                         void extendOrShorten(30);
                       }}
                       type="button"
                     >
-                      <Clock3 className="text-indigo-600" size={13} /> Extend 30 min
+                      <Clock size={13} /> Extend by 30 mins
                     </button>
                     <button
                       className="flex w-full items-center gap-2 rounded-lg p-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                      disabled={busy}
                       onClick={() => {
                         setShowActiveMenu(false);
                         void extendOrShorten(-30);
                       }}
                       type="button"
                     >
-                      <Clock3 className="text-slate-500" size={13} /> Shorten 30 min
+                      <Clock size={13} /> Shorten by 30 mins
                     </button>
-                    <div className="my-1 border-t border-slate-100" />
-                    <button
-                      className="flex w-full items-center gap-2 rounded-lg p-2 text-xs font-bold text-rose-700 hover:bg-rose-50"
-                      disabled={busy}
-                      onClick={() => {
-                        setShowActiveMenu(false);
-                        void changeStatus("not-started");
-                      }}
-                      type="button"
-                    >
-                      <X size={13} /> Cancel Sitting
-                    </button>
+                    <div className="border-t border-slate-100 pt-1">
+                      <button
+                        className="flex w-full items-center gap-2 rounded-lg p-2 text-xs font-semibold text-rose-600 hover:bg-rose-50"
+                        onClick={() => {
+                          setShowActiveMenu(false);
+                          void changeStatus("not-started");
+                        }}
+                        type="button"
+                      >
+                        <X size={13} /> Cancel Sitting
+                      </button>
+                    </div>
                   </div>
                 ) : null}
               </div>
             </div>
           </div>
 
-          {/* Change Room Inline Form */}
+          {/* Quick Room Edit Modal/Inline (when opened via Actions) */}
           {editingRoom ? (
-            <div className="mt-2.5 rounded-xl border border-indigo-200 bg-indigo-50/40 p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-800">Change Consultation Room</span>
-                <button
-                  className="text-xs text-slate-400 hover:text-slate-600"
-                  onClick={() => setEditingRoom(false)}
-                  type="button"
-                >
-                  <X size={13} />
-                </button>
-              </div>
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                Change Consultation Room
+              </span>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <select
-                  aria-label="Consultation room"
-                  className={`${fieldClass} max-w-xs`}
-                  onChange={(e) => setRoomLabel(e.target.value)}
-                  value={roomLabel}
-                >
-                  {availableRooms.map((room) => (
-                    <option key={room.id} value={room.label}>{room.label}</option>
-                  ))}
-                </select>
+                <div className="w-60 sm:w-68">
+                  <select
+                    className={`${fieldClass} h-10`}
+                    onChange={(e) => setRoomLabel(e.target.value)}
+                    value={roomLabel}
+                  >
+                    {availableRooms.map((room) => (
+                      <option key={room.id} value={room.label}>
+                        {room.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <button
-                  className="inline-flex h-9 items-center rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white hover:bg-indigo-700"
-                  onClick={() => void save(false)}
+                  className="inline-flex h-10 items-center rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white shadow-xs hover:bg-indigo-700"
+                  disabled={busy}
+                  onClick={async () => {
+                    await save(false);
+                    setEditingRoom(false);
+                  }}
                   type="button"
                 >
-                  Save New Room
+                  Update Room
                 </button>
                 <button
-                  className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex h-10 items-center rounded-xl border border-slate-200 bg-white px-3 text-xs font-bold text-slate-600 hover:bg-slate-50"
                   onClick={() => setEditingRoom(false)}
                   type="button"
                 >
@@ -1209,9 +1299,9 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
       )}
 
       {/* Result or Blocker Alerts */}
-      <div className="empty:hidden mt-2">
-        {isNotStarted && startBlockers.length > 0 ? (
-          <ActionReadiness blockers={startBlockers} hideLinks />
+      <div className="empty:hidden mt-3">
+        {isNotStarted && otherBlockers.length > 0 ? (
+          <ActionReadiness blockers={otherBlockers} hideLinks />
         ) : null}
         <ActionResult result={result} />
       </div>
@@ -2128,6 +2218,15 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 export function DoctorSchedulePanel({ model, embedded = false }: { model: DoctorWorkflowModel; embedded?: boolean }) {
+  const { selectedLocation, selectedLocationId } = usePracticeLocation();
+  const { branches, doctor } = useDoctorPortalContext();
+  const activeBranchName =
+    (selectedLocationId !== "all" && (selectedLocation?.name || branches.find((b) => b.id === selectedLocationId)?.name)) ||
+    branches.find((b) => b.id === doctor?.primaryBranchId)?.name ||
+    model.roster[0]?.branch?.name ||
+    branches[0]?.name ||
+    model.locations[0]?.name;
+
   const roster = [...model.roster].sort(
     (left, right) =>
       WEEK_ORDER.indexOf(left.weekday as (typeof WEEK_ORDER)[number]) -
@@ -2138,6 +2237,7 @@ export function DoctorSchedulePanel({ model, embedded = false }: { model: Doctor
   return (
     <div className="space-y-3">
       {!embedded ? <DoctorPageHeader
+        branchName={activeBranchName}
         description="Your recurring weekly availability, as booked by reception and patients."
         title="My Schedule"
       /> : null}

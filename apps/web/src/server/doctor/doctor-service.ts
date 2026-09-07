@@ -1,4 +1,4 @@
-import{database}from"@wonflow/database";import{requireBranchId,requirePermission,requireTenantContext}from"@wonflow/contracts";import type{WonFlowRequestContext}from"@wonflow/contracts";import{WonFlowApiError}from"@/server/http/route-handler";import{checkStartConsultationReadiness}from"@/server/readiness/readiness-service";import{dayFilterIn}from"@/server/time/business-day";
+import{database}from"@wonflow/database";import{requireBranchId,requirePermission,requireTenantContext}from"@wonflow/contracts";import type{WonFlowRequestContext}from"@wonflow/contracts";import{WonFlowApiError}from"@/server/http/route-handler";import{checkStartConsultationReadiness}from"@/server/readiness/readiness-service";import{dayFilterIn}from"@/server/time/business-day";import{findAllergyConflicts,describeAllergyConflicts}from"@/server/clinical/allergy-check";
 /** Postgres SQLSTATE 40001 — a SERIALIZABLE transaction lost a write race and must be treated as "someone else won," not a server error. Prisma sometimes wraps this as P2034 and sometimes lets the driver adapter's own error through with the code nested under `cause`, so both shapes are checked. */
 function isSerializationFailure(error:unknown):boolean{if(!(error instanceof Error))return false;const code=(error as{code?:unknown}).code;if(code==="P2034")return true;const cause=(error as{cause?:{originalCode?:unknown;kind?:unknown}}).cause;return cause?.originalCode==="40001"||cause?.kind==="TransactionWriteConflict";}
 const isUniqueConstraintError=(caught:unknown)=>typeof caught==="object"&&caught!==null&&(caught as{code?:string}).code==="P2002";
@@ -234,7 +234,7 @@ async removeOrder(rc:WonFlowRequestContext,encounterId:string,orderId:string){
   await database.auditEvent.create({data:{tenantId:c.tenantId,branchId:e.branchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"diagnostic.order.removed",entityType:"diagnostic-order",entityId:orderId,severity:"INFORMATION",sourceApplication:c.sourceApplication}});
   return deleted;
 }
-async createPrescription(rc:WonFlowRequestContext,id:string,input:{instructions?:string;items:{medicationId:string;dose:string;route?:string;frequency:string;duration?:string;quantity?:number;instructions?:string}[]}){
+async createPrescription(rc:WonFlowRequestContext,id:string,input:{instructions?:string;allergyOverrideReason?:string;items:{medicationId:string;dose:string;route?:string;frequency:string;duration?:string;quantity?:number;instructions?:string}[]}){
   const{context:c,doctor}=await this.resolveDoctor(rc);
   requirePermission(c,"encounters.manage");
   if(!input.items||!input.items.length)throw new WonFlowApiError(400,"prescription-items-required","At least one medication is required.");
@@ -246,6 +246,28 @@ async createPrescription(rc:WonFlowRequestContext,id:string,input:{instructions?
   const e=await this.requireEncounterAccess(c.tenantId,doctor.id,id,{requireActive:true});
   const UUID_REGEX=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
   const resolvedItems=await Promise.all(input.items.map(async(x)=>{let med=null;if(UUID_REGEX.test(x.medicationId)){med=await database.medication.findFirst({where:{id:x.medicationId,tenantId:c.tenantId}});}if(!med){med=await database.medication.findFirst({where:{tenantId:c.tenantId,OR:[{genericName:{equals:x.medicationId,mode:"insensitive"}},{brandName:{equals:x.medicationId,mode:"insensitive"}},{code:{equals:x.medicationId,mode:"insensitive"}}]}});}if(!med){const cleanCode=`MED-${x.medicationId.slice(0,6).toUpperCase().replace(/[^A-Z0-9]/g,"")}-${Date.now().toString(36).toUpperCase()}`;med=await database.medication.create({data:{tenantId:c.tenantId,code:cleanCode,genericName:x.medicationId.trim(),unit:"unit",isActive:true}});}return{medicationId:med.id,dose:x.dose,route:x.route??null,frequency:x.frequency,duration:x.duration??null,quantity:x.quantity!=null?Number(x.quantity):null,instructions:x.instructions??null};}));
+  /*
+   * Allergy screening, immediately before the prescription is written.
+   *
+   * The allergy list was previously read only to paint a banner on the
+   * consultation screen — nothing compared it against what was being
+   * prescribed, and the video-consultation path did not even show the banner.
+   * A conflict now stops the write and names it. A prescriber who means it can
+   * still proceed by sending `allergyOverrideReason`, which is recorded on the
+   * audit trail: the decision stays the clinician's, but it stops being silent.
+   */
+  const allergies=await database.patientAllergy.findMany({where:{tenantId:c.tenantId,patientId:e.patientId,status:"ACTIVE"},select:{allergen:true,severity:true,reaction:true}});
+  if(allergies.length){
+    const medications=await database.medication.findMany({where:{tenantId:c.tenantId,id:{in:resolvedItems.map(item=>item.medicationId)}},select:{genericName:true,brandName:true,code:true}});
+    const conflicts=findAllergyConflicts(allergies,medications.map(medication=>({name:medication.genericName||medication.brandName||medication.code,alternateNames:[medication.brandName,medication.code]})));
+    if(conflicts.length){
+      const override=input.allergyOverrideReason?.trim();
+      if(!override){
+        throw new WonFlowApiError(409,"allergy-conflict",`${describeAllergyConflicts(conflicts)} Confirm you intend to prescribe despite this, with a reason.`);
+      }
+      await database.auditEvent.create({data:{tenantId:c.tenantId,branchId:e.branchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"prescription.allergy-override",entityType:"encounter",entityId:e.id,severity:"WARNING",reason:`${describeAllergyConflicts(conflicts)} Override: ${override}`,sourceApplication:c.sourceApplication}});
+    }
+  }
   return database.prescription.create({data:{tenantId:c.tenantId,patientId:e.patientId,encounterId:e.id,doctorId:doctor.id,status:"ACTIVE",prescribedAt:new Date(),instructions:input.instructions?.trim()||null,items:{create:resolvedItems}},include:{items:{include:{medication:true}}}});
 }
 }
