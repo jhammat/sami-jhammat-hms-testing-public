@@ -378,19 +378,31 @@ export function calculatePertDose(
   fatGrams: number | null,
   capsuleStrength: number | null,
   kind: "meal" | "snack",
+  ratioPerGram: number = 2_000,
+  customFloor?: number | null,
 ): PertDose | null {
   if (fatGrams === null || capsuleStrength === null || capsuleStrength <= 0) return null;
   if (fatGrams < 0) return null;
 
-  const floor = kind === "meal" ? 25_000 : 10_000;
-  const calculated = Math.round(fatGrams * 2_000);
+  // Medically, a fat-free intake (0g fat) requires 0 units of lipase
+  if (fatGrams === 0) {
+    return {
+      units: 0,
+      capsules: 0,
+      note: `0 g fat intake requires no pancreatic enzymes (0 IU).`,
+    };
+  }
+
+  const defaultFloor = kind === "meal" ? 25_000 : 10_000;
+  const floor = customFloor !== undefined && customFloor !== null ? customFloor : defaultFloor;
+  const calculated = Math.round(fatGrams * ratioPerGram);
   const units = Math.max(floor, calculated);
   const capsules = Math.max(1, Math.ceil(units / capsuleStrength));
 
   const note =
     calculated < floor
-      ? `Below the usual ${kind} minimum, so the ${floor.toLocaleString()} unit floor is applied.`
-      : `${fatGrams} g of fat at about 2,000 units per gram.`;
+      ? `Below the ${kind} minimum (${floor.toLocaleString()} IU safety floor applied).`
+      : `${fatGrams} g fat at ${ratioPerGram.toLocaleString()} IU/g (${calculated.toLocaleString()} IU calculated).`;
 
   return { units, capsules, note };
 }

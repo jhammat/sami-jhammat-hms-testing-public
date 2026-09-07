@@ -1,3 +1,9 @@
-export default function PharmacyLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+import type { ReactNode } from "react";
+
+import { requirePortal } from "@/lib/auth/portal-guard";
+
+export default async function PharmacyLayout({ children }: { children: ReactNode }) {
+  await requirePortal("/operations/pharmacy");
+
   return children;
 }

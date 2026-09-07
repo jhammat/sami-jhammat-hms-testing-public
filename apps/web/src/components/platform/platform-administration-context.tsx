@@ -538,7 +538,16 @@ const SERVER_SUBSCRIPTION_PLAN: Record<string, PlatformSubscriptionPlan> = {
 };
 
 function isoOrEmpty(value: string | null | undefined): string {
-  return value ?? "";
+  if (!value) return "";
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  if (match) return match[1];
+  try {
+    const d = new Date(value);
+    if (!isNaN(d.getTime())) {
+      return d.toISOString().slice(0, 10);
+    }
+  } catch {}
+  return "";
 }
 
 function mapServerSubscription(
@@ -1023,16 +1032,8 @@ export function PlatformAdministrationProvider({
               subscription.monthlyAmountMinor,
             seatCount: subscription.seatCount,
             currencyCode: subscription.currencyCode,
-            /*
-             * Empty strings are the form's "unset"; the server expects the
-             * field to be absent rather than an unparseable date.
-             */
-            ...(subscription.trialEndsAt
-              ? { trialEndsAt: subscription.trialEndsAt }
-              : {}),
-            ...(subscription.renewsAt
-              ? { renewsAt: subscription.renewsAt }
-              : {}),
+            trialEndsAt: subscription.trialEndsAt || null,
+            renewsAt: subscription.renewsAt || null,
           }),
         },
       );

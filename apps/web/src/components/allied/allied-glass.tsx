@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type ButtonHTMLAttributes,
@@ -166,8 +167,8 @@ export function AuroraHero({
                   key={chip.label}
                   className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-medium ${
                     chip.solid
-                      ? "border-white/25 bg-[rgb(255_255_255_/_0.20)] text-white"
-                      : "border-white/15 bg-[rgb(255_255_255_/_0.08)] text-indigo-100/85"
+                      ? "border-white/25 bg-[rgb(255_255_255/0.20)] text-white"
+                      : "border-white/15 bg-[rgb(255_255_255/0.08)] text-indigo-100/85"
                   }`}
                 >
                   {chip.value ? (
@@ -274,7 +275,7 @@ export function GlassChip({
       {typeof count === "number" ? (
         <span
           className={`rounded-full px-1.5 text-[10px] tabular-nums ${
-            active ? "bg-[rgb(255_255_255_/_0.25)]" : "bg-slate-900/8 dark:bg-white/10"
+            active ? "bg-[rgb(255_255_255/0.25)]" : "bg-slate-900/8 dark:bg-white/10"
           }`}
         >
           {count}
@@ -475,7 +476,7 @@ export function ProgressRing({
             fill="none"
             stroke="currentColor"
             strokeWidth={thickness}
-            className="text-[rgb(15_23_42_/_0.09)] dark:text-[rgb(255_255_255_/_0.10)]"
+            className="text-[rgb(15_23_42/0.09)] dark:text-[rgb(255_255_255/0.10)]"
           />
 
           <circle
@@ -675,7 +676,7 @@ export function Dial({
             stroke="currentColor"
             strokeLinecap="round"
             strokeWidth={thickness}
-            className="text-[rgb(15_23_42_/_0.09)] dark:text-[rgb(255_255_255_/_0.10)]"
+            className="text-[rgb(15_23_42/0.09)] dark:text-[rgb(255_255_255/0.10)]"
           />
 
           <path
@@ -814,39 +815,202 @@ export function GradientSlider({
   );
 }
 
-/** Plus/minus stepper for the doses a therapist changes one unit at a time. */
+/**
+ * Intelligently infers a realistic starting clinical hint/placeholder
+ * based on the label, unit, or context.
+ */
+export function getSuggestedHint(label: string, unit?: string, placeholder?: string): string {
+  if (placeholder) return placeholder;
+  const l = label.toLowerCase();
+  const u = (unit ?? "").toLowerCase();
+
+  if (l.includes("weight") || u.includes("kg")) {
+    if (l.includes("change") || l.includes("loss") || l.includes("surgery") || u.includes("negative")) {
+      return "e.g. -2.5";
+    }
+    return "e.g. 70";
+  }
+  if (l.includes("height") || u.includes("cm")) {
+    return "e.g. 175";
+  }
+  if (l.includes("energy") || l.includes("caloric") || u.includes("kcal")) {
+    return "e.g. 2000";
+  }
+  if (l.includes("protein") || u.includes("g/day")) {
+    return "e.g. 85";
+  }
+  if (l.includes("fluid") || u.includes("ml/day")) {
+    return "e.g. 2200";
+  }
+  if (l.includes("fat")) {
+    if (l.includes("snack")) return "e.g. 10";
+    return "e.g. 25";
+  }
+  if (l.includes("floor")) {
+    if (l.includes("snack")) return "e.g. 10000";
+    return "e.g. 25000";
+  }
+  if (l.includes("rate") || l.includes("infusion") || u.includes("ml/hour") || u.includes("ml/hr")) {
+    return "e.g. 60";
+  }
+  if (l.includes("hours") || u.includes("hours")) {
+    return "e.g. 20";
+  }
+  if (l.includes("tug") || l.includes("timed") || (l.includes("hold") && u.includes("sec"))) {
+    return "e.g. 12";
+  }
+  if (l.includes("walk") || l.includes("distance") || u.includes("metres")) {
+    return "e.g. 400";
+  }
+  if (l.includes("sets")) {
+    return "e.g. 3";
+  }
+  if (l.includes("reps") || l.includes("repetitions")) {
+    return "e.g. 10";
+  }
+  if (l.includes("days")) {
+    return "e.g. 7";
+  }
+  return "e.g. 0";
+}
+
+/** Plus/minus stepper with freeform number typing and clinical hints. */
 export function Stepper({
   value,
   onChange,
-  min = 0,
-  max = 999,
+  min,
+  max,
   step = 1,
   label,
   unit,
   accent = "#0891b2",
+  placeholder,
+  hint,
+  defaultStart,
 }: {
   value: number | null;
-  onChange: (next: number) => void;
+  onChange: (next: number | null) => void;
   min?: number;
   max?: number;
   step?: number;
   label: string;
   unit?: string;
   accent?: string;
+  placeholder?: string;
+  hint?: string;
+  defaultStart?: number;
 }) {
   const id = useId();
 
+  const resolvedPlaceholder = useMemo(
+    () => getSuggestedHint(label, unit, placeholder),
+    [label, unit, placeholder],
+  );
+
+  const parsedHintNumber = useMemo(() => {
+    const match = resolvedPlaceholder.match(/-?\d+(\.\d+)?/);
+    return match ? parseFloat(match[0]) : null;
+  }, [resolvedPlaceholder]);
+
+  const startBaseline = defaultStart ?? parsedHintNumber ?? (min !== undefined && min > 0 ? min : 0);
+
+  const [localText, setLocalText] = useState<string>(() =>
+    value !== null && value !== undefined ? String(value) : ""
+  );
+  const [isFocused, setIsFocused] = useState(false);
+
+  useEffect(() => {
+    if (!isFocused) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLocalText(value !== null && value !== undefined ? String(value) : "");
+    }
+  }, [value, isFocused]);
+
+  const handleInputChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = event.target.value;
+
+    // Allow typing digits, negative sign at the front, and decimal point
+    if (raw !== "" && !/^-?\d*\.?\d*$/.test(raw)) {
+      return;
+    }
+
+    setLocalText(raw);
+
+    if (raw === "" || raw === "-") {
+      onChange(null);
+      return;
+    }
+
+    const parsed = parseFloat(raw);
+    if (!isNaN(parsed)) {
+      // Allow entering any number directly without clamp obstruction
+      onChange(parsed);
+    }
+  };
+
+  const handleFocus = () => {
+    setIsFocused(true);
+  };
+
+  const handleBlur = () => {
+    setIsFocused(false);
+    if (localText === "" || localText === "-") {
+      setLocalText("");
+      onChange(null);
+      return;
+    }
+    const parsed = parseFloat(localText);
+    if (!isNaN(parsed)) {
+      setLocalText(String(parsed));
+      onChange(parsed);
+    } else {
+      setLocalText("");
+      onChange(null);
+    }
+  };
+
+  const handleIncrement = () => {
+    if (value === null || value === undefined) {
+      onChange(startBaseline);
+      setLocalText(String(startBaseline));
+      return;
+    }
+    const next = Math.round((value + step) * 1000) / 1000;
+    const clamped = max !== undefined ? Math.min(max, next) : next;
+    onChange(clamped);
+    setLocalText(String(clamped));
+  };
+
+  const handleDecrement = () => {
+    if (value === null || value === undefined) {
+      const initial = Math.round((startBaseline - step) * 1000) / 1000;
+      const clamped = min !== undefined ? Math.max(min, initial) : initial;
+      onChange(clamped);
+      setLocalText(String(clamped));
+      return;
+    }
+    const next = Math.round((value - step) * 1000) / 1000;
+    const clamped = min !== undefined ? Math.max(min, next) : next;
+    onChange(clamped);
+    setLocalText(String(clamped));
+  };
+
   return (
     <div className="wfg-well px-3 py-2.5">
-      <label htmlFor={id} className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-        {label}
-      </label>
+      <div className="flex items-center justify-between">
+        <label htmlFor={id} className="block text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+          {label}
+        </label>
+        {hint ? (
+          <span className="text-[9px] text-slate-400 dark:text-slate-500 truncate">{hint}</span>
+        ) : null}
+      </div>
 
       <div className="mt-1.5 flex items-center gap-2">
         <button
           type="button"
           aria-label={`Decrease ${label}`}
-          onClick={() => onChange(clamp((value ?? min) - step, min, max))}
+          onClick={handleDecrement}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-300/60 text-sm font-semibold text-slate-600 transition hover:bg-slate-500/10 dark:border-white/12 dark:text-slate-300"
         >
           −
@@ -854,25 +1018,23 @@ export function Stepper({
 
         <input
           id={id}
-          type="number"
-          inputMode="numeric"
-          min={min}
-          max={max}
-          step={step}
-          value={value ?? ""}
-          placeholder="—"
-          onChange={(event) => {
-            const raw = event.target.value;
-            if (raw === "") return;
-            onChange(clamp(Number(raw), min, max));
-          }}
-          className="min-w-0 flex-1 border-0 bg-transparent p-0 text-center text-lg font-semibold tabular-nums text-slate-900 outline-none dark:text-white"
+          type="text"
+          inputMode="decimal"
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck="false"
+          value={isFocused ? localText : (value !== null && value !== undefined ? String(value) : "")}
+          placeholder={resolvedPlaceholder}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          onChange={handleInputChange}
+          className="min-w-0 flex-1 border-0 bg-transparent p-0 text-center text-lg font-semibold tabular-nums text-slate-900 outline-none dark:text-white placeholder:text-slate-400/70 dark:placeholder:text-slate-500/70 placeholder:font-normal placeholder:text-base focus:placeholder-transparent transition"
         />
 
         <button
           type="button"
           aria-label={`Increase ${label}`}
-          onClick={() => onChange(clamp((value ?? min) + step, min, max))}
+          onClick={handleIncrement}
           className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm font-semibold text-white transition hover:brightness-110"
           style={{ background: accent }}
         >
@@ -1074,7 +1236,7 @@ export function BodyMap({
     <div className="flex items-center gap-4">
       <svg viewBox="0 0 100 200" className="h-56 w-28 shrink-0" role="group" aria-label="Body region filter">
         {/* Silhouette behind the interactive regions. */}
-        <g className="text-[rgb(15_23_42_/_0.09)] dark:text-[rgb(255_255_255_/_0.10)]" fill="currentColor">
+        <g className="text-[rgb(15_23_42/0.09)] dark:text-[rgb(255_255_255/0.10)]" fill="currentColor">
           <circle cx="50" cy="22" r="13" />
           <rect x="30" y="38" width="40" height="58" rx="14" />
           <rect x="34" y="94" width="32" height="18" rx="8" />

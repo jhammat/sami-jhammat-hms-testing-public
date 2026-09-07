@@ -58,6 +58,7 @@ export interface RefundRecord {
   approvedByMembershipId: string | null;
   requestedAt: string;
   approvedAt: string | null;
+  completedAt?: string | null;
 }
 
 export interface InvoiceRecord {
@@ -253,6 +254,26 @@ export function approveRefund(refundId: string, reason: string): Promise<{ refun
 export function useApproveRefund(): UseApiMutationResult<{ refund: RefundRecord }, { refundId: string; reason: string }> {
   return useApiMutation(({ refundId, reason }: { refundId: string; reason: string }) => approveRefund(refundId, reason), {
     invalidates: [REFUNDS_TAG, INVOICES_TAG],
+  });
+}
+
+export function rejectRefund(refundId: string, reason: string): Promise<{ refund: RefundRecord }> {
+  return apiPatch<{ refund: RefundRecord }, { reason: string }>(`/api/v1/billing/refunds/${refundId}/reject`, { reason });
+}
+
+export function useRejectRefund(): UseApiMutationResult<{ refund: RefundRecord }, { refundId: string; reason: string }> {
+  return useApiMutation(({ refundId, reason }: { refundId: string; reason: string }) => rejectRefund(refundId, reason), {
+    invalidates: [REFUNDS_TAG, INVOICES_TAG],
+  });
+}
+
+export function completeRefund(refundId: string, reason?: string): Promise<{ refund: RefundRecord }> {
+  return apiPatch<{ refund: RefundRecord }, { reason?: string }>(`/api/v1/billing/refunds/${refundId}/complete`, { reason });
+}
+
+export function useCompleteRefund(): UseApiMutationResult<{ refund: RefundRecord }, { refundId: string; reason?: string }> {
+  return useApiMutation(({ refundId, reason }: { refundId: string; reason?: string }) => completeRefund(refundId, reason), {
+    invalidates: [REFUNDS_TAG, INVOICES_TAG, LEDGER_TAG, PAYMENTS_TAG],
   });
 }
 

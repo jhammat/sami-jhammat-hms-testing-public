@@ -1,6 +1,6 @@
 @import "./registration-ui-legacy.css";
 /* =========================================================
-   WonFlow Premium Visual System â€” WF-067
+   WonFlow Premium Visual System — WF-067
    ========================================================= */
 
 :root {
@@ -435,7 +435,7 @@ textarea:focus-visible {
 }
 
 /* =========================================================
-   WonFlow printable laboratory report â€” WF-072
+   WonFlow printable laboratory report — WF-072
    ========================================================= */
 
 @media print {
@@ -491,7 +491,7 @@ textarea:focus-visible {
   }
 }
 /* =========================================================
-   WonFlow existing-screen premium compatibility â€” WF-070
+   WonFlow existing-screen premium compatibility — WF-070
    ========================================================= */
 
 .wf-screen-stack {
@@ -635,7 +635,7 @@ select {
   }
 }
 /* =========================================================
-   WonFlow Reception â€” polished first-release visual system
+   WonFlow Reception — polished first-release visual system
    ========================================================= */
 
 .wf-reception-page {
@@ -931,7 +931,7 @@ select {
   }
 }
 /* =========================================================
-   WonFlow sidebar â€” stronger blue and purple separation
+   WonFlow sidebar — stronger blue and purple separation
    ========================================================= */
 
 .wf-sidebar-shell,

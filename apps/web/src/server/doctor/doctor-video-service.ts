@@ -260,6 +260,15 @@ export async function saveVideoConsultationChart(
     throw new WonFlowApiError(404, "appointment-not-found", "Appointment was not found.");
   }
 
+  if (appointment.doctorId && appointment.doctorId !== doctor.id) {
+    const treatingDoc = await database.doctorProfile.findFirst({
+      where: { id: appointment.doctorId, tenantId: context.tenantId },
+    });
+    if (treatingDoc?.supervisorDoctorId !== doctor.id) {
+      throw new WonFlowApiError(403, "forbidden", "You do not have permission to chart this consultation.");
+    }
+  }
+
   // Ensure valid branchId
   let resolvedBranchId: string | null = appointment.branchId;
   if (!resolvedBranchId) {
@@ -366,9 +375,9 @@ export async function saveVideoConsultationChart(
           data: {
             prescriptionId: rx.id,
             medicationId: medication.id,
-            dose: item.dosage.trim() || "1 tab",
-            frequency: item.frequency.trim() || "Once daily",
-            duration: item.duration.trim() || "5 days",
+            dose: item.dosage.trim() || "As directed",
+            frequency: item.frequency.trim() || "As directed",
+            duration: item.duration?.trim() || null,
             instructions: item.instructions?.trim() || null,
           },
         });
@@ -386,6 +395,7 @@ export async function saveVideoConsultationChart(
     .join("\n\n");
 
   if (noteBody) {
+    const isSupervised = Boolean(doctor.requiresCountersignature);
     await database.encounterNote.create({
       data: {
         tenantId: context.tenantId,
@@ -393,8 +403,8 @@ export async function saveVideoConsultationChart(
         authorMembershipId: context.membershipId!,
         noteType: "consultation_summary",
         content: { text: noteBody },
-        status: "SIGNED",
-        signedAt: now,
+        status: isSupervised ? "DRAFT" : "SIGNED",
+        signedAt: isSupervised ? null : now,
       },
     });
   }

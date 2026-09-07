@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { authenticateAccount } from "@/lib/auth/account-service";
 import { setPendingLoginCookie } from "@/lib/auth/pending-login";
+import { AUDIENCE_LABELS, audienceOf, isPortalAudience, type PortalAudience } from "@/lib/auth/portal-directory";
 import { createSessionCookie } from "@/lib/auth/session-server";
 import { checkRateLimit, clearRateLimit, clientAddress, recordFailure, rateLimitResponse } from "@/lib/security/rate-limit";
 
@@ -54,8 +55,18 @@ async function handleLogin(request: Request): Promise<NextResponse | Response> {
   const limit = checkRateLimit(throttleKey, LOGIN_FAILURE_LIMIT, LOGIN_WINDOW_MS);
   if (!limit.allowed) return rateLimitResponse(limit);
 
-  const body = await request.json().catch(() => null) as { email?: string; password?: string } | null;
+  const body = await request.json().catch(() => null) as { email?: string; password?: string; audience?: string } | null;
   if (!body?.email?.trim() || !body.password) return NextResponse.json({ error: "Enter your email and password." }, { status: 400 });
+
+  /*
+   * Which side of the sign-in screen this came from. It used to be sent
+   * nowhere and enforced nowhere, so the two doors led to the same room:
+   * patient credentials typed under "Hospital staff" signed in, and the
+   * session that came back was a real one. The audience is now part of the
+   * request, and an account that holds nothing on the chosen side is refused
+   * rather than quietly let in through the other door.
+   */
+  const audience: PortalAudience = isPortalAudience(body.audience) ? body.audience : "hospital";
 
   const account = await authenticateAccount(body.email, body.password);
   if (!account) {
@@ -66,9 +77,32 @@ async function handleLogin(request: Request): Promise<NextResponse | Response> {
   if (account.suspendedOrganizationLabel) return NextResponse.json({ error: `${account.suspendedOrganizationLabel}'s access has been suspended. Contact your platform administrator.`, code: "organization-suspended" }, { status: 403 });
   if (!account.contexts.length) return NextResponse.json({ error: "No active workspace is assigned to this account." }, { status: 403 });
   if (account.requiresMfa) return NextResponse.json({ error: "MFA verification is required.", requiresMfa: true }, { status: 403 });
+
+  const contexts = account.contexts.filter((context) => audienceOf(context.role) === audience);
+
+  if (!contexts.length) {
+    /*
+     * The password was right, so the person is who they say they are — they
+     * are simply at the wrong door. Saying which door is theirs leaks nothing
+     * they do not already know about their own account, and refusing without
+     * saying it is how you get someone typing a correct password five times
+     * until the account locks.
+     */
+    const otherAudience = audienceOf(account.contexts[0]!.role);
+
+    return NextResponse.json(
+      {
+        error: `These credentials are for the ${AUDIENCE_LABELS[otherAudience]} side of WonFlow, not the ${AUDIENCE_LABELS[audience]} side.`,
+        code: "wrong-audience",
+        audience: otherAudience,
+      },
+      { status: 403 },
+    );
+  }
+
   /*
-   * More than one portal, so the password is right but the destination is not
-   * yet known.
+   * More than one portal on the chosen side, so the password is right but the
+   * destination is not yet known.
    *
    * This used to answer 409 with the context list and nothing else — no
    * `error` field, and no endpoint anywhere that could finish the sign-in. The
@@ -77,22 +111,22 @@ async function handleLogin(request: Request): Promise<NextResponse | Response> {
    * every time, with no way through. A pending-login cookie is issued instead
    * and `/api/auth/select-context` completes it.
    */
-  if (account.contexts.length > 1) {
+  if (contexts.length > 1) {
     clearRateLimit(throttleKey);
-    await setPendingLoginCookie(account.identityId, isSecureRequest(await headers()));
+    await setPendingLoginCookie(account.identityId, audience, isSecureRequest(await headers()));
 
     return NextResponse.json(
       {
         requiresContextSelection: true,
         displayName: account.displayName,
-        contexts: account.contexts,
+        contexts,
       },
       { status: 200 },
     );
   }
 
   clearRateLimit(throttleKey);
-  const context = account.contexts[0]!;
+  const context = contexts[0]!;
   await createSessionCookie(account, context);
   return NextResponse.json({
     homePath: account.mustChangePassword ? "/auth/change-password" : context.homePath,

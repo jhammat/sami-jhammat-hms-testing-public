@@ -27,6 +27,7 @@ import {
   Building2,
   CalendarDays,
   CalendarPlus,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   CircleHelp,
@@ -39,6 +40,7 @@ import {
   Landmark,
   LayoutDashboard,
   ListOrdered,
+  Loader2,
   LogOut,
   Menu,
   Network,
@@ -58,6 +60,7 @@ import {
   UserRound,
   Users,
   Utensils,
+  UserCircle,
   Video,
   X,
 } from "lucide-react";
@@ -90,6 +93,9 @@ import { ThemeToggle } from "./theme-toggle";
 import {
   useWonFlowSession,
 } from "@/app/_providers";
+
+import { homePathForRole, type WonFlowRole } from "@/lib/auth/accounts";
+import { canRoleOpen } from "@/lib/auth/portal-access";
 
 interface NavigationItem {
   label: string;
@@ -246,54 +252,6 @@ const fullNavigationGroups:
 
           description:
             "Returned medicines, stock reversal and refund coordination",
-        },
-      ],
-    },
-    {
-      label:
-        "Clinical Workspace",
-
-      items: [
-        {
-          label:
-            "Doctor Dashboard",
-
-          href: "/doctor",
-
-          icon:
-            Stethoscope,
-
-          description:
-            "Doctor schedule and clinical activity",
-        },
-        {
-          label:
-            "Patient Consultations",
-
-          href:
-            "/doctor/consultations",
-
-          icon: Activity,
-
-          description:
-            "Doctor patient queue and consultations",
-
-          activePrefixes: [
-            "/doctor/encounters",
-          ],
-        },
-        {
-          label:
-            "Radiology Results",
-
-          href:
-            "/doctor/radiology-results",
-
-          icon:
-            ScanLine,
-
-          description:
-            "Review finalized imaging reports and critical findings",
         },
       ],
     },
@@ -783,11 +741,11 @@ const patientNavigationGroups:
             "Book and view hospital appointments",
         },
         {
-          label: "Care",
+          label: "Prescriptions & Care",
           href: "/patient/care",
-          icon: HeartPulse,
+          icon: Pill,
           description:
-            "Medicines, tests and doctor instructions",
+            "Doctor prescriptions, medicines, instructions and orders",
         },
         {
           label: "Reports",
@@ -1071,6 +1029,13 @@ const platformNavigationGroups:
           description:
             "Platform defaults, languages and shared experience settings",
         },
+        {
+          label: "Profile",
+          href: "/platform/profile",
+          icon: UserCircle,
+          description:
+            "Superadmin profile picture, credentials and password security",
+        },
       ],
     },
   ];
@@ -1154,26 +1119,28 @@ const physiotherapyNavigationGroups:
     {
       label: "Across the Recovery",
       items: [
+        /*
+         * Surgical care plans now have a dedicated read-only view inside the
+         * physiotherapy workspace — no redirect to the doctor portal needed.
+         */
         {
           label: "Surgical Care Plans",
-          href: "/doctor/careplans",
+          href: "/operations/physiotherapy?view=careplans",
           icon: HeartPulse,
+          view: "careplans",
           description:
-            "The managing surgeon's view of the recoveries you are working on",
+            "Post-operative recovery surveillance, drain tracking and alerts",
         },
         {
           label: "Clinical Alerts",
-          href: "/operations/alerts",
+          href: "/operations/physiotherapy?view=alerts",
           icon: ShieldAlert,
+          view: "alerts",
+          activePrefixes: [
+            "/operations/alerts",
+          ],
           description:
             "Escalations raised on the patients in your caseload",
-        },
-        {
-          label: "Dietetics Workspace",
-          href: "/operations/nutrition",
-          icon: Utensils,
-          description:
-            "The nutrition side of the same recovery",
         },
       ],
     },
@@ -1254,26 +1221,18 @@ const nutritionNavigationGroups:
     {
       label: "Across the Recovery",
       items: [
-        {
-          label: "Surgical Care Plans",
-          href: "/doctor/careplans",
-          icon: HeartPulse,
-          description:
-            "The managing surgeon's view of the recoveries you are working on",
-        },
+        // Same as physiotherapy above: the surgical care plan is read on the
+        // Nutrition Deck, and the physiotherapy workspace is its own portal.
         {
           label: "Clinical Alerts",
-          href: "/operations/alerts",
+          href: "/operations/nutrition?view=alerts",
           icon: ShieldAlert,
+          view: "alerts",
+          activePrefixes: [
+            "/operations/alerts",
+          ],
           description:
             "Escalations raised on the patients in your caseload",
-        },
-        {
-          label: "Physiotherapy Workspace",
-          href: "/operations/physiotherapy",
-          icon: Activity,
-          description:
-            "The mobility side of the same recovery",
         },
       ],
     },
@@ -1329,10 +1288,52 @@ const workspaceNavigationGroups:
     NUTRITIONIST: nutritionNavigationGroups,
   };
 
+/** The menu a role owns, wherever they happen to be standing. */
+function navigationGroupsForRole(role: WonFlowRole): readonly NavigationGroup[] {
+  switch (role) {
+    case "doctor":
+      return doctorNavigationGroups;
+    case "patient":
+      return patientNavigationGroups;
+    case "admin":
+      return adminNavigationGroups;
+    case "platform":
+      return platformNavigationGroups;
+    case "reception":
+      return receptionNavigationGroups;
+    case "laboratory":
+      return laboratoryNavigationGroups;
+    case "radiology":
+      return radiologyNavigationGroups;
+    case "pharmacy":
+      return pharmacyNavigationGroups;
+    case "billing":
+      return billingNavigationGroups;
+    case "management":
+      return managementNavigationGroups;
+    case "physiotherapist":
+      return physiotherapyNavigationGroups;
+    case "nutritionist":
+      return nutritionNavigationGroups;
+  }
+}
+
 function getNavigationGroupsForPath(
   pathname: string,
   workspace?: WorkspaceCode | null,
+  role?: WonFlowRole | null,
 ): readonly NavigationGroup[] {
+  /*
+   * The path decides the menu, but only for a path this role may actually
+   * open. Keying on the path alone is how a reception session that landed on
+   * `/doctor` was handed the entire doctor sidebar to browse: the server now
+   * turns that navigation away, and this makes sure the menu never advertises
+   * it in the first place.
+   */
+  if (role && !canRoleOpen(role, pathname)) {
+    return navigationGroupsForRole(role);
+  }
+
   if (
     pathname.startsWith(
       "/operations/physiotherapy",
@@ -1354,6 +1355,18 @@ function getNavigationGroupsForPath(
       "/operations/alerts",
     )
   ) {
+    if (workspace === "PHYSIOTHERAPIST" || role === "physiotherapist") {
+      return physiotherapyNavigationGroups;
+    }
+    if (workspace === "NUTRITIONIST" || role === "nutritionist") {
+      return nutritionNavigationGroups;
+    }
+    if (workspace === "DOCTOR" || role === "doctor") {
+      return doctorNavigationGroups;
+    }
+    const wsGroups = workspace ? workspaceNavigationGroups[workspace] : undefined;
+    if (wsGroups) return wsGroups;
+    if (role) return navigationGroupsForRole(role);
     return alertNavigationGroups;
   }
 
@@ -1453,7 +1466,11 @@ function getNavigationGroupsForPath(
 function getHomePathForPath(
   pathname: string,
   workspace?: WorkspaceCode | null,
+  role?: WonFlowRole | null,
 ): string {
+  // Standing somewhere this role cannot open, the only sensible home is their own.
+  if (role && !canRoleOpen(role, pathname)) return homePathForRole(role);
+
   if (pathname.startsWith("/doctor")) return "/doctor";
   if (pathname.startsWith("/patient")) return "/patient";
   if (pathname.startsWith("/admin") || pathname.startsWith("/organization")) return "/admin";
@@ -1640,8 +1657,9 @@ function SidebarNavigation({
         getNavigationGroupsForPath(
           pathname,
           session?.workspace,
+          session?.role,
         ),
-      [pathname, session?.workspace],
+      [pathname, session?.workspace, session?.role],
     );
 
   return (
@@ -1667,10 +1685,12 @@ function SidebarNavigation({
           href={getHomePathForPath(
             pathname,
             session?.workspace,
+            session?.role,
           )}
           onClick={
             onNavigate
           }
+          suppressHydrationWarning
         >
           <WonFlowLogo
             compact={compact}
@@ -1718,12 +1738,13 @@ function SidebarNavigation({
         </div>
       ) : null}
 
-      <nav className="wf-scrollbar flex-1 overflow-y-auto px-3 py-4">
+      <nav className="wf-scrollbar flex-1 overflow-y-auto px-3 py-4" suppressHydrationWarning>
         <div className="space-y-6">
           {navigationGroups.map(
             (group) => (
               <section
-                key={group.label}
+                key={`${group.label}-${group.items[0]?.href ?? ""}`}
+                suppressHydrationWarning
               >
                 {!compact ? (
                   <div className="mb-2 px-3">
@@ -1806,6 +1827,7 @@ function SidebarNavigation({
                           onClick={
                             onNavigate
                           }
+                          suppressHydrationWarning
                           title={
                             compact
                               ? item.label
@@ -1896,8 +1918,9 @@ function CommandPalette({
         getNavigationGroupsForPath(
           pathname,
           session?.workspace,
+          session?.role,
         ),
-      [pathname, session?.workspace],
+      [pathname, session?.workspace, session?.role],
     );
 
   const allNavigationItems =
@@ -1962,7 +1985,7 @@ function CommandPalette({
 
   return (
     <div
-      aria-label="WonFlow command search"
+      aria-label="Command search"
       aria-modal="true"
       className="fixed inset-0 z-[100] flex items-start justify-center bg-slate-950/30 px-4 pt-[9vh] backdrop-blur-[6px]"
       onClick={
@@ -2016,7 +2039,7 @@ function CommandPalette({
           0 ? (
             <div className="px-5 py-12 text-center">
               <div className="text-sm font-black text-slate-900">
-                No WonFlow page found
+                No page found
               </div>
 
               <p className="mt-2 text-xs text-slate-500">
@@ -2080,7 +2103,7 @@ function CommandPalette({
 
         <footer className="wfg-divide flex items-center justify-between border-t px-5 py-3 text-[10px] font-semibold text-slate-500">
           <span>
-            Search WonFlow navigation
+            Search navigation
           </span>
 
           <span className="flex items-center gap-1">
@@ -2162,6 +2185,135 @@ function useSignedInAvatar(identityId: string | undefined): string | null {
   return identityId === undefined ? null : avatarUrl;
 }
 
+const WORKSPACE_SWITCHER_MAP: Record<string, { label: string; icon: LucideIcon }> = {
+  DOCTOR: { label: "Doctor Workspace", icon: Stethoscope },
+  BILLING: { label: "Billing Portal", icon: Landmark },
+  ADMIN: { label: "Administration", icon: Building2 },
+  RECEPTION: { label: "Reception", icon: Users },
+  PHARMACY: { label: "Pharmacy", icon: Pill },
+  LABORATORY: { label: "Laboratory", icon: FlaskConical },
+  RADIOLOGY: { label: "Radiology", icon: ScanLine },
+  MANAGEMENT: { label: "Management", icon: BarChart3 },
+  PHYSIOTHERAPIST: { label: "Physiotherapy", icon: Activity },
+  NUTRITIONIST: { label: "Dietetics", icon: Utensils },
+};
+
+function WorkspaceSwitcherDropdown({
+  currentWorkspace,
+  availableWorkspaces,
+}: {
+  currentWorkspace: WorkspaceCode | null;
+  availableWorkspaces: WorkspaceCode[];
+}) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMounted(true);
+  }, []);
+
+  const [open, setOpen] = useState(false);
+  const [switching, setSwitching] = useState<string | null>(null);
+
+  const currentInfo = (currentWorkspace && WORKSPACE_SWITCHER_MAP[currentWorkspace]) || {
+    label: currentWorkspace || "Workspace",
+    icon: Building2,
+  };
+  const CurrentIcon = currentInfo.icon;
+
+  if (!mounted) {
+    return null;
+  }
+
+  async function handleSwitch(workspace: WorkspaceCode) {
+    if (workspace === currentWorkspace || switching) return;
+    setSwitching(workspace);
+    try {
+      const res = await fetch("/api/auth/switch-workspace", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ workspace }),
+      });
+      const data = await res.json();
+      if (res.ok && data.homePath) {
+        window.location.assign(data.homePath);
+      } else {
+        setSwitching(null);
+      }
+    } catch {
+      setSwitching(null);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="wfg-control flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:text-indigo-600 dark:text-slate-200"
+        title="Switch portal"
+      >
+        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
+          <CurrentIcon size={13} />
+        </span>
+        <span className="hidden sm:inline-block max-w-28 truncate">{currentInfo.label}</span>
+        <ChevronDown size={14} className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1.5 z-50 w-56 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Switch Workspace ({availableWorkspaces.length})
+            </div>
+            <div className="space-y-1">
+              {availableWorkspaces.map((ws) => {
+                const info = WORKSPACE_SWITCHER_MAP[ws] || { label: ws, icon: Building2 };
+                const Icon = info.icon;
+                const isCurrent = ws === currentWorkspace;
+                const isTarget = switching === ws;
+
+                return (
+                  <button
+                    key={ws}
+                    type="button"
+                    disabled={isCurrent || switching !== null}
+                    onClick={() => handleSwitch(ws)}
+                    className={`flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition ${
+                      isCurrent
+                        ? "bg-indigo-50 text-indigo-900 dark:bg-indigo-950/60 dark:text-indigo-300 font-bold"
+                        : "text-slate-700 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${
+                          isCurrent
+                            ? "bg-indigo-600 text-white"
+                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                      >
+                        {isTarget ? <Loader2 size={13} className="animate-spin" /> : <Icon size={13} />}
+                      </span>
+                      <span className="truncate">{info.label}</span>
+                    </div>
+                    {isCurrent ? (
+                      <span className="rounded-full bg-indigo-600/10 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700 dark:bg-indigo-400/10 dark:text-indigo-300">
+                        Active
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 export function PremiumApplicationShell({
   children,
 }: PremiumApplicationShellProps) {
@@ -2190,8 +2342,9 @@ export function PremiumApplicationShell({
         getNavigationGroupsForPath(
           pathname,
           session?.workspace,
+          session?.role,
         ),
-      [pathname, session?.workspace],
+      [pathname, session?.workspace, session?.role],
     );
 
   const allNavigationItems =
@@ -2490,7 +2643,7 @@ export function PremiumApplicationShell({
               />
 
               <span className="min-w-0 flex-1 truncate">
-                Search WonFlow
+                Search...
               </span>
 
               <span className="wfg-well flex items-center gap-1 px-2 py-1 text-[9px] font-semibold text-slate-400">
@@ -2529,33 +2682,47 @@ export function PremiumApplicationShell({
               />
             </button>
 
+            {session?.availableWorkspaces && session.availableWorkspaces.length > 1 ? (
+              <WorkspaceSwitcherDropdown
+                currentWorkspace={session.workspace}
+                availableWorkspaces={session.availableWorkspaces}
+              />
+            ) : null}
+
             <div className="wfg-control flex items-center gap-2 py-1.5 pl-1.5 pr-2">
-              <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-600 to-violet-600 text-[11px] font-semibold text-white shadow-[0_6px_16px_-6px_rgba(75,99,255,0.9)]">
-                {avatarUrl === null ? (
-                  getInitials(
-                    session?.name,
-                  )
-                ) : (
-                  /* eslint-disable-next-line @next/next/no-img-element -- the photo is a stored data URL, not an optimisable remote asset. */
-                  <img
-                    alt=""
-                    className="h-full w-full object-cover"
-                    src={avatarUrl}
-                  />
-                )}
-              </div>
-
-              <div className="hidden min-w-0 md:block">
-                <div className="max-w-28 truncate text-xs font-semibold text-slate-900">
-                  {session?.name ??
-                    "Signed out"}
+              <Link
+                className="flex items-center gap-2 transition hover:opacity-85"
+                href={session?.role === "platform" ? "/platform/profile" : session?.role === "doctor" ? "/doctor/profile" : "#"}
+                suppressHydrationWarning
+                title="View profile"
+              >
+                <div className="relative flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-600 to-violet-600 text-[11px] font-semibold text-white shadow-[0_6px_16px_-6px_rgba(75,99,255,0.9)]">
+                  {avatarUrl === null ? (
+                    getInitials(
+                      session?.name,
+                    )
+                  ) : (
+                    /* eslint-disable-next-line @next/next/no-img-element -- the photo is a stored data URL, not an optimisable remote asset. */
+                    <img
+                      alt=""
+                      className="h-full w-full object-cover"
+                      src={avatarUrl}
+                    />
+                  )}
                 </div>
 
-                <div className="mt-0.5 max-w-28 truncate text-[10px] font-medium text-slate-400">
-                  {session?.orgLabel ??
-                    ""}
+                <div className="hidden min-w-0 md:block text-left">
+                  <div className="max-w-28 truncate text-xs font-semibold text-slate-900">
+                    {session?.name ??
+                      "Signed out"}
+                  </div>
+
+                  <div className="mt-0.5 max-w-28 truncate text-[10px] font-medium text-slate-400">
+                    {session?.orgLabel ??
+                      ""}
+                  </div>
                 </div>
-              </div>
+              </Link>
 
               <button
                 aria-label="Log out"

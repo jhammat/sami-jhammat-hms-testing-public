@@ -146,6 +146,18 @@ export class MedicationAdherenceService {
           const dueBy = new Date(scheduledFor);
           dueBy.setHours(dueBy.getHours() + 3); // 3-hour adherence grace window
 
+          // Prevent duplicate tasks if already generated
+          const existing = await database.carePlanTask.findFirst({
+            where: {
+              tenantId: rc.tenantId,
+              carePlanId,
+              taskType: "MEDICATION",
+              title: `Take ${medName} ${item.dose}`,
+              scheduledFor,
+            },
+          });
+          if (existing) continue;
+
           await database.carePlanTask.create({
             data: {
               tenantId: rc.tenantId,
@@ -181,7 +193,7 @@ export class MedicationAdherenceService {
         branchId: toUuid(rc.branchId),
         actorMembershipId: toUuid(rc.membershipId),
         sessionId: toUuid(rc.sessionId),
-        requestId: rc.requestId,
+        requestId: rc.requestId || crypto.randomUUID(),
         action: "clinical.medication.reminders_generated",
         entityType: "prescription",
         entityId: prescription.id,
@@ -217,7 +229,7 @@ export class MedicationAdherenceService {
     const endOfDay = new Date(date);
     endOfDay.setHours(23, 59, 59, 999);
 
-    const tasks = await database.carePlanTask.findMany({
+    let tasks = await database.carePlanTask.findMany({
       where: {
         tenantId: rc.tenantId,
         carePlan: { patientId },
@@ -226,6 +238,47 @@ export class MedicationAdherenceService {
       },
       orderBy: { scheduledFor: "asc" },
     });
+
+    if (tasks.length === 0) {
+      // If no tasks exist for this target date, check for active prescriptions and auto-generate daily doses
+      const activePrescriptions = await database.prescription.findMany({
+        where: {
+          tenantId: rc.tenantId,
+          patientId,
+          status: { in: ["ACTIVE", "DISPENSED", "PARTIALLY_DISPENSED"] },
+        },
+        include: {
+          items: {
+            include: {
+              medication: true,
+            },
+          },
+        },
+      });
+
+      if (activePrescriptions.length > 0) {
+        for (const rx of activePrescriptions) {
+          try {
+            await this.generateMedicationTasksFromPrescription(rc, {
+              prescriptionId: rx.id,
+              durationDays: 7,
+            });
+          } catch {
+            // Ignore if already generated or concurrent
+          }
+        }
+
+        tasks = await database.carePlanTask.findMany({
+          where: {
+            tenantId: rc.tenantId,
+            carePlan: { patientId },
+            taskType: "MEDICATION",
+            scheduledFor: { gte: startOfDay, lte: endOfDay },
+          },
+          orderBy: { scheduledFor: "asc" },
+        });
+      }
+    }
 
     const now = new Date();
     const todayDoses: MedicationDoseItem[] = tasks.map((t) => {

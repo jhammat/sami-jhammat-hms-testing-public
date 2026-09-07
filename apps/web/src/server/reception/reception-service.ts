@@ -314,10 +314,13 @@ async registerPatient(rc:WonFlowRequestContext,input:RegisterPatientInput){const
     const consentData={consentToContact:input.consentToContact??true,patientCategory:trimOrUndefined(input.patientCategory),preferredLanguage:trimOrUndefined(input.preferredLanguage),bloodGroup:trimOrUndefined(input.bloodGroup),referralSource,notes:trimOrUndefined(input.notes),alternateMobileNumber:trimOrUndefined(input.alternateMobileNumber)};
     const patient=await createPatientRecord(c,{dateOfBirth,normalizedPhone,normalizedEmail,address,guardianData,consentData},input);
     return{patient,possibleDuplicates};}
-async bookAppointment(rc:WonFlowRequestContext,input:{patientId:string;doctorId?:string;serviceId?:string;startsAt:string;endsAt:string;reason?:string;source:string;idempotencyKey:string;consultationMode?:"IN_PERSON"|"ONLINE"}){
+async bookAppointment(rc:WonFlowRequestContext,input:{patientId:string;doctorId?:string;serviceId?:string;branchId?:string;startsAt:string;endsAt:string;reason?:string;source:string;idempotencyKey:string;consultationMode?:"IN_PERSON"|"ONLINE"}){
   const c=requireTenantContext(rc);requirePermission(c,"appointments.manage");
-  const branchId=requireBranchId(c),startsAt=new Date(input.startsAt),endsAt=new Date(input.endsAt);
+  const branchId = input.branchId || requireBranchId(c);
+  const startsAt = new Date(input.startsAt), endsAt = new Date(input.endsAt);
   if(!Number.isFinite(startsAt.getTime())||!Number.isFinite(endsAt.getTime())||endsAt<=startsAt)throw new WonFlowApiError(400,"invalid-appointment-time","The appointment time is invalid.");
+  const fiveMinutesAgo = new Date(Date.now() - 5 * 60000);
+  if(startsAt < fiveMinutesAgo && input.source !== "historical-import")throw new WonFlowApiError(400,"appointment-in-past","Appointments cannot be booked in the past.");
   const old=await database.idempotencyRecord.findUnique({where:{tenantId_key_operation:{tenantId:c.tenantId,key:input.idempotencyKey,operation:"appointment.book"}}});
   if(old?.responsePayload&&typeof old.responsePayload==="object"&&"appointmentId"in old.responsePayload){const a=await database.appointment.findFirst({where:{id:String(old.responsePayload.appointmentId),tenantId:c.tenantId}});if(a)return a;}
   try{
@@ -333,10 +336,25 @@ async bookAppointment(rc:WonFlowRequestContext,input:{patientId:string;doctorId?
       if(input.consultationMode&&service&&!service.consultationModes.includes(input.consultationMode))throw new WonFlowApiError(400,"consultation-mode-mismatch",`${service.name} does not offer ${input.consultationMode==="ONLINE"?"online consultations":"in-person visits"}.`);
       const doctorId=input.doctorId??service?.doctorId??null;
       if(doctorId&&!await tx.doctorProfile.findFirst({where:{id:doctorId,tenantId:c.tenantId,staffProfile:{membership:{organizationId:c.organizationId}}}}))throw new WonFlowApiError(400,"invalid-appointment-doctor","The selected doctor is unavailable.");
-      if(doctorId&&await tx.appointment.findFirst({where:{tenantId:c.tenantId,branchId,doctorId,status:{in:["PENDING","CONFIRMED","CHECKED_IN","IN_QUEUE","IN_PROGRESS"]},startsAt:{lt:endsAt},endsAt:{gt:startsAt}}}))throw new WonFlowApiError(409,"appointment-conflict","The selected clinician is no longer available at that time.");
+      const isDoctorDirectBooking = input.source === "doctor-portal" || (rc as { workspace?: string }).workspace === "doctor";
+      if(doctorId){
+        const conflict=await tx.appointment.findFirst({where:{tenantId:c.tenantId,branchId,doctorId,status:{in:["PENDING","CONFIRMED","CHECKED_IN","IN_QUEUE","IN_PROGRESS"]},startsAt:{lt:endsAt},endsAt:{gt:startsAt}}});
+        if(conflict){
+          if(isDoctorDirectBooking){
+            const latestAppt = await tx.appointment.findFirst({where:{tenantId:c.tenantId,branchId,doctorId,status:{in:["PENDING","CONFIRMED","CHECKED_IN","IN_QUEUE","IN_PROGRESS"]}},orderBy:{endsAt:"desc"}});
+            if(latestAppt && latestAppt.endsAt > startsAt){
+              const diffMs = endsAt.getTime() - startsAt.getTime();
+              startsAt.setTime(latestAppt.endsAt.getTime() + 60000);
+              endsAt.setTime(startsAt.getTime() + (diffMs > 0 ? diffMs : 1200000));
+            }
+          }else{
+            throw new WonFlowApiError(409,"appointment-conflict","The selected clinician is no longer available at that time.");
+          }
+        }
+      }
       // Reception books against the doctor's sitting hours; the hospital roster
       // applies only on dates where the doctor has not recorded a sitting.
-      if(doctorId){const branch=await tx.branch.findFirst({where:{id:branchId,tenantId:c.tenantId},select:{timezone:true}});const bookable=await checkDoctorBookable(tx,{tenantId:c.tenantId,doctorId,branchId,startsAt,endsAt,timezone:branch?.timezone??c.timezone});if(!bookable.ok)throw new WonFlowApiError(409,"doctor-unavailable",bookable.reason);}
+      if(doctorId && !isDoctorDirectBooking){const branch=await tx.branch.findFirst({where:{id:branchId,tenantId:c.tenantId},select:{timezone:true}});const bookable=await checkDoctorBookable(tx,{tenantId:c.tenantId,doctorId,branchId,startsAt,endsAt,timezone:branch?.timezone??c.timezone});if(!bookable.ok)throw new WonFlowApiError(409,"doctor-unavailable",bookable.reason);}
       // Final backstop against the [tenantId, doctorId, branchId, startsAt]
       // partial unique index: the findFirst check above can still race with
       // a concurrent request between the check and this insert. Postgres
@@ -353,17 +371,43 @@ async bookAppointment(rc:WonFlowRequestContext,input:{patientId:string;doctorId?
     throw caught;
   }
 }
-async checkIn(rc:WonFlowRequestContext,id:string,input:{queueDate:string;priority?:number;notes?:string}){const c=requireTenantContext(rc);requirePermission(c,"queues.manage");const branchId=requireBranchId(c),queueDate=new Date(`${input.queueDate}T00:00:00.000Z`);return database.$transaction(async tx=>{const a=await tx.appointment.findFirst({where:{id,tenantId:c.tenantId,branchId,status:{in:["PENDING","CONFIRMED"]}}});if(!a)throw new WonFlowApiError(404,"appointment-not-found","The appointment cannot be checked in.");const q=await tx.queue.upsert({where:{tenantId_branchId_queueDate:{tenantId:c.tenantId,branchId,queueDate}},create:{tenantId:c.tenantId,branchId,queueDate},update:{}}),counter=await tx.queue.update({where:{id:q.id},data:{nextTokenNumber:{increment:1}}}),tokenNumber=counter.nextTokenNumber-1,queueEntry=await tx.queueEntry.create({data:{tenantId:c.tenantId,queueId:q.id,patientId:a.patientId,appointmentId:a.id,tokenNumber,priority:input.priority??0,notes:input.notes?.trim()||null},include:{patient:true,appointment:true}}),appointment=await tx.appointment.update({where:{id:a.id},data:{status:"IN_QUEUE",checkedInAt:new Date(),tokenNumber,queueStatus:"waiting"}});await tx.auditEvent.create({data:{tenantId:c.tenantId,branchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"appointment.checked-in",entityType:"appointment",entityId:a.id,severity:"INFORMATION",sourceApplication:c.sourceApplication}});return{appointment,queueEntry};});}
-async cancelAppointment(rc:WonFlowRequestContext,id:string,reason:string){const c=requireTenantContext(rc);requirePermission(c,"appointments.manage");if(!reason.trim())throw new WonFlowApiError(400,"cancellation-reason-required","A cancellation reason is required.");return database.$transaction(async tx=>{const found=await tx.appointment.findFirst({where:{id,tenantId:c.tenantId,branchId:requireBranchId(c)}});if(!found)throw new WonFlowApiError(404,"appointment-not-found","The appointment could not be found.");const appointment=await tx.appointment.update({where:{id:found.id},data:{status:"CANCELLED",cancellationReason:reason.trim(),cancelledAt:new Date()}});await tx.queueEntry.updateMany({where:{tenantId:c.tenantId,appointmentId:id},data:{status:"CANCELLED",cancelledAt:new Date()}});await tx.auditEvent.create({data:{tenantId:c.tenantId,branchId:c.branchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"appointment.cancelled",entityType:"appointment",entityId:id,severity:"INFORMATION",reason:reason.trim(),sourceApplication:c.sourceApplication}});return appointment;});}
+async checkIn(rc:WonFlowRequestContext,id:string,input:{queueDate:string;priority?:number;notes?:string;branchId?:string}){
+  const c=requireTenantContext(rc);requirePermission(c,"queues.manage");
+  const branchId=input.branchId||(c.branchId?c.branchId:null),queueDate=new Date(`${input.queueDate}T00:00:00.000Z`);
+  try{
+    return await database.$transaction(async tx=>{
+      const a=await tx.appointment.findFirst({where:{id,tenantId:c.tenantId,...(branchId?{branchId}:{})},include:{queueEntry:{include:{patient:true,appointment:true}}}});
+      if(!a)throw new WonFlowApiError(404,"appointment-not-found","The appointment could not be found.");
+      if(a.status==="IN_QUEUE"||a.status==="CHECKED_IN"||a.queueEntry){
+        if(a.queueEntry)return{appointment:a,queueEntry:a.queueEntry};
+        const existingEntry=await tx.queueEntry.findFirst({where:{tenantId:c.tenantId,appointmentId:a.id},include:{patient:true,appointment:true}});
+        if(existingEntry)return{appointment:a,queueEntry:existingEntry};
+      }
+      if(a.status!=="PENDING"&&a.status!=="CONFIRMED")throw new WonFlowApiError(409,"appointment-not-checkable",`An appointment that is ${a.status.toLowerCase().replaceAll("_"," ")} cannot be checked in.`);
+      const effectiveBranchId=branchId||a.branchId;
+      const q=await tx.queue.upsert({where:{tenantId_branchId_queueDate:{tenantId:c.tenantId,branchId:effectiveBranchId,queueDate}},create:{tenantId:c.tenantId,branchId:effectiveBranchId,queueDate},update:{}}),counter=await tx.queue.update({where:{id:q.id},data:{nextTokenNumber:{increment:1}}}),tokenNumber=counter.nextTokenNumber-1,queueEntry=await tx.queueEntry.create({data:{tenantId:c.tenantId,queueId:q.id,patientId:a.patientId,appointmentId:a.id,tokenNumber,priority:input.priority??0,notes:input.notes?.trim()||null},include:{patient:true,appointment:true}}),appointment=await tx.appointment.update({where:{id:a.id},data:{status:"IN_QUEUE",checkedInAt:new Date(),tokenNumber,queueStatus:"waiting"}});
+      await tx.auditEvent.create({data:{tenantId:c.tenantId,branchId:effectiveBranchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"appointment.checked-in",entityType:"appointment",entityId:a.id,severity:"INFORMATION",sourceApplication:c.sourceApplication}});
+      return{appointment,queueEntry};
+    });
+  }catch(caught){
+    if(isUniqueConstraintError(caught)){
+      const already=await database.queueEntry.findFirst({where:{tenantId:c.tenantId,appointmentId:id},include:{patient:true,appointment:true}});
+      if(already)return{appointment:already.appointment,queueEntry:already};
+    }
+    throw caught;
+  }
+}
+async cancelAppointment(rc:WonFlowRequestContext,id:string,reason:string){const c=requireTenantContext(rc);requirePermission(c,"appointments.manage");if(!reason.trim())throw new WonFlowApiError(400,"cancellation-reason-required","A cancellation reason is required.");return database.$transaction(async tx=>{const found=await tx.appointment.findFirst({where:{id,tenantId:c.tenantId,...(c.branchId?{branchId:c.branchId}:{})}});if(!found)throw new WonFlowApiError(404,"appointment-not-found","The appointment could not be found.");const branchId=found.branchId;const appointment=await tx.appointment.update({where:{id:found.id},data:{status:"CANCELLED",cancellationReason:reason.trim(),cancelledAt:new Date()}});await tx.queueEntry.updateMany({where:{tenantId:c.tenantId,appointmentId:id},data:{status:"CANCELLED",cancelledAt:new Date()}});await tx.auditEvent.create({data:{tenantId:c.tenantId,branchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"appointment.cancelled",entityType:"appointment",entityId:id,severity:"INFORMATION",reason:reason.trim(),sourceApplication:c.sourceApplication}});return appointment;});}
 /** Moves a booked appointment to a new time, subject to the same conflict and doctor-availability checks as booking, and the same 409 on a lost race. */
 async rescheduleAppointment(rc:WonFlowRequestContext,id:string,input:{startsAt:string;endsAt:string}){
   const c=requireTenantContext(rc);requirePermission(c,"appointments.manage");
-  const branchId=requireBranchId(c),startsAt=new Date(input.startsAt),endsAt=new Date(input.endsAt);
+  const startsAt=new Date(input.startsAt),endsAt=new Date(input.endsAt);
   if(!Number.isFinite(startsAt.getTime())||!Number.isFinite(endsAt.getTime())||endsAt<=startsAt)throw new WonFlowApiError(400,"invalid-appointment-time","The appointment time is invalid.");
   try{
     return await database.$transaction(async tx=>{
-      const found=await tx.appointment.findFirst({where:{id,tenantId:c.tenantId,branchId}});
+      const found=await tx.appointment.findFirst({where:{id,tenantId:c.tenantId,...(c.branchId?{branchId:c.branchId}:{})}});
       if(!found)throw new WonFlowApiError(404,"appointment-not-found","The appointment could not be found.");
+      const branchId=found.branchId;
       if(found.status!=="PENDING"&&found.status!=="CONFIRMED")throw new WonFlowApiError(409,"appointment-not-reschedulable",`An appointment that is ${found.status.toLowerCase().replaceAll("_"," ")} cannot be rescheduled.`);
       if(found.doctorId&&await tx.appointment.findFirst({where:{id:{not:id},tenantId:c.tenantId,branchId,doctorId:found.doctorId,status:{in:["PENDING","CONFIRMED","CHECKED_IN","IN_QUEUE","IN_PROGRESS"]},startsAt:{lt:endsAt},endsAt:{gt:startsAt}}}))throw new WonFlowApiError(409,"appointment-conflict","The selected clinician is no longer available at that time.");
       if(found.doctorId){const branch=await tx.branch.findFirst({where:{id:branchId,tenantId:c.tenantId},select:{timezone:true}});const bookable=await checkDoctorBookable(tx,{tenantId:c.tenantId,doctorId:found.doctorId,branchId,startsAt,endsAt,timezone:branch?.timezone??c.timezone});if(!bookable.ok)throw new WonFlowApiError(409,"doctor-unavailable",bookable.reason);}

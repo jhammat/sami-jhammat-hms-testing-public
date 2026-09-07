@@ -2,6 +2,7 @@
 
 import {
   Activity,
+  AlertCircle,
   AlertTriangle,
   Bell,
   Building2,
@@ -43,7 +44,7 @@ import {
   Zap,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 
 import {
@@ -53,6 +54,7 @@ import {
   type BarDatum,
   type DonutSlice,
 } from "@/components/charts";
+import { WonFlowPagination, useWonFlowPagination } from "@/components/feedback";
 
 import { phaseOneApi } from "@/lib/api/phase-one-api";
 
@@ -103,7 +105,6 @@ import {
   useDoctorPortalContext,
 } from "./doctor-portal-shell";
 import { DoctorProfileAvatar } from "./doctor-profile-avatar";
-import { AddHospitalBranchModal } from "./doctor-portal-workflow";
 
 const SECONDARY_DATA_EVENTS = [
   "wonflow:demo-patients-changed",
@@ -466,7 +467,7 @@ function buildInboxItems(
 
 function PatientAvatar({ patient }: { patient: { displayName: string } }) {
   return (
-    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 text-xs font-black text-indigo-700 ring-1 ring-indigo-200">
+    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-linear-to-br from-indigo-100 to-violet-100 text-xs font-black text-indigo-700 ring-1 ring-indigo-200">
       {getInitials(patient.displayName)}
     </span>
   );
@@ -545,7 +546,7 @@ function MetricCard({
 
   return (
     <div className={`rounded-2xl border p-3 ${toneClass[tone]}`}>
-      <p className="text-[10px] font-black uppercase tracking-[0.1em] opacity-70">
+      <p className="text-[10px] font-black uppercase tracking-widest opacity-70">
         {label}
       </p>
       <p className="mt-1 text-2xl font-black text-slate-950">{value}</p>
@@ -648,7 +649,7 @@ function DoctorPatientDetailsModal({
     <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
       <div className="flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-indigo-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900">
         {/* Header Banner */}
-        <div className="relative bg-gradient-to-r from-indigo-700 via-indigo-600 to-violet-700 p-5 text-white">
+        <div className="relative bg-linear-to-r from-indigo-700 via-indigo-600 to-violet-700 p-5 text-white">
           <div className="flex items-start justify-between gap-3">
             <div className="flex items-center gap-3.5">
               <div className="grid size-14 place-items-center rounded-2xl bg-white/20 text-xl font-black text-white shadow-inner backdrop-blur-md">
@@ -933,17 +934,17 @@ function DoctorPatientPortalModal({
   useEffect(() => {
     if (!patient) return;
     queueMicrotask(() => {
-    setLoading(true);
-    setError("");
-    setProvisionResult(null);
-    void fetch(`/api/v1/patients/${patient.id}/portal-credentials`, { cache: "no-store" })
-      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed to load status"))))
-      .then((data: { hasPortalAccess: boolean; email?: string }) => {
-        setPortalStatus(data);
-        setEmailInput(data.email || "");
-      })
-      .catch((e) => setError(e instanceof Error ? e.message : "Error checking portal status"))
-      .finally(() => setLoading(false));
+      setLoading(true);
+      setError("");
+      setProvisionResult(null);
+      void fetch(`/api/v1/patients/${patient.id}/portal-credentials`, { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Failed to load status"))))
+        .then((data: { hasPortalAccess: boolean; email?: string }) => {
+          setPortalStatus(data);
+          setEmailInput(data.email || "");
+        })
+        .catch((e) => setError(e instanceof Error ? e.message : "Error checking portal status"))
+        .finally(() => setLoading(false));
     });
   }, [patient]);
 
@@ -986,15 +987,20 @@ function DoctorPatientPortalModal({
     }
   }
 
+  const mrn =
+    (patient as { mrNumber?: string; patientNumber?: string })?.mrNumber ||
+    (patient as { mrNumber?: string; patientNumber?: string })?.patientNumber ||
+    "";
+
   return (
     <div className="fixed inset-0 z-[150] flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-sm">
-      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-indigo-200 bg-white shadow-2xl">
-        <div className="flex items-center justify-between bg-gradient-to-r from-indigo-700 via-indigo-600 to-violet-700 px-5 py-4 text-white">
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-indigo-200 bg-white shadow-2xl dark:border-indigo-800 dark:bg-slate-900">
+        <div className="flex items-center justify-between bg-linear-to-r from-indigo-700 via-indigo-600 to-violet-700 px-5 py-4 text-white">
           <div className="flex items-center gap-2.5">
             <KeyRound className="size-5" />
             <div>
               <h3 className="text-base font-black">Patient Portal Access</h3>
-              <p className="text-xs text-indigo-100">{patient.displayName} · {patient.mrNumber}</p>
+              <p className="text-xs text-indigo-100">{patient.displayName} · {mrn}</p>
             </div>
           </div>
           <button
@@ -1008,31 +1014,42 @@ function DoctorPatientPortalModal({
 
         <div className="p-5 space-y-4">
           {error && (
-            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700">
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-300">
               {error}
             </div>
           )}
 
           {/* Current Status */}
-          <div className="flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50/60 p-3">
-            <div className="flex items-center gap-2">
-              <Globe className="text-indigo-600" size={16} />
+          <div className="flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50/60 p-3.5 dark:border-indigo-900/40 dark:bg-indigo-950/30">
+            <div className="flex items-center gap-2.5">
+              <Globe className="text-indigo-600 dark:text-indigo-400 shrink-0" size={18} />
               <div>
-                <div className="text-xs font-black text-slate-900">Portal Account Status</div>
-                <div className="text-[11px] text-slate-500">
-                  {loading
-                    ? "Checking portal status…"
-                    : portalStatus?.hasPortalAccess
-                    ? `Active (${portalStatus.email})`
-                    : "No active patient portal account"}
+                <div className="text-xs font-black text-slate-900 dark:text-white">Portal Account Status</div>
+                <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                  {loading ? (
+                    "Checking portal status…"
+                  ) : portalStatus?.hasPortalAccess ? (
+                    <div className="space-y-0.5">
+                      <p>
+                        <span className="font-semibold text-slate-500">Username / MR Number:</span>{" "}
+                        <strong className="font-mono text-indigo-700 dark:text-indigo-400">{mrn}</strong>
+                      </p>
+                      <p>
+                        <span className="font-semibold text-slate-500">Email:</span>{" "}
+                        <span className="font-medium text-slate-700 dark:text-slate-300">{portalStatus.email}</span>
+                      </p>
+                    </div>
+                  ) : (
+                    "No active patient portal account"
+                  )}
                 </div>
               </div>
             </div>
             <span
               className={`rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wider ${
                 portalStatus?.hasPortalAccess
-                  ? "bg-emerald-100 text-emerald-800"
-                  : "bg-amber-100 text-amber-800"
+                  ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300"
+                  : "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300"
               }`}
             >
               {portalStatus?.hasPortalAccess ? "🟢 Active" : "⚪ Not Created"}
@@ -1041,82 +1058,131 @@ function DoctorPatientPortalModal({
 
           {/* Newly Provisioned Credentials View */}
           {provisionResult ? (
-            <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50/80 to-teal-50/50 p-4 space-y-3">
-              <div className="flex items-center gap-2 text-xs font-black text-emerald-900">
-                <Check className="size-4 text-emerald-600" />
+            <div className="rounded-xl border border-emerald-200 bg-linear-to-br from-emerald-50/80 to-teal-50/50 p-4 space-y-3 dark:border-emerald-900/60 dark:bg-emerald-950/30">
+              <div className="flex items-center gap-2 text-xs font-black text-emerald-900 dark:text-emerald-300">
+                <Check className="size-4 text-emerald-600 dark:text-emerald-400" />
                 <span>Portal Credentials Ready &amp; Active!</span>
               </div>
               <div className="grid gap-2 text-[11px]">
-                <div className="flex items-center justify-between rounded-lg bg-white p-2 border border-emerald-100">
+                {/* Username / MR Number */}
+                <div className="flex items-center justify-between rounded-lg bg-white p-2.5 border border-emerald-200/80 shadow-xs dark:border-slate-800 dark:bg-slate-900">
                   <div>
-                    <span className="text-[9px] font-bold text-slate-400">Login URL</span>
-                    <div className="font-bold text-indigo-700">{typeof window !== "undefined" ? window.location.origin : ""}/patient</div>
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Username / MR Number</span>
+                    <div className="font-mono font-black text-sm text-indigo-700 dark:text-indigo-400">{mrn}</div>
                   </div>
                   <button
                     type="button"
-                    onClick={() => copyText((typeof window !== "undefined" ? window.location.origin : "") + "/patient", "url")}
-                    className="rounded p-1.5 text-slate-500 hover:bg-slate-100"
+                    onClick={() => copyText(mrn, "mrn")}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                   >
-                    {copiedField === "url" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                    {copiedField === "mrn" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                    <span className="text-[10px] font-bold">{copiedField === "mrn" ? "Copied" : "Copy"}</span>
                   </button>
                 </div>
 
-                <div className="flex items-center justify-between rounded-lg bg-white p-2 border border-emerald-100">
+                {/* Login Email */}
+                <div className="flex items-center justify-between rounded-lg bg-white p-2.5 border border-emerald-200/80 shadow-xs dark:border-slate-800 dark:bg-slate-900">
                   <div>
-                    <span className="text-[9px] font-bold text-slate-400">Login Email</span>
-                    <div className="font-bold text-slate-800">{provisionResult.email}</div>
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Login Email</span>
+                    <div className="font-bold text-slate-800 dark:text-slate-200">{provisionResult.email}</div>
                   </div>
                   <button
                     type="button"
                     onClick={() => copyText(provisionResult.email, "email")}
-                    className="rounded p-1.5 text-slate-500 hover:bg-slate-100"
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                   >
                     {copiedField === "email" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                    <span className="text-[10px] font-bold">{copiedField === "email" ? "Copied" : "Copy"}</span>
                   </button>
                 </div>
 
+                {/* Temporary Password */}
                 {provisionResult.temporaryPassword && (
-                  <div className="flex items-center justify-between rounded-lg bg-white p-2 border border-emerald-100">
+                  <div className="flex items-center justify-between rounded-lg bg-white p-2.5 border border-emerald-200/80 shadow-xs dark:border-slate-800 dark:bg-slate-900">
                     <div>
-                      <span className="text-[9px] font-bold text-slate-400">Temporary Password</span>
-                      <div className="font-mono font-black text-slate-900">{provisionResult.temporaryPassword}</div>
+                      <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Temporary Password</span>
+                      <div className="font-mono font-black text-slate-900 dark:text-white">{provisionResult.temporaryPassword}</div>
                     </div>
                     <button
                       type="button"
                       onClick={() => copyText(provisionResult.temporaryPassword!, "pw")}
-                      className="rounded p-1.5 text-slate-500 hover:bg-slate-100"
+                      className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                     >
                       {copiedField === "pw" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                      <span className="text-[10px] font-bold">{copiedField === "pw" ? "Copied" : "Copy"}</span>
                     </button>
                   </div>
                 )}
+
+                {/* Login URL */}
+                <div className="flex items-center justify-between rounded-lg bg-white p-2.5 border border-emerald-200/80 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+                  <div>
+                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Login URL</span>
+                    <div className="font-bold text-indigo-700 dark:text-indigo-400">
+                      {typeof window !== "undefined" ? window.location.origin : ""}/login?audience=patient
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyText((typeof window !== "undefined" ? window.location.origin : "") + "/login?audience=patient", "url")}
+                    className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    {copiedField === "url" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                    <span className="text-[10px] font-bold">{copiedField === "url" ? "Copied" : "Copy"}</span>
+                  </button>
+                </div>
               </div>
-              <p className="text-[10px] text-slate-600">
-                The patient can use these credentials to log in to <strong>/patient</strong> to view prescriptions, medical records, and join scheduled video consultations.
+              <p className="text-[10px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                The patient can use either their <strong>MR Number ({mrn})</strong> or their <strong>Login Email</strong> with this password to log in to the portal.
               </p>
             </div>
           ) : (
             /* Provisioning Form */
             <div className="space-y-3">
+              {/* Username / MR Number Display Field */}
               <div>
-                <label className="block text-xs font-bold text-slate-700">Patient Login Email (optional override)</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                  Username / MR Number (Patient Login ID)
+                </label>
+                <div className="mt-1 flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2 text-xs dark:border-indigo-900/60 dark:bg-indigo-950/40">
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-slate-500 dark:text-slate-400">MRN:</span>
+                    <span className="font-mono font-black text-indigo-950 dark:text-indigo-200">{mrn}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => copyText(mrn, "mrn_form")}
+                    className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-bold text-indigo-600 shadow-2xs hover:bg-indigo-50 dark:bg-slate-800 dark:text-indigo-300"
+                    title="Copy MR Number"
+                  >
+                    {copiedField === "mrn_form" ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                    <span>{copiedField === "mrn_form" ? "Copied" : "Copy MRN"}</span>
+                  </button>
+                </div>
+                <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                  Patients can sign in directly using this MR Number as their login username.
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Patient Login Email (optional override)</label>
                 <input
                   type="email"
                   value={emailInput}
                   onChange={(e) => setEmailInput(e.target.value)}
-                  placeholder={`${patient.mrNumber.toLowerCase()}@patient.wonflow.com`}
-                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold focus:border-indigo-500 focus:outline-none"
+                  placeholder={`${mrn.toLowerCase()}@patient.wonflow.com`}
+                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700">Custom Password (leave blank for secure auto-generation)</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Custom Password (leave blank for secure auto-generation)</label>
                 <input
                   type="text"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
                   placeholder="e.g. Patient#Pass2026 (or auto-generate)"
-                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-mono font-semibold focus:border-indigo-500 focus:outline-none"
+                  className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-xs font-mono font-semibold focus:border-indigo-500 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 />
               </div>
 
@@ -1130,8 +1196,8 @@ function DoctorPatientPortalModal({
                   {loading
                     ? "Generating…"
                     : portalStatus?.hasPortalAccess
-                    ? "Reset / Update Credentials"
-                    : "⚡ Generate Portal Credentials"}
+                      ? "Reset / Update Credentials"
+                      : "⚡ Generate Portal Credentials"}
                 </button>
               </div>
             </div>
@@ -1190,6 +1256,8 @@ export function DoctorPatientsPage() {
     return true;
   });
 
+  const patientPages = useWonFlowPagination(visiblePatients, 6);
+
   useEffect(() => {
     if (visiblePatients.length === 0) return;
     const unverified = visiblePatients.filter((p) => portalStatusMap[p.id] === undefined);
@@ -1203,7 +1271,7 @@ export function DoctorPatientsPage() {
             setPortalStatusMap((prev) => ({ ...prev, [p.id]: data }));
           }
         })
-        .catch(() => {});
+        .catch(() => { });
     });
   }, [visiblePatients, portalStatusMap]);
 
@@ -1311,7 +1379,7 @@ export function DoctorPatientsPage() {
         title="Patients Directory"
       />
 
-      <section className="relative overflow-hidden rounded-[20px] border border-indigo-100/80 bg-gradient-to-r from-white via-slate-50/60 to-indigo-50/70 p-3 shadow-[0_12px_32px_rgba(79,70,229,0.08)]">
+      <section className="relative overflow-hidden rounded-[20px] border border-indigo-100/80 bg-linear-to-r from-white via-slate-50/60 to-indigo-50/70 p-3 shadow-[0_12px_32px_rgba(79,70,229,0.08)]">
         <div className="pointer-events-none absolute -right-10 -top-16 h-32 w-32 rounded-full bg-violet-400/10 blur-2xl" />
         <div className="relative grid gap-2 lg:grid-cols-[minmax(240px,1fr)_auto] lg:items-center">
           <label className="relative block">
@@ -1323,7 +1391,10 @@ export function DoctorPatientsPage() {
             />
             <input
               className={`${INPUT_CLASS_NAME} pl-9`}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                patientPages.setPage(1);
+              }}
               placeholder="Search name, MR number, CNIC / passport or mobile"
               type="search"
               value={query}
@@ -1332,13 +1403,15 @@ export function DoctorPatientsPage() {
           <div className="flex flex-wrap gap-1.5">
             {filters.map((item) => (
               <button
-                className={`min-h-9 rounded-xl px-3 text-[11px] font-black transition ${
-                  filter === item.value
+                className={`min-h-9 rounded-xl px-3 text-[11px] font-black transition ${filter === item.value
                     ? "bg-indigo-600 text-white"
                     : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-                }`}
+                  }`}
                 key={item.value}
-                onClick={() => setFilter(item.value)}
+                onClick={() => {
+                  setFilter(item.value);
+                  patientPages.setPage(1);
+                }}
                 type="button"
               >
                 {item.label}
@@ -1373,11 +1446,15 @@ export function DoctorPatientsPage() {
         </section>
       ) : null}
 
-      <div className="flex items-center justify-between gap-3 rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 shadow-sm backdrop-blur">
+      <div
+        className="flex items-center justify-between gap-3 rounded-[18px] border border-slate-200/70 bg-white/70 px-4 py-3 shadow-sm backdrop-blur"
+        id="doctor-patients-directory-header"
+      >
         <div>
           <h2 className="text-sm font-black text-slate-950">Patient Directory</h2>
           <p className="text-[11px] text-slate-500">
-            {visiblePatients.length} of {patients.length} patients shown · Click any patient card for details &amp; clinical actions
+            Showing {patientPages.firstShown}–{patientPages.lastShown} of {patientPages.total} {patientPages.total === 1 ? "patient" : "patients"}
+            {visiblePatients.length !== patients.length ? ` (${patients.length} total in records)` : ""} · Page {patientPages.page} of {patientPages.pageCount}
           </p>
         </div>
         <StatusPill tone="indigo">Hospital Records</StatusPill>
@@ -1396,168 +1473,185 @@ export function DoctorPatientsPage() {
           title={patients.length === 0 ? "No patients found" : "No matching patients"}
         />
       ) : (
-        <div className="grid gap-3.5 xl:grid-cols-2">
-          {visiblePatients.map((patient) => {
-            const portalAccessInfo = portalStatusMap[patient.id];
-            return (
-              <article
-                className="group relative isolate cursor-pointer overflow-hidden rounded-[22px] border border-indigo-100/90 bg-gradient-to-br from-white via-white to-indigo-50/50 p-4 shadow-[0_12px_30px_rgba(79,70,229,0.06)] transition duration-300 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-[0_20px_45px_rgba(79,70,229,0.14)] focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                id={`doctor-patient-${patient.id}`}
-                key={patient.id}
-                onClick={() => setSelectedPatientDetails(patient)}
-                tabIndex={0}
-              >
-                <div className="flex items-start gap-3.5">
-                  <PatientAvatar patient={patient} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <h3 className="truncate text-sm font-black text-slate-950 group-hover:text-indigo-600 transition">
-                            {patient.displayName}
-                          </h3>
-                          <span className="rounded-md bg-indigo-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
-                            {patient.mrNumber}
-                          </span>
+        <>
+          <div className="grid gap-3.5 xl:grid-cols-2">
+            {patientPages.visible.map((patient) => {
+              const portalAccessInfo = portalStatusMap[patient.id];
+              return (
+                <article
+                  className="group relative isolate cursor-pointer overflow-hidden rounded-[22px] border border-indigo-100/90 bg-linear-to-br from-white via-white to-indigo-50/50 p-4 shadow-[0_12px_30px_rgba(79,70,229,0.06)] transition duration-300 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-[0_20px_45px_rgba(79,70,229,0.14)] focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  id={`doctor-patient-${patient.id}`}
+                  key={patient.id}
+                  onClick={() => setSelectedPatientDetails(patient)}
+                  tabIndex={0}
+                >
+                  <div className="flex items-start gap-3.5">
+                    <PatientAvatar patient={patient} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2">
+                            <h3 className="truncate text-sm font-black text-slate-950 group-hover:text-indigo-600 transition">
+                              {patient.displayName}
+                            </h3>
+                            <span className="rounded-md bg-indigo-50 px-1.5 py-0.5 font-mono text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
+                              {patient.mrNumber}
+                            </span>
+                          </div>
+                          <p className="mt-0.5 text-[11px] text-slate-500 font-medium">
+                            {patient.age === undefined ? "Age not recorded" : `${patient.age} yrs`} ·{" "}
+                            {humanize(patient.gender)} · {patient.mobileNumber || "No mobile"}
+                          </p>
                         </div>
-                        <p className="mt-0.5 text-[11px] text-slate-500 font-medium">
-                          {patient.age === undefined ? "Age not recorded" : `${patient.age} yrs`} ·{" "}
-                          {humanize(patient.gender)} · {patient.mobileNumber || "No mobile"}
-                        </p>
+                        {patient.unreadReports > 0 ? (
+                          <StatusPill tone="amber">
+                            {patient.unreadReports} unread report
+                            {patient.unreadReports === 1 ? "" : "s"}
+                          </StatusPill>
+                        ) : null}
                       </div>
-                      {patient.unreadReports > 0 ? (
-                        <StatusPill tone="amber">
-                          {patient.unreadReports} unread report
-                          {patient.unreadReports === 1 ? "" : "s"}
-                        </StatusPill>
+
+                      {patient.referralSource ? (
+                        <span className="mt-1.5 inline-block rounded-full bg-slate-500/12 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300">
+                          Source: {REFERRAL_SOURCE_LABELS[patient.referralSource] ?? humanize(patient.referralSource)}
+                        </span>
                       ) : null}
                     </div>
-
-                    {patient.referralSource ? (
-                      <span className="mt-1.5 inline-block rounded-full bg-slate-500/12 px-2 py-0.5 text-[9px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300">
-                        Source: {REFERRAL_SOURCE_LABELS[patient.referralSource] ?? humanize(patient.referralSource)}
-                      </span>
-                    ) : null}
                   </div>
-                </div>
 
-                {/* Patient Portal Status & Quick Toggle */}
-                <div
-                  className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-indigo-100/70 bg-gradient-to-r from-indigo-50/60 to-white p-2.5 dark:border-indigo-400/25 dark:from-indigo-500/12 dark:to-transparent"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <div className="flex items-center gap-1.5 text-[11px]">
-                    <Globe className="text-indigo-600 size-3.5" />
-                    {portalAccessInfo?.hasPortalAccess ? (
-                      <span className="inline-flex items-center gap-1.5 font-bold text-emerald-700 dark:text-emerald-300">
-                        <span className="size-2 rounded-full bg-emerald-500" />
-                        Portal Active ({portalAccessInfo.email || "Registered"})
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 font-bold text-slate-500 dark:text-slate-300">
-                        <span className="size-2 rounded-full bg-slate-300" />
-                        Portal Not Created
-                      </span>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setPortalModalPatient(patient);
-                    }}
-                    className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-black transition ${
-                      portalAccessInfo?.hasPortalAccess
-                        ? "bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50 shadow-sm dark:bg-indigo-500/15 dark:text-indigo-200 dark:border-indigo-400/30 dark:hover:bg-indigo-500/25"
-                        : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
-                    }`}
+                  {/* Patient Portal Status & Quick Toggle */}
+                  <div
+                    className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-[14px] border border-indigo-100/70 bg-linear-to-r from-indigo-50/60 to-white p-2.5 dark:border-indigo-400/25 dark:from-indigo-500/12 dark:to-transparent"
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <KeyRound size={11} />
-                    {portalAccessInfo?.hasPortalAccess ? "Manage Portal" : "+ Create Portal Access"}
-                  </button>
-                </div>
-
-                <dl className="mt-3 grid gap-3 rounded-[15px] border border-white bg-gradient-to-r from-slate-50 via-indigo-50/50 to-cyan-50/45 p-3 shadow-inner sm:grid-cols-3 dark:border-white/10 dark:from-white/[0.04] dark:via-indigo-500/10 dark:to-cyan-500/10">
-                  <div>
-                    <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
-                      Last visit
-                    </dt>
-                    <dd className="mt-1 text-[11px] font-bold text-slate-700">
-                      {formatDate(patient.lastActivityAt)}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
-                      Last diagnosis
-                    </dt>
-                    <dd className="mt-1 line-clamp-2 text-[11px] font-bold text-slate-700">
-                      {patient.lastDiagnosis ?? "Not documented"}
-                    </dd>
-                  </div>
-                  <div>
-                    <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
-                      Next appointment
-                    </dt>
-                    <dd className="mt-1 text-[11px] font-bold text-slate-700">
-                      {patient.nextAppointment
-                        ? `${formatDate(patient.nextAppointment.appointmentDate)} · ${patient.nextAppointment.slotStart}`
-                        : "None scheduled"}
-                    </dd>
-                  </div>
-                </dl>
-
-                {/* Direct Action Buttons on Card */}
-                <div
-                  className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100/80 pt-3 dark:border-slate-800"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <span className="text-[10px] font-bold text-slate-500">
-                    {patient.encounterCount} encounter{patient.encounterCount === 1 ? "" : "s"}
-                  </span>
-                  <div className="flex flex-wrap items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 text-[11px]">
+                      <Globe className="text-indigo-600 size-3.5" />
+                      {portalAccessInfo?.hasPortalAccess ? (
+                        <span className="inline-flex items-center gap-1.5 font-bold text-emerald-700 dark:text-emerald-300">
+                          <span className="size-2 rounded-full bg-emerald-500" />
+                          Portal Active ({portalAccessInfo.email || "Registered"})
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 font-bold text-slate-500 dark:text-slate-300">
+                          <span className="size-2 rounded-full bg-slate-300" />
+                          Portal Not Created
+                        </span>
+                      )}
+                    </div>
                     <button
-                      className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[10px] font-bold text-slate-700 shadow-xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                      onClick={() => setSelectedPatientDetails(patient)}
                       type="button"
-                    >
-                      <Eye size={12} className="text-slate-500" />
-                      Details &amp; History
-                    </button>
-
-                    <Link
-                      className="inline-flex min-h-8 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 text-[10px] font-black text-white hover:bg-emerald-700 shadow-xs"
-                      href={`/doctor/consultations?patientId=${encodeURIComponent(patient.id)}`}
-                    >
-                      <Stethoscope size={12} />
-                      Consult
-                    </Link>
-
-                    <Link
-                      className="inline-flex min-h-8 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 text-[10px] font-black text-white hover:bg-indigo-700 shadow-xs"
-                      href={`/doctor/register-patient?patientId=${encodeURIComponent(patient.id)}`}
-                    >
-                      <CalendarPlus size={12} />
-                      Book Visit
-                    </Link>
-
-                    <button
-                      className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-rose-200 bg-rose-50/80 px-2 text-[10px] font-bold text-rose-700 shadow-xs hover:bg-rose-100 hover:border-rose-300 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 transition"
                       onClick={(e) => {
                         e.stopPropagation();
-                        setPatientToDelete(patient);
+                        setPortalModalPatient(patient);
                       }}
-                      title="Delete Patient from Directory"
-                      type="button"
+                      className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[10px] font-black transition ${portalAccessInfo?.hasPortalAccess
+                          ? "bg-white text-indigo-700 border border-indigo-200 hover:bg-indigo-50 shadow-sm dark:bg-indigo-500/15 dark:text-indigo-200 dark:border-indigo-400/30 dark:hover:bg-indigo-500/25"
+                          : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-sm"
+                        }`}
                     >
-                      <Trash2 size={11} className="text-rose-600" />
-                      Delete
+                      <KeyRound size={11} />
+                      {portalAccessInfo?.hasPortalAccess ? "Manage Portal" : "+ Create Portal Access"}
                     </button>
                   </div>
-                </div>
-              </article>
-            );
-          })}
-        </div>
+
+                  <dl className="mt-3 grid gap-3 rounded-[15px] border border-white bg-linear-to-r from-slate-50 via-indigo-50/50 to-cyan-50/45 p-3 shadow-inner sm:grid-cols-3 dark:border-white/10 dark:from-white/4 dark:via-indigo-500/10 dark:to-cyan-500/10">
+                    <div>
+                      <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                        Last visit
+                      </dt>
+                      <dd className="mt-1 text-[11px] font-bold text-slate-700">
+                        {formatDate(patient.lastActivityAt)}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                        Last diagnosis
+                      </dt>
+                      <dd className="mt-1 line-clamp-2 text-[11px] font-bold text-slate-700">
+                        {patient.lastDiagnosis ?? "Not documented"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt className="text-[9px] font-black uppercase tracking-wide text-slate-400">
+                        Next appointment
+                      </dt>
+                      <dd className="mt-1 text-[11px] font-bold text-slate-700">
+                        {patient.nextAppointment
+                          ? `${formatDate(patient.nextAppointment.appointmentDate)} · ${patient.nextAppointment.slotStart}`
+                          : "None scheduled"}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  {/* Direct Action Buttons on Card */}
+                  <div
+                    className="mt-3.5 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100/80 pt-3 dark:border-slate-800"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <span className="text-[10px] font-bold text-slate-500">
+                      {patient.encounterCount} encounter{patient.encounterCount === 1 ? "" : "s"}
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button
+                        className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-[10px] font-bold text-slate-700 shadow-xs hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        onClick={() => setSelectedPatientDetails(patient)}
+                        type="button"
+                      >
+                        <Eye size={12} className="text-slate-500" />
+                        Details &amp; History
+                      </button>
+
+                      <Link
+                        className="inline-flex min-h-8 items-center gap-1 rounded-lg bg-emerald-600 px-2.5 text-[10px] font-black text-white hover:bg-emerald-700 shadow-xs"
+                        href={`/doctor/consultations?patientId=${encodeURIComponent(patient.id)}`}
+                      >
+                        <Stethoscope size={12} />
+                        Consult
+                      </Link>
+
+                      <Link
+                        className="inline-flex min-h-8 items-center gap-1 rounded-lg bg-indigo-600 px-2.5 text-[10px] font-black text-white hover:bg-indigo-700 shadow-xs"
+                        href={`/doctor/register-patient?patientId=${encodeURIComponent(patient.id)}`}
+                      >
+                        <CalendarPlus size={12} />
+                        Book Visit
+                      </Link>
+
+                      <button
+                        className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-rose-200 bg-rose-50/80 px-2 text-[10px] font-bold text-rose-700 shadow-xs hover:bg-rose-100 hover:border-rose-300 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300 transition"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setPatientToDelete(patient);
+                        }}
+                        title="Delete Patient from Directory"
+                        type="button"
+                      >
+                        <Trash2 size={11} className="text-rose-600" />
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+
+          <WonFlowPagination
+            firstShown={patientPages.firstShown}
+            lastShown={patientPages.lastShown}
+            noun="patients"
+            onPageChange={(nextPage) => {
+              patientPages.setPage(nextPage);
+              const tableHeader = document.getElementById("doctor-patients-directory-header");
+              if (tableHeader) {
+                tableHeader.scrollIntoView({ behavior: "smooth", block: "start" });
+              }
+            }}
+            page={patientPages.page}
+            pageCount={patientPages.pageCount}
+            total={patientPages.total}
+          />
+        </>
       )}
 
       {/* Comprehensive Patient Details & Action Hub Modal */}
@@ -1793,11 +1887,10 @@ export function DoctorInboxPage() {
             ] as const
           ).map(([value, label]) => (
             <button
-              className={`min-h-9 rounded-xl px-3 text-[11px] font-black ${
-                filter === value
+              className={`min-h-9 rounded-xl px-3 text-[11px] font-black ${filter === value
                   ? "bg-indigo-600 text-white"
                   : "bg-slate-100 text-slate-600 hover:bg-slate-200"
-              }`}
+                }`}
               key={value}
               onClick={() => setFilter(value)}
               type="button"
@@ -1846,11 +1939,10 @@ export function DoctorInboxPage() {
                 key={`${item.kind}-${item.id}`}
               >
                 <span
-                  className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${
-                    item.kind === "laboratory"
+                  className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${item.kind === "laboratory"
                       ? "bg-cyan-50 text-cyan-700"
                       : "bg-violet-50 text-violet-700"
-                  }`}
+                    }`}
                 >
                   {item.kind === "laboratory" ? (
                     <FlaskConical size={18} />
@@ -1996,7 +2088,7 @@ export function DoctorHistoryPage() {
         />
       ) : (
         <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-          <div className="hidden grid-cols-[130px_minmax(180px,1fr)_minmax(220px,1.2fr)_150px_130px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 text-[9px] font-black uppercase tracking-[0.1em] text-slate-400 lg:grid">
+          <div className="hidden grid-cols-[130px_minmax(180px,1fr)_minmax(220px,1.2fr)_150px_130px] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-2 text-[9px] font-black uppercase tracking-widest text-slate-400 lg:grid">
             <span>Date</span>
             <span>Patient</span>
             <span>Diagnosis / reason</span>
@@ -2150,11 +2242,10 @@ export function DoctorFollowUpsPage() {
             ] as const
           ).map(([value, label]) => (
             <button
-              className={`min-h-9 rounded-xl px-3 text-[11px] font-black ${
-                filter === value
+              className={`min-h-9 rounded-xl px-3 text-[11px] font-black ${filter === value
                   ? "bg-indigo-600 text-white"
                   : "bg-slate-100 text-slate-600"
-              }`}
+                }`}
               key={value}
               onClick={() => setFilter(value)}
               type="button"
@@ -2269,6 +2360,91 @@ export function DoctorFollowUpsPage() {
   );
 }
 
+const PROFILE_FIELD_LABELS: Record<string, string> = {
+  profileImageData: "Profile Photo",
+  displayName: "Full Name",
+  title: "Professional Title",
+  specialtyName: "Specialty",
+  registrationNumber: "Registration Number",
+  qualifications: "Qualifications",
+  contactPhone: "Contact Phone",
+  primaryBranchId: "Primary Location",
+  durationMinutes: "Consultation Duration",
+  biography: "Professional Biography",
+};
+
+function processProfilePhoto(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const validMimes = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    const validExts = ["jpg", "jpeg", "png", "webp"];
+    if (!validMimes.includes(file.type.toLowerCase()) && (!ext || !validExts.includes(ext))) {
+      return reject(new Error("Please upload a JPG, PNG or WebP image."));
+    }
+    if (file.size > 15 * 1024 * 1024) {
+      return reject(new Error("The selected photo is larger than 15 MB. Please choose a smaller photo."));
+    }
+
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("The selected photo could not be read."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("Failed to decode image file."));
+      img.onload = () => {
+        try {
+          const maxDim = 400; // Optimal 400x400 square avatar for retina displays (~30-50 KB)
+          const width = img.width;
+          const height = img.height;
+
+          // Center-crop to square for profile avatar
+          const minEdge = Math.min(width, height);
+          const sx = (width - minEdge) / 2;
+          const sy = (height - minEdge) / 2;
+
+          const canvas = document.createElement("canvas");
+          const targetSize = Math.min(minEdge, maxDim);
+          canvas.width = targetSize;
+          canvas.height = targetSize;
+
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            const rawResult = String(reader.result);
+            if (rawResult.length > 1_500_000) {
+              return reject(new Error("The photo is too large (over 1 MB). Please choose a smaller photo."));
+            }
+            return resolve(rawResult);
+          }
+
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(img, sx, sy, minEdge, minEdge, 0, 0, targetSize, targetSize);
+
+          let dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+
+          // If still larger than 800KB, re-encode with lower quality
+          if (dataUrl.length > 800_000) {
+            dataUrl = canvas.toDataURL("image/jpeg", 0.70);
+          }
+
+          if (dataUrl.length > 1_500_000) {
+            return reject(new Error("The photo could not be compressed below 1 MB. Please choose a smaller image."));
+          }
+
+          resolve(dataUrl);
+        } catch {
+          const rawResult = String(reader.result);
+          if (rawResult.length > 1_500_000) {
+            return reject(new Error("The photo is too large (over 1 MB). Please choose a smaller JPG or PNG image."));
+          }
+          resolve(rawResult);
+        }
+      };
+      img.src = String(reader.result);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function DoctorProfileEditor({
   doctor,
   onSaved,
@@ -2286,71 +2462,281 @@ function DoctorProfileEditor({
     contactPhone: doctor.contactPhone ?? "",
     biography: doctor.biography ?? "",
     primaryBranchId: doctor.primaryBranchId,
-    durationMinutes: doctor.durationMinutes ?? 15,
+    durationMinutes: doctor.durationMinutes && doctor.durationMinutes >= 5 ? String(doctor.durationMinutes) : "15",
     publiclyBookable: doctor.publiclyBookable ?? false,
     profileImageData: doctor.profileImageUrl ?? "",
   });
   const [saving, setSaving] = useState(false);
-  const [showAddBranchModal, setShowAddBranchModal] = useState(false);
+  const [processingPhoto, setProcessingPhoto] = useState(false);
   const [message, setMessage] = useState<string>();
   const [error, setError] = useState<string>();
+  const [generalError, setGeneralError] = useState<{ message: string; targetField?: string } | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // Field refs for auto-focus and auto-scroll
+  const photoRef = useRef<HTMLDivElement>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+  const titleRef = useRef<HTMLInputElement>(null);
+  const registrationRef = useRef<HTMLInputElement>(null);
+  const qualificationsRef = useRef<HTMLInputElement>(null);
+  const phoneRef = useRef<HTMLInputElement>(null);
+  const branchRef = useRef<HTMLSelectElement>(null);
+  const durationRef = useRef<HTMLInputElement>(null);
+  const biographyRef = useRef<HTMLTextAreaElement>(null);
+
+  function scrollToField(fieldKey: string) {
+    const refMap: Record<string, React.RefObject<HTMLElement | null>> = {
+      profileImageData: photoRef,
+      photo: photoRef,
+      displayName: nameRef,
+      name: nameRef,
+      title: titleRef,
+      registrationNumber: registrationRef,
+      qualifications: qualificationsRef,
+      contactPhone: phoneRef,
+      phone: phoneRef,
+      primaryBranchId: branchRef,
+      branch: branchRef,
+      durationMinutes: durationRef,
+      duration: durationRef,
+      biography: biographyRef,
+    };
+    const targetRef = refMap[fieldKey];
+    if (targetRef?.current) {
+      targetRef.current.scrollIntoView({ behavior: "smooth", block: "center" });
+      setTimeout(() => {
+        if (targetRef.current && "focus" in targetRef.current && typeof targetRef.current.focus === "function") {
+          targetRef.current.focus();
+        }
+      }, 150);
+    }
+  }
 
   function update<Key extends keyof typeof form>(key: Key, value: (typeof form)[Key]) {
     setForm((current) => ({ ...current, [key]: value }));
     setMessage(undefined);
     setError(undefined);
+    setGeneralError(null);
+    setFieldErrors((prev) => {
+      if (!prev[key]) return prev;
+      const copy = { ...prev };
+      delete copy[key];
+      return copy;
+    });
   }
 
-  function selectPhoto(file?: File) {
+  async function selectPhoto(file?: File) {
     if (!file) return;
-    if (!(["image/jpeg", "image/png", "image/webp"] as string[]).includes(file.type) || file.size > 1_000_000) {
-      setError("Choose a JPG, PNG or WebP image smaller than 1 MB.");
-      return;
+    setFieldErrors((prev) => {
+      const copy = { ...prev };
+      delete copy.profileImageData;
+      return copy;
+    });
+    setError(undefined);
+    setGeneralError(null);
+    setProcessingPhoto(true);
+    try {
+      const dataUrl = await processProfilePhoto(file);
+      update("profileImageData", dataUrl);
+    } catch (caught) {
+      const msg = caught instanceof Error ? caught.message : "The selected photo could not be read.";
+      setFieldErrors((prev) => ({ ...prev, profileImageData: msg }));
+      setGeneralError({ message: msg, targetField: "profileImageData" });
+      scrollToField("profileImageData");
+    } finally {
+      setProcessingPhoto(false);
     }
-    const reader = new FileReader();
-    reader.onload = () => update("profileImageData", String(reader.result));
-    reader.onerror = () => setError("The selected photo could not be read.");
-    reader.readAsDataURL(file);
   }
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSaving(true);
     setMessage(undefined);
     setError(undefined);
+    setGeneralError(null);
+    setFieldErrors({});
+
+    // Comprehensive client-side validations with direct field targeting
+    if (form.profileImageData && form.profileImageData.length > 1_500_000) {
+      const msg = "The profile photo exceeds 1 MB. Please remove it or choose a smaller image.";
+      setFieldErrors({ profileImageData: msg });
+      setGeneralError({ message: msg, targetField: "profileImageData" });
+      scrollToField("profileImageData");
+      return;
+    }
+
+    const trimmedName = form.displayName.trim();
+    if (trimmedName.length < 2) {
+      const msg = "Please enter the doctor's full name (minimum 2 characters).";
+      setFieldErrors({ displayName: msg });
+      setGeneralError({ message: msg, targetField: "displayName" });
+      scrollToField("displayName");
+      return;
+    }
+
+    if (branches.length > 0 && !form.primaryBranchId) {
+      const msg = "Please select a primary hospital location.";
+      setFieldErrors({ primaryBranchId: msg });
+      setGeneralError({ message: msg, targetField: "primaryBranchId" });
+      scrollToField("primaryBranchId");
+      return;
+    }
+
+    const parsed = parseInt(String(form.durationMinutes), 10);
+    if (isNaN(parsed) || parsed < 5 || parsed > 480) {
+      const msg = "Consultation duration must be between 5 and 480 minutes.";
+      setFieldErrors({ durationMinutes: msg });
+      setGeneralError({ message: msg, targetField: "durationMinutes" });
+      scrollToField("durationMinutes");
+      return;
+    }
+
+    if (form.registrationNumber && form.registrationNumber.trim().length > 150) {
+      const msg = "Registration number is too long (maximum 150 characters).";
+      setFieldErrors({ registrationNumber: msg });
+      setGeneralError({ message: msg, targetField: "registrationNumber" });
+      scrollToField("registrationNumber");
+      return;
+    }
+
+    if (form.contactPhone && form.contactPhone.trim().length > 80) {
+      const msg = "Contact phone number is too long (maximum 80 characters).";
+      setFieldErrors({ contactPhone: msg });
+      setGeneralError({ message: msg, targetField: "contactPhone" });
+      scrollToField("contactPhone");
+      return;
+    }
+
+    if (form.biography && form.biography.length > 5000) {
+      const msg = "Professional biography is too long (maximum 5000 characters).";
+      setFieldErrors({ biography: msg });
+      setGeneralError({ message: msg, targetField: "biography" });
+      scrollToField("biography");
+      return;
+    }
+
+    const durationMinutes = Math.min(480, Math.max(5, parsed));
+    setSaving(true);
+
     try {
       await phaseOneApi<{ profile: DoctorPortalIdentity }>("/api/v1/doctor/profile", {
         method: "PATCH",
-        body: JSON.stringify({ ...form, profileImageData: form.profileImageData || null }),
+        body: JSON.stringify({
+          ...form,
+          durationMinutes,
+          profileImageData: form.profileImageData || null,
+        }),
       });
       setMessage("Your profile has been saved and updated across the doctor portal.");
-      // The application shell keeps the profile photo outside the session, so
-      // tell it to re-read the new one.
       window.dispatchEvent(new Event(WONFLOW_AVATAR_CHANGED_EVENT));
       window.setTimeout(onSaved, 500);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Your profile could not be saved.");
+    } catch (caught: unknown) {
+      const rawErrorMsg = caught instanceof Error ? caught.message : "Your profile could not be saved.";
+      const errorCode =
+        caught && typeof caught === "object" && "code" in caught
+          ? (caught as { code?: string }).code
+          : undefined;
+
+      let targetField: string | undefined;
+      let fieldMsg = rawErrorMsg;
+
+      // 1. Explicit server error code & keyword matching
+      if (
+        errorCode === "invalid-profile-photo" ||
+        errorCode === "payload-too-large" ||
+        errorCode === "invalid-json" ||
+        /image|photo|avatar|file size|1 MB|payload/i.test(rawErrorMsg)
+      ) {
+        targetField = "profileImageData";
+        fieldMsg = /size|large|payload/i.test(rawErrorMsg)
+          ? "The uploaded photo is too large for the server. Please select a smaller photo (under 1 MB)."
+          : rawErrorMsg || "Please upload a valid JPG, PNG or WebP photo.";
+      } else if (
+        errorCode === "invalid-doctor-name" ||
+        /doctor.*name|full name|display\s*name/i.test(rawErrorMsg)
+      ) {
+        targetField = "displayName";
+        fieldMsg = rawErrorMsg || "Please enter the doctor's full name (minimum 2 characters).";
+      } else if (
+        errorCode === "invalid-doctor-branch" ||
+        /location|branch/i.test(rawErrorMsg)
+      ) {
+        targetField = "primaryBranchId";
+        fieldMsg = rawErrorMsg || "Please select a valid hospital location.";
+      } else if (
+        errorCode === "invalid-consultation-duration" ||
+        /duration|minute/i.test(rawErrorMsg)
+      ) {
+        targetField = "durationMinutes";
+        fieldMsg = rawErrorMsg || "Consultation duration must be between 5 and 480 minutes.";
+      } else if (
+        errorCode === "duplicate-registration-number" ||
+        /registration\s*number|already\s*in\s*use/i.test(rawErrorMsg)
+      ) {
+        targetField = "registrationNumber";
+        fieldMsg = rawErrorMsg || "This registration number is already in use by another practitioner.";
+      } else if (/phone|contact/i.test(rawErrorMsg)) {
+        targetField = "contactPhone";
+      } else if (/qualification/i.test(rawErrorMsg)) {
+        targetField = "qualifications";
+      } else if (/biography|bio/i.test(rawErrorMsg)) {
+        targetField = "biography";
+      } else if (/title/i.test(rawErrorMsg)) {
+        targetField = "title";
+      }
+
+      // 2. Intelligent inference when error is generic (e.g. "The request could not be completed.")
+      if (!targetField) {
+        const photoChanged = form.profileImageData !== (doctor.profileImageUrl ?? "");
+        if (photoChanged && form.profileImageData) {
+          targetField = "profileImageData";
+          fieldMsg =
+            "The uploaded photo could not be accepted by the server. Please try removing the photo or choosing a smaller JPG/PNG image.";
+        } else if (!form.displayName || form.displayName.trim().length < 2) {
+          targetField = "displayName";
+          fieldMsg = "Please enter the doctor's full name (minimum 2 characters).";
+        } else if (branches.length > 0 && !form.primaryBranchId) {
+          targetField = "primaryBranchId";
+          fieldMsg = "Please select a valid hospital location.";
+        } else {
+          // If a photo was attached, it is the primary suspect for server 500 / unhandled error
+          targetField = form.profileImageData ? "profileImageData" : "displayName";
+          fieldMsg =
+            form.profileImageData
+              ? "The request could not be completed. The uploaded photo might be too large for the server. Try removing the photo or choosing a smaller JPG/PNG file."
+              : rawErrorMsg;
+        }
+      }
+
+      setFieldErrors({ [targetField]: fieldMsg });
+      setGeneralError({ message: fieldMsg, targetField });
+      setError(fieldMsg);
+      scrollToField(targetField);
     } finally {
       setSaving(false);
     }
   }
 
-  const field = "mt-1 h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100";
+  const getFieldClass = (key: string, extra = "") =>
+    `mt-1 h-10 w-full rounded-xl border px-3 text-xs font-semibold text-slate-800 outline-none transition ${
+      fieldErrors[key]
+        ? "border-rose-400 bg-rose-50/25 ring-2 ring-rose-200 focus:border-rose-500 focus:ring-rose-200"
+        : "border-slate-200 bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+    } ${extra}`;
+
   const label = "text-[10px] font-black uppercase tracking-wide text-slate-500";
 
   return (
     <form className="p-5" onSubmit={save}>
-      <AddHospitalBranchModal
-        isOpen={showAddBranchModal}
-        onClose={() => setShowAddBranchModal(false)}
-        onCreated={(newBranch) => {
-          update("primaryBranchId", newBranch.id);
-          setMessage(`Branch "${newBranch.name}" created and set as primary location.`);
-          onSaved();
-        }}
-      />
       <div className="grid items-start gap-6 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="rounded-[20px] border border-slate-200 bg-slate-50/70 p-5 text-center">
+        <aside
+          ref={photoRef}
+          tabIndex={-1}
+          className={`rounded-[20px] border p-5 text-center transition outline-none ${
+            fieldErrors.profileImageData
+              ? "border-rose-300 bg-rose-50/40 ring-2 ring-rose-200"
+              : "border-slate-200 bg-slate-50/70"
+          }`}
+        >
           <DoctorProfileAvatar
             className="mx-auto h-32 w-32 rounded-full text-2xl shadow-[0_14px_34px_rgba(79,70,229,0.18)] ring-4 ring-white"
             name={form.displayName}
@@ -2359,20 +2745,29 @@ function DoctorProfileEditor({
           <h3 className="mt-4 text-sm font-black text-slate-950">{form.displayName || "Doctor profile"}</h3>
           <p className="mt-1 text-[10px] font-semibold text-slate-500">{form.specialtyName || "Add your specialty"}</p>
           <label className="mt-4 inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-xl border border-indigo-200 bg-white px-4 text-xs font-black text-indigo-700 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50">
-            <Upload size={15} /> Upload photo
+            <Upload size={15} /> {processingPhoto ? "Optimizing..." : "Upload photo"}
             <input
               accept="image/jpeg,image/png,image/webp"
               className="sr-only"
+              disabled={processingPhoto}
               onChange={(event) => selectPhoto(event.target.files?.[0])}
               type="file"
             />
           </label>
           {form.profileImageData ? (
-            <button className="mt-2 block w-full text-[10px] font-bold text-rose-600" onClick={() => update("profileImageData", "")} type="button">
+            <button className="mt-2 block w-full text-[10px] font-bold text-rose-600 cursor-pointer" onClick={() => update("profileImageData", "")} type="button">
               Remove photo
             </button>
           ) : null}
-          <p className="mt-3 text-[9px] leading-4 text-slate-500">JPG, PNG or WebP. Maximum size 1 MB.</p>
+          <p className="mt-3 text-[9px] leading-4 text-slate-500">JPG, PNG or WebP. Automatically optimized.</p>
+          {fieldErrors.profileImageData ? (
+            <div className="mt-2.5 rounded-xl border border-rose-200 bg-white p-2.5 text-left text-[11px] font-bold text-rose-700 shadow-xs">
+              <div className="flex items-start gap-1.5">
+                <AlertCircle size={14} className="shrink-0 text-rose-500 mt-0.5" />
+                <span>{fieldErrors.profileImageData}</span>
+              </div>
+            </div>
+          ) : null}
         </aside>
 
         <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2">
@@ -2380,49 +2775,219 @@ function DoctorProfileEditor({
             <h3 className="text-sm font-black text-slate-950">Professional information</h3>
             <p className="mt-1 text-[10px] text-slate-500">Details patients and hospital teams use to identify you.</p>
           </div>
-          <label className={label}>Full name<input className={field} onChange={(event) => update("displayName", event.target.value)} required value={form.displayName} /></label>
-          <label className={label}>Professional title<input className={field} onChange={(event) => update("title", event.target.value)} value={form.title} /></label>
-          <label className={label}>Specialty / department<input className={`${field} bg-slate-50 text-slate-500`} disabled title="Assigned by the hospital administrator" value={form.specialtyName} /></label>
-          <label className={label}>Registration number<input className={field} onChange={(event) => update("registrationNumber", event.target.value)} value={form.registrationNumber} /></label>
-          <label className={label}>Qualifications<input className={field} onChange={(event) => update("qualifications", event.target.value)} placeholder="MBBS, FCPS, MRCP..." value={form.qualifications} /></label>
-          <label className={label}>Contact phone<input className={field} onChange={(event) => update("contactPhone", event.target.value)} type="tel" value={form.contactPhone} /></label>
+          <label className={label}>
+            Full name
+            <input
+              ref={nameRef}
+              className={getFieldClass("displayName")}
+              onChange={(event) => update("displayName", event.target.value)}
+              required
+              value={form.displayName}
+            />
+            {fieldErrors.displayName ? (
+              <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-rose-600">
+                <AlertCircle size={13} className="shrink-0 text-rose-500" />
+                {fieldErrors.displayName}
+              </p>
+            ) : null}
+          </label>
+          <label className={label}>
+            Professional title
+            <input
+              ref={titleRef}
+              className={getFieldClass("title")}
+              onChange={(event) => update("title", event.target.value)}
+              value={form.title}
+            />
+            {fieldErrors.title ? (
+              <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-rose-600">
+                <AlertCircle size={13} className="shrink-0 text-rose-500" />
+                {fieldErrors.title}
+              </p>
+            ) : null}
+          </label>
+          <label className={label}>
+            Specialty / department
+            <input
+              className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-500 outline-none"
+              disabled
+              title="Assigned by the hospital administrator"
+              value={form.specialtyName}
+            />
+          </label>
+          <label className={label}>
+            Registration number
+            <input
+              ref={registrationRef}
+              className={getFieldClass("registrationNumber")}
+              onChange={(event) => update("registrationNumber", event.target.value)}
+              placeholder="e.g. PMDC-12345"
+              value={form.registrationNumber}
+            />
+            {fieldErrors.registrationNumber ? (
+              <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-rose-600">
+                <AlertCircle size={13} className="shrink-0 text-rose-500" />
+                {fieldErrors.registrationNumber}
+              </p>
+            ) : null}
+          </label>
+          <label className={label}>
+            Qualifications
+            <input
+              ref={qualificationsRef}
+              className={getFieldClass("qualifications")}
+              onChange={(event) => update("qualifications", event.target.value)}
+              placeholder="MBBS, FCPS, MRCP..."
+              value={form.qualifications}
+            />
+            {fieldErrors.qualifications ? (
+              <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-rose-600">
+                <AlertCircle size={13} className="shrink-0 text-rose-500" />
+                {fieldErrors.qualifications}
+              </p>
+            ) : null}
+          </label>
+          <label className={label}>
+            Contact phone
+            <input
+              ref={phoneRef}
+              className={getFieldClass("contactPhone")}
+              onChange={(event) => update("contactPhone", event.target.value)}
+              type="tel"
+              value={form.contactPhone}
+            />
+            {fieldErrors.contactPhone ? (
+              <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-rose-600">
+                <AlertCircle size={13} className="shrink-0 text-rose-500" />
+                {fieldErrors.contactPhone}
+              </p>
+            ) : null}
+          </label>
           <div className="mt-3 border-b border-slate-200 pb-3 sm:col-span-2">
             <h3 className="text-sm font-black text-slate-950">Hospital assignment</h3>
             <p className="mt-1 text-[10px] text-slate-500">Your secure account identifiers and default working location.</p>
           </div>
-          <label className={label}>Login email<input className={`${field} bg-slate-50 text-slate-500`} disabled value={doctor.email ?? ""} /></label>
-          <label className={label}>Employee number<input className={`${field} bg-slate-50 text-slate-500`} disabled value={doctor.employeeNumber} /></label>
+          <label className={label}>
+            Login email
+            <input className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-500 outline-none" disabled value={doctor.email ?? ""} />
+          </label>
+          <label className={label}>
+            Employee number
+            <input className="mt-1 h-10 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-semibold text-slate-500 outline-none" disabled value={doctor.employeeNumber} />
+          </label>
           <div>
-            <div className="flex items-center justify-between">
-              <label className={label}>Primary location</label>
-              <button
-                className="flex items-center gap-1 text-[9px] font-bold text-indigo-600 hover:text-indigo-800"
-                onClick={() => setShowAddBranchModal(true)}
-                type="button"
-              >
-                <Plus size={10} /> Add branch
-              </button>
-            </div>
-            <select className={field} onChange={(event) => update("primaryBranchId", event.target.value)} value={form.primaryBranchId}>
+            <label className={label}>Primary location</label>
+            <select
+              ref={branchRef}
+              className={getFieldClass("primaryBranchId")}
+              onChange={(event) => update("primaryBranchId", event.target.value)}
+              value={form.primaryBranchId}
+            >
               <option value="">Select location</option>
               {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
             </select>
+            {fieldErrors.primaryBranchId ? (
+              <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-rose-600">
+                <AlertCircle size={13} className="shrink-0 text-rose-500" />
+                {fieldErrors.primaryBranchId}
+              </p>
+            ) : null}
           </div>
-          <label className={label}>Default consultation minutes<input className={field} max={480} min={5} onChange={(event) => update("durationMinutes", Number(event.target.value))} type="number" value={form.durationMinutes} /></label>
+          <label className={label}>
+            Default consultation minutes
+            <input
+              ref={durationRef}
+              className={getFieldClass("durationMinutes")}
+              max={480}
+              min={5}
+              onBlur={() => {
+                const parsed = parseInt(form.durationMinutes, 10);
+                if (isNaN(parsed) || parsed < 5) {
+                  update("durationMinutes", "15");
+                } else if (parsed > 480) {
+                  update("durationMinutes", "480");
+                } else {
+                  update("durationMinutes", String(parsed));
+                }
+              }}
+              onChange={(event) => {
+                let val = event.target.value;
+                if (val.length > 1 && /^0+[1-9]/.test(val)) {
+                  val = val.replace(/^0+/, "");
+                }
+                update("durationMinutes", val);
+              }}
+              placeholder="15"
+              required
+              type="number"
+              value={form.durationMinutes}
+            />
+            {fieldErrors.durationMinutes ? (
+              <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-rose-600">
+                <AlertCircle size={13} className="shrink-0 text-rose-500" />
+                {fieldErrors.durationMinutes}
+              </p>
+            ) : null}
+          </label>
           <div className="mt-3 border-b border-slate-200 pb-3 sm:col-span-2">
             <h3 className="text-sm font-black text-slate-950">Patient-facing profile</h3>
             <p className="mt-1 text-[10px] text-slate-500">Introduce your experience and control appointment visibility.</p>
           </div>
-          <label className={`${label} sm:col-span-2`}>Professional biography<textarea className="mt-1 min-h-28 w-full resize-y rounded-xl border border-slate-200 bg-white p-3 text-xs font-semibold leading-5 text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" onChange={(event) => update("biography", event.target.value)} placeholder="Share your clinical experience, interests and approach to patient care..." value={form.biography} /></label>
+          <label className={`${label} sm:col-span-2`}>
+            Professional biography
+            <textarea
+              ref={biographyRef}
+              className={`mt-1 min-h-28 w-full resize-y rounded-xl border p-3 text-xs font-semibold leading-5 text-slate-800 outline-none transition ${
+                fieldErrors.biography
+                  ? "border-rose-400 bg-rose-50/25 ring-2 ring-rose-200 focus:border-rose-500 focus:ring-rose-200"
+                  : "border-slate-200 bg-white focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+              }`}
+              onChange={(event) => update("biography", event.target.value)}
+              placeholder="Share your clinical experience, interests and approach to patient care..."
+              value={form.biography}
+            />
+            {fieldErrors.biography ? (
+              <p className="mt-1 flex items-center gap-1 text-[11px] font-bold text-rose-600">
+                <AlertCircle size={13} className="shrink-0 text-rose-500" />
+                {fieldErrors.biography}
+              </p>
+            ) : null}
+          </label>
           <label className="flex items-center gap-3 rounded-xl border border-indigo-100 bg-indigo-50/70 p-3 text-xs font-bold text-indigo-950 sm:col-span-2">
             <input checked={form.publiclyBookable} onChange={(event) => update("publiclyBookable", event.target.checked)} type="checkbox" /> Allow patients to book my published services
           </label>
         </div>
       </div>
-      {error ? <p className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-bold text-rose-700">{error}</p> : null}
+      {generalError || error ? (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border-2 border-rose-300 bg-rose-50/95 p-4 text-xs font-bold text-rose-800 shadow-md backdrop-blur-sm transition">
+          <div className="flex items-start sm:items-center gap-2.5">
+            <AlertCircle size={18} className="shrink-0 text-rose-600 mt-0.5 sm:mt-0 animate-pulse" />
+            <div>
+              <p className="font-extrabold text-rose-900 leading-snug">
+                {generalError?.message || error}
+              </p>
+              {generalError?.targetField ? (
+                <p className="mt-0.5 text-[11px] font-medium text-rose-600">
+                  Problem in field: <strong className="font-bold underline">{PROFILE_FIELD_LABELS[generalError.targetField] || generalError.targetField}</strong>
+                </p>
+              ) : null}
+            </div>
+          </div>
+          {generalError?.targetField ? (
+            <button
+              type="button"
+              onClick={() => scrollToField(generalError.targetField!)}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3.5 py-2 text-xs font-black text-rose-700 shadow-sm transition hover:bg-rose-100/80 hover:border-rose-400 hover:shadow cursor-pointer active:scale-95"
+            >
+              <span>Go to {PROFILE_FIELD_LABELS[generalError.targetField] || "error field"}</span>
+              <ChevronRight size={14} className="text-rose-500" />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       {message ? <p className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-bold text-emerald-700">{message}</p> : null}
       <div className="mt-5 flex justify-end border-t border-slate-100 pt-4">
-        <button className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 px-5 text-xs font-black text-white shadow-lg shadow-indigo-500/20 hover:from-indigo-700 hover:to-violet-700 disabled:opacity-60" disabled={saving} type="submit">
+        <button className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-linear-to-r from-indigo-600 to-violet-600 px-5 text-xs font-black text-white shadow-lg shadow-indigo-500/20 hover:from-indigo-700 hover:to-violet-700 disabled:opacity-60 cursor-pointer" disabled={saving || processingPhoto} type="submit">
           <Save size={15} /> {saving ? "Saving..." : "Save profile"}
         </button>
       </div>
@@ -2469,7 +3034,7 @@ export function DoctorProfilePage() {
       ) : (
         <>
           <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-[0_14px_40px_rgba(15,23,42,0.07)]">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-slate-50 via-white to-indigo-50/60 px-5 py-4 text-slate-950">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-linear-to-r from-slate-50 via-white to-indigo-50/60 px-5 py-4 text-slate-950">
               <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-4">
                   <div>
@@ -2487,7 +3052,7 @@ export function DoctorProfilePage() {
                 </p>
               </div>
             </div>
-            <DoctorProfileEditor doctor={doctor} onSaved={reload} />
+            <DoctorProfileEditor key={doctor.id} doctor={doctor} onSaved={reload} />
           </section>
 
           <section className="hidden">
@@ -2510,11 +3075,10 @@ export function DoctorProfilePage() {
               <div className="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                 {schedules.map((schedule) => (
                   <article
-                    className={`rounded-xl border p-3 ${
-                      schedule.active
+                    className={`rounded-xl border p-3 ${schedule.active
                         ? "border-indigo-100 bg-indigo-50/50"
                         : "border-slate-200 bg-slate-50 opacity-65"
-                    }`}
+                      }`}
                     key={schedule.id}
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -2569,15 +3133,15 @@ export function DoctorAppointmentsPage() {
     <div className="space-y-4">
       <DoctorPageHeader description="Review your confirmed schedule, patient arrival status and consultation queue." icon={<CalendarClock size={18} />} title="Appointments" />
       <section className="grid gap-3 sm:grid-cols-3">
-        {[{ label: "Today", value: todayCount, tone: "from-indigo-500 to-violet-600" }, { label: "Upcoming", value: upcomingCount, tone: "from-cyan-500 to-blue-600" }, { label: "Waiting now", value: waitingCount, tone: "from-emerald-500 to-teal-600" }].map((metric) => <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" key={metric.label}><div className="flex items-center gap-3"><span className={`grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br ${metric.tone} text-white`}><CalendarClock size={17} /></span><div><p className="text-xl font-black text-slate-950">{metric.value}</p><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{metric.label}</p></div></div></div>)}
+        {[{ label: "Today", value: todayCount, tone: "from-indigo-500 to-violet-600" }, { label: "Upcoming", value: upcomingCount, tone: "from-cyan-500 to-blue-600" }, { label: "Waiting now", value: waitingCount, tone: "from-emerald-500 to-teal-600" }].map((metric) => <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" key={metric.label}><div className="flex items-center gap-3"><span className={`grid h-10 w-10 place-items-center rounded-xl bg-linear-to-br ${metric.tone} text-white`}><CalendarClock size={17} /></span><div><p className="text-xl font-black text-slate-950">{metric.value}</p><p className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{metric.label}</p></div></div></div>)}
       </section>
       <section className="overflow-hidden rounded-[22px] border border-slate-200 bg-white shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-gradient-to-r from-indigo-50 via-white to-cyan-50 px-5 py-4"><div><h2 className="text-sm font-black text-slate-950">My appointment schedule</h2><p className="mt-1 text-[10px] text-slate-500">Appointments assigned to your practitioner profile.</p></div><div className="flex rounded-xl bg-slate-100 p-1">{(["today", "upcoming", "all"] as const).map((item) => <button className={`rounded-lg px-3 py-2 text-[10px] font-black capitalize ${view === item ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`} key={item} onClick={() => setView(item)} type="button">{item}</button>)}</div></div>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-linear-to-r from-indigo-50 via-white to-cyan-50 px-5 py-4"><div><h2 className="text-sm font-black text-slate-950">My appointment schedule</h2><p className="mt-1 text-[10px] text-slate-500">Appointments assigned to your practitioner profile.</p></div><div className="flex rounded-xl bg-slate-100 p-1">{(["today", "upcoming", "all"] as const).map((item) => <button className={`rounded-lg px-3 py-2 text-[10px] font-black capitalize ${view === item ? "bg-white text-indigo-700 shadow-sm" : "text-slate-500"}`} key={item} onClick={() => setView(item)} type="button">{item}</button>)}</div></div>
         {visible.length === 0 ? <div className="m-5"><EmptyState action={<Link className="wf-button-secondary" href="/doctor/queue">Open patient queue</Link>} description={view === "today" ? "No appointments are assigned to you for today." : "No appointments match this view."} icon={<CalendarClock size={20} />} title="No appointments found" /></div> : <div className="divide-y divide-slate-100">{visible.map((appointment) => {
           const patient = patients.get(appointment.patientId);
           const queueEntry = data.queueEntries.find((entry) => entry.appointmentId === appointment.id);
           const statusTone = appointment.status === "completed" ? "emerald" : appointment.status === "cancelled" || appointment.status === "no-show" ? "rose" : appointment.appointmentDate === today ? "indigo" : "amber";
-          return <article className="grid gap-4 p-5 transition hover:bg-slate-50/70 lg:grid-cols-[110px_minmax(0,1fr)_180px] lg:items-center" key={appointment.id}><div><p className="text-lg font-black text-indigo-700">{appointment.slotStart}</p><p className="text-[10px] font-semibold text-slate-500">{formatDate(appointment.appointmentDate)}</p></div><div className="flex min-w-0 items-center gap-3"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-indigo-100 to-violet-100 text-xs font-black text-indigo-700">{getInitials(patient?.displayName ?? "Patient")}</span><div className="min-w-0"><h3 className="truncate text-sm font-black text-slate-950">{patient?.displayName ?? "Patient record"}</h3><p className="mt-1 text-[10px] font-semibold text-slate-500">{patient?.mrNumber ?? appointment.patientId} · {appointment.serviceName} · {appointment.durationMinutes} min</p><p className="mt-1 truncate text-[10px] text-slate-600">{appointment.reasonForVisit || "No appointment reason recorded."}</p></div></div><div className="flex items-center justify-between gap-2 lg:justify-end"><StatusPill tone={statusTone}>{humanize(queueEntry?.status ?? appointment.status)}</StatusPill><Link className="rounded-xl bg-indigo-600 px-3 py-2 text-[10px] font-black text-white hover:bg-indigo-700" href={queueEntry ? `/doctor/consultations?queueEntryId=${encodeURIComponent(queueEntry.id)}` : "/doctor/queue"}>{queueEntry?.status === "serving" ? "Continue" : queueEntry ? "Open patient" : "View queue"}</Link></div></article>;
+          return <article className="grid gap-4 p-5 transition hover:bg-slate-50/70 lg:grid-cols-[110px_minmax(0,1fr)_180px] lg:items-center" key={appointment.id}><div><p className="text-lg font-black text-indigo-700">{appointment.slotStart}</p><p className="text-[10px] font-semibold text-slate-500">{formatDate(appointment.appointmentDate)}</p></div><div className="flex min-w-0 items-center gap-3"><span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-linear-to-br from-indigo-100 to-violet-100 text-xs font-black text-indigo-700">{getInitials(patient?.displayName ?? "Patient")}</span><div className="min-w-0"><h3 className="truncate text-sm font-black text-slate-950">{patient?.displayName ?? "Patient record"}</h3><p className="mt-1 text-[10px] font-semibold text-slate-500">{patient?.mrNumber ?? appointment.patientId} · {appointment.serviceName} · {appointment.durationMinutes} min</p><p className="mt-1 truncate text-[10px] text-slate-600">{appointment.reasonForVisit || "No appointment reason recorded."}</p></div></div><div className="flex items-center justify-between gap-2 lg:justify-end"><StatusPill tone={statusTone}>{humanize(queueEntry?.status ?? appointment.status)}</StatusPill><Link className="rounded-xl bg-indigo-600 px-3 py-2 text-[10px] font-black text-white hover:bg-indigo-700" href={queueEntry ? `/doctor/consultations?queueEntryId=${encodeURIComponent(queueEntry.id)}` : "/doctor/queue"}>{queueEntry?.status === "serving" ? "Continue" : queueEntry ? "Open patient" : "View queue"}</Link></div></article>;
         })}</div>}
       </section>
     </div>
@@ -2722,11 +3286,10 @@ export function DoctorSettingsPage() {
             <div className="grid grid-cols-2 gap-2">
               {(["compact", "comfortable"] as const).map((density) => (
                 <button
-                  className={`rounded-xl border p-3 text-left ${
-                    preferences.displayDensity === density
+                  className={`rounded-xl border p-3 text-left ${preferences.displayDensity === density
                       ? "border-indigo-300 bg-indigo-50 text-indigo-800"
                       : "border-slate-200 bg-white text-slate-600"
-                  }`}
+                    }`}
                   key={density}
                   onClick={() => updatePreference("displayDensity", density)}
                   type="button"

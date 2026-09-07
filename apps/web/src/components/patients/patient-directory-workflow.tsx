@@ -216,8 +216,8 @@ function PatientDetailModal({
       <div className="relative flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden rounded-[28px] border border-slate-200/80 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-[0_25px_70px_rgba(0,0,0,0.35)]">
         
         {/* Banner Header */}
-        <div className="relative overflow-hidden bg-gradient-to-r from-blue-700 via-indigo-700 to-violet-800 p-5 text-white sm:p-6">
-          <div className="pointer-events-none absolute inset-0 opacity-15 [background-image:radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] [background-size:16px_16px]" />
+        <div className="relative overflow-hidden bg-linear-to-r from-blue-700 via-indigo-700 to-violet-800 p-5 text-white sm:p-6">
+          <div className="pointer-events-none absolute inset-0 opacity-15 bg-[radial-gradient(circle_at_1px_1px,white_1px,transparent_0)] bg-size-[16px_16px]" />
           
           <div className="relative flex items-center justify-between gap-4">
             <div className="flex items-center gap-4 min-w-0">
@@ -784,7 +784,7 @@ function PatientDetailModal({
                   Cancel
                 </button>
                 <button
-                  className="rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-2.5 text-xs font-black text-white shadow hover:from-blue-700 hover:to-indigo-700 transition disabled:opacity-50"
+                  className="rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-6 py-2.5 text-xs font-black text-white shadow hover:from-blue-700 hover:to-indigo-700 transition disabled:opacity-50"
                   disabled={saving}
                   type="submit"
                 >
@@ -819,7 +819,7 @@ function PatientDetailModal({
             ) : null}
 
             <Link
-              className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-xs font-black text-white shadow-sm hover:from-blue-700 hover:to-indigo-700 transition"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-4 py-2 text-xs font-black text-white shadow-sm hover:from-blue-700 hover:to-indigo-700 transition"
               href={`/operations/reception?patientId=${encodeURIComponent(patient.id)}`}
             >
               🗓️ Book Appointment
@@ -1264,7 +1264,7 @@ function PatientDirectoryContent({ branches }: PatientDirectoryContentProps) {
                       {/* Name & Avatar */}
                       <td className="py-4 pl-5 pr-4">
                         <div className="flex items-center gap-3">
-                          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 text-xs font-black text-white shadow-sm">
+                          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-linear-to-br from-indigo-600 to-violet-600 text-xs font-black text-white shadow-sm">
                             {getInitials(registration.displayName)}
                           </div>
                           <div className="min-w-0">
@@ -1373,7 +1373,7 @@ function PatientDirectoryContent({ branches }: PatientDirectoryContentProps) {
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
-                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-gradient-to-br from-indigo-600 to-violet-600 text-xs font-black text-white shadow-sm">
+                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-linear-to-br from-indigo-600 to-violet-600 text-xs font-black text-white shadow-sm">
                         {getInitials(registration.displayName)}
                       </div>
                       <div className="min-w-0">
@@ -1504,7 +1504,7 @@ export function PatientDirectoryWorkflow() {
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
-              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700"
+              className="inline-flex min-h-10 items-center justify-center rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700"
               href="/operations/reception"
             >
               + Register New Patient

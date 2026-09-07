@@ -4,8 +4,8 @@ import { useMemo, useState } from "react";
 
 import { useWonFlowSession } from "@/app/_providers";
 import { useInvoice, useInvoices } from "@/lib/api/billing";
-import { useRefunds, useRequestRefund, useApproveRefund } from "@/lib/api/billing";
-import type { RefundStatus } from "@/lib/api/billing";
+import { useRefunds, useRequestRefund, useApproveRefund, useRejectRefund, useCompleteRefund } from "@/lib/api/billing";
+import type { RefundRecord, RefundStatus } from "@/lib/api/billing";
 
 function minorToPkr(minor: number): string {
   return (minor / 100).toLocaleString("en-PK", { style: "currency", currency: "PKR" });
@@ -182,32 +182,73 @@ function RequestRefundPanel() {
   );
 }
 
-function ApproveRow({ refundId }: { refundId: string }) {
+function RefundActionControls({ refund }: { refund: RefundRecord }) {
+  const [action, setAction] = useState<"approve" | "reject" | "complete" | null>(null);
   const [reason, setReason] = useState("");
-  const [open, setOpen] = useState(false);
-  const approve = useApproveRefund();
   const [error, setError] = useState("");
+  const approve = useApproveRefund();
+  const reject = useRejectRefund();
+  const complete = useCompleteRefund();
 
-  if (!open) {
-    return <button className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-black text-white" onClick={() => setOpen(true)} type="button">Approve</button>;
+  if (!action) {
+    if (refund.status === "REQUESTED") {
+      return (
+        <div className="flex items-center gap-2">
+          <button className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-black text-white hover:bg-emerald-700" onClick={() => { setAction("approve"); setReason(""); setError(""); }} type="button">Approve</button>
+          <button className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-black text-white hover:bg-rose-700" onClick={() => { setAction("reject"); setReason(""); setError(""); }} type="button">Reject</button>
+        </div>
+      );
+    }
+    if (refund.status === "APPROVED") {
+      return (
+        <button className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-black text-white hover:bg-blue-700" onClick={() => { setAction("complete"); setReason(""); setError(""); }} type="button">
+          Disburse Cash / Payout
+        </button>
+      );
+    }
+    return null;
   }
 
+  const isSaving = approve.saveState === "saving" || reject.saveState === "saving" || complete.saveState === "saving";
+
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-emerald-200 bg-emerald-50 p-2">
-      {error ? <p className="text-xs font-bold text-red-700">{error}</p> : null}
-      <input className="rounded-lg border border-slate-200 px-2 py-1 text-xs" onChange={(event) => setReason(event.target.value)} placeholder="Approval reason" value={reason} />
-      <button
-        className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-black text-white disabled:opacity-50"
-        disabled={approve.saveState === "saving"}
-        onClick={async () => {
-          setError("");
-          if (!reason.trim()) { setError("A reason is required to approve a refund."); return; }
-          try { await approve.mutate({ refundId, reason: reason.trim() }); } catch (cause) { setError(cause instanceof Error ? cause.message : "The refund could not be approved."); }
-        }}
-        type="button"
-      >
-        Confirm approval
-      </button>
+    <div className="flex flex-col gap-2 rounded-xl border border-slate-200 bg-slate-50 p-2 text-xs">
+      {error ? <p className="font-bold text-red-700">{error}</p> : null}
+      <input
+        className="rounded-lg border border-slate-200 px-2 py-1 text-xs"
+        onChange={(event) => setReason(event.target.value)}
+        placeholder={action === "approve" ? "Approval reason" : action === "reject" ? "Rejection reason (required)" : "Disbursement note (optional)"}
+        value={reason}
+      />
+      <div className="flex items-center gap-2">
+        <button
+          className={`rounded-lg px-3 py-1.5 font-black text-white disabled:opacity-50 ${action === "approve" ? "bg-emerald-600 hover:bg-emerald-700" : action === "reject" ? "bg-rose-600 hover:bg-rose-700" : "bg-blue-600 hover:bg-blue-700"}`}
+          disabled={isSaving}
+          onClick={async () => {
+            setError("");
+            try {
+              if (action === "approve") {
+                if (!reason.trim()) { setError("A reason is required to approve a refund."); return; }
+                await approve.mutate({ refundId: refund.id, reason: reason.trim() });
+              } else if (action === "reject") {
+                if (!reason.trim()) { setError("A reason is required to reject a refund."); return; }
+                await reject.mutate({ refundId: refund.id, reason: reason.trim() });
+              } else if (action === "complete") {
+                await complete.mutate({ refundId: refund.id, reason: reason.trim() || undefined });
+              }
+              setAction(null);
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : "The refund action failed.");
+            }
+          }}
+          type="button"
+        >
+          {isSaving ? "Saving…" : action === "approve" ? "Confirm approval" : action === "reject" ? "Confirm rejection" : "Confirm disbursement"}
+        </button>
+        <button className="rounded-lg border border-slate-300 px-2 py-1 text-slate-600 hover:bg-slate-200" onClick={() => { setAction(null); setError(""); }} type="button">
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
@@ -256,7 +297,7 @@ export function BillingRefundWorklist({ initialReturnId }: { initialReturnId?: s
                   <p className="text-xs text-slate-500">{refund.reason}</p>
                   <span className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[11px] font-black ${STATUS_TONE[refund.status]}`}>{refund.status}</span>
                 </div>
-                {refund.status === "REQUESTED" ? <ApproveRow refundId={refund.id} /> : null}
+                <RefundActionControls refund={refund} />
               </article>
             ))}
           </div>

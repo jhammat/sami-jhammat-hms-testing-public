@@ -321,7 +321,7 @@ export function PatientProfileEditor() {
         </section>
 
         <button
-          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-sm font-black text-white shadow-md transition hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-blue-600 to-indigo-600 p-4 text-sm font-black text-white shadow-md transition hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50"
           disabled={busy}
           type="submit"
         >

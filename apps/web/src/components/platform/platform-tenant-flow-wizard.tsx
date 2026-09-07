@@ -568,7 +568,7 @@ export function PlatformTenantFlowWizard() {
                   }
                   placeholder="Leave empty for no trial"
                   type="date"
-                  value={subscriptionForm.trialEndsAt}
+                  value={subscriptionForm.trialEndsAt ? subscriptionForm.trialEndsAt.slice(0, 10) : ""}
                 />
               </Field>
               <Field hint="Optional renewal date (YYYY-MM-DD)" label="Renewal date">
@@ -582,7 +582,7 @@ export function PlatformTenantFlowWizard() {
                   }
                   placeholder="Leave empty for auto-renewal"
                   type="date"
-                  value={subscriptionForm.renewsAt}
+                  value={subscriptionForm.renewsAt ? subscriptionForm.renewsAt.slice(0, 10) : ""}
                 />
               </Field>
             </div>

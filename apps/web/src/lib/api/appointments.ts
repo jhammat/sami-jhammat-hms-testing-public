@@ -125,6 +125,7 @@ export interface BookAppointmentInput {
   patientId: string;
   doctorId?: string;
   serviceId?: string;
+  branchId?: string;
   startsAt: string;
   endsAt: string;
   reason?: string;
@@ -147,6 +148,7 @@ export interface CheckInAppointmentInput {
   queueDate: string;
   priority?: number;
   notes?: string;
+  branchId?: string;
 }
 
 const APPOINTMENTS_TAG = "appointments";

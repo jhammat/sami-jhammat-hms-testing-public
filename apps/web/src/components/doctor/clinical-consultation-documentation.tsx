@@ -259,6 +259,52 @@ const INSTRUCTION_PRESETS = [
   "Avoid driving after dose",
 ];
 
+export function getPrescriptionItemMedicineName(
+  item: {
+    medicationId: string;
+    medication?: {
+      id?: string;
+      name?: string;
+      genericName?: string;
+      brandName?: string | null;
+    } | null;
+  },
+  catalog?: { id: string; genericName: string; brandName?: string | null }[],
+): string {
+  if (item.medication) {
+    const generic = item.medication.genericName?.trim();
+    const brand = item.medication.brandName?.trim();
+    const name = item.medication.name?.trim();
+
+    if (generic && brand && generic.toLowerCase() !== brand.toLowerCase()) {
+      return `${generic} (${brand})`;
+    }
+    if (generic) return generic;
+    if (brand) return brand;
+    if (name) return name;
+  }
+
+  if (catalog && catalog.length > 0) {
+    const found = catalog.find((c) => c.id === item.medicationId);
+    if (found) {
+      const generic = found.genericName?.trim();
+      const brand = found.brandName?.trim();
+      if (generic && brand && generic.toLowerCase() !== brand.toLowerCase()) {
+        return `${generic} (${brand})`;
+      }
+      if (generic) return generic;
+      if (brand) return brand;
+    }
+  }
+
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(item.medicationId);
+  if (!isUuid && item.medicationId) {
+    return item.medicationId;
+  }
+
+  return "Prescribed Medication";
+}
+
 // -------------------------------------------------------------
 // REUSABLE DYNAMIC SEARCHABLE COMBOBOX
 // -------------------------------------------------------------
@@ -274,21 +320,27 @@ interface DynamicComboboxItem {
 function DynamicSearchCombobox({
   placeholder = "Type to search or add new…",
   items,
+  value,
+  onChange,
   onSelect,
   onAddNew,
   label,
   icon: Icon = Search,
   accentColor = "indigo",
+  clearOnSelect = false,
 }: {
   placeholder?: string;
   items: DynamicComboboxItem[];
+  value?: string;
+  onChange?: (value: string) => void;
   onSelect: (item: DynamicComboboxItem) => void;
   onAddNew?: (query: string) => void;
   label?: string;
   icon?: LucideIcon;
   accentColor?: "indigo" | "emerald" | "amber" | "violet" | "rose" | "blue";
+  clearOnSelect?: boolean;
 }) {
-  const [query, setQuery] = useState("");
+  const [internalQuery, setInternalQuery] = useState(value ?? "");
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -302,22 +354,64 @@ function DynamicSearchCombobox({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const displayQuery = value !== undefined ? value : internalQuery;
+
   const filteredItems = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return items.slice(0, 15);
+    const q = displayQuery.trim().toLowerCase();
+    if (!q) return items.slice(0, 20);
     return items.filter(
       (item) =>
         item.label.toLowerCase().includes(q) ||
         (item.sublabel && item.sublabel.toLowerCase().includes(q)) ||
         (item.badge && item.badge.toLowerCase().includes(q)),
     );
-  }, [items, query]);
+  }, [items, displayQuery]);
 
   const exactMatch = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const q = displayQuery.trim().toLowerCase();
     if (!q) return false;
     return items.some((item) => item.label.toLowerCase() === q);
-  }, [items, query]);
+  }, [items, displayQuery]);
+
+  const handleInputChange = (val: string) => {
+    if (value === undefined) {
+      setInternalQuery(val);
+    }
+    onChange?.(val);
+    setOpen(true);
+  };
+
+  const handleSelectItem = (item: DynamicComboboxItem) => {
+    onSelect(item);
+    if (clearOnSelect) {
+      if (value === undefined) setInternalQuery("");
+      onChange?.("");
+    } else {
+      if (value === undefined) setInternalQuery(item.label);
+      onChange?.(item.label);
+    }
+    setOpen(false);
+  };
+
+  const handleAddNew = (customText: string) => {
+    const trimmed = customText.trim();
+    if (!trimmed) return;
+    onAddNew?.(trimmed);
+    if (clearOnSelect) {
+      if (value === undefined) setInternalQuery("");
+      onChange?.("");
+    } else {
+      if (value === undefined) setInternalQuery(trimmed);
+      onChange?.(trimmed);
+    }
+    setOpen(false);
+  };
+
+  const handleClear = () => {
+    if (value === undefined) setInternalQuery("");
+    onChange?.("");
+    setOpen(false);
+  };
 
   const borderFocusClass = {
     indigo: "focus:border-indigo-500 focus:ring-indigo-100",
@@ -350,65 +444,86 @@ function DynamicSearchCombobox({
         </div>
         <input
           type="text"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOpen(true);
-          }}
+          value={displayQuery}
+          onChange={(e) => handleInputChange(e.target.value)}
           onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (filteredItems.length > 0 && !exactMatch) {
+                handleSelectItem(filteredItems[0]);
+              } else if (onAddNew && displayQuery.trim()) {
+                handleAddNew(displayQuery.trim());
+              } else {
+                setOpen(false);
+              }
+            } else if (e.key === "Escape") {
+              setOpen(false);
+            }
+          }}
           placeholder={placeholder}
-          className={`h-11 w-full rounded-2xl border border-slate-200/90 bg-white/90 pl-10 pr-10 text-xs font-bold text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:ring-2 dark:border-slate-700 dark:bg-slate-800 dark:text-white ${borderFocusClass}`}
+          className={`h-11 w-full rounded-2xl border border-slate-200/90 bg-white/90 pl-10 pr-16 text-xs font-bold text-slate-900 shadow-inner outline-none transition placeholder:text-slate-400 focus:ring-2 dark:border-slate-700 dark:bg-slate-800 dark:text-white ${borderFocusClass}`}
         />
-        <button
-          type="button"
-          onClick={() => setOpen(!open)}
-          className="absolute inset-y-0 right-0 flex items-center pr-3 text-slate-400 hover:text-slate-600"
-        >
-          <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
-        </button>
+        <div className="absolute inset-y-0 right-0 flex items-center pr-2 gap-1">
+          {displayQuery ? (
+            <button
+              type="button"
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={handleClear}
+              className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
+              title="Clear input"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => setOpen(!open)}
+            className="rounded-lg p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+            title={open ? "Close suggestions" : "Open suggestions"}
+          >
+            <ChevronDown className={`h-4 w-4 transition-transform ${open ? "rotate-180" : ""}`} />
+          </button>
+        </div>
       </div>
 
       {open && (
         <div className="absolute z-50 mt-1.5 max-h-72 w-full overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/98 p-1.5 shadow-2xl backdrop-blur-2xl dark:border-slate-700 dark:bg-slate-900/98">
-          {query.trim() && !exactMatch && onAddNew ? (
+          {displayQuery.trim() && !exactMatch && onAddNew ? (
             <button
               type="button"
-              onClick={() => {
-                onAddNew(query.trim());
-                setQuery("");
-                setOpen(false);
-              }}
+              onMouseDown={(e) => e.preventDefault()}
+              onClick={() => handleAddNew(displayQuery.trim())}
               className={`mb-1 flex w-full items-center gap-2 rounded-xl p-2.5 text-left text-xs font-black transition ${buttonAccentClass}`}
             >
               <Plus className="h-4 w-4 shrink-0" />
-              <span>Add &quot;{query.trim()}&quot; as new custom entry</span>
+              <span>Add &quot;{displayQuery.trim()}&quot; as custom entry</span>
             </button>
           ) : null}
 
-          {filteredItems.length === 0 && !query.trim() ? (
+          {filteredItems.length === 0 && !displayQuery.trim() ? (
             <div className="p-3 text-center text-xs font-semibold text-slate-400">
               No suggestions available. Type to create a new entry.
             </div>
           ) : (
             <div className="space-y-0.5">
               {filteredItems.map((item, idx) => {
-                const badgeColor = item.badgeTone === "emerald"
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                  : item.badgeTone === "rose"
-                  ? "bg-rose-50 text-rose-700 border-rose-200"
-                  : item.badgeTone === "amber"
-                  ? "bg-amber-50 text-amber-700 border-amber-200"
-                  : "bg-slate-100 text-slate-600 border-slate-200";
+                const badgeColor =
+                  item.badgeTone === "emerald"
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                    : item.badgeTone === "rose"
+                    ? "bg-rose-50 text-rose-700 border-rose-200"
+                    : item.badgeTone === "amber"
+                    ? "bg-amber-50 text-amber-700 border-amber-200"
+                    : "bg-slate-100 text-slate-600 border-slate-200";
 
                 return (
                   <button
                     key={`${item.label}-${idx}`}
                     type="button"
-                    onClick={() => {
-                      onSelect(item);
-                      setQuery("");
-                      setOpen(false);
-                    }}
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => handleSelectItem(item)}
                     className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs transition hover:bg-slate-100 dark:hover:bg-slate-800"
                   >
                     <div className="min-w-0 pr-2">
@@ -519,7 +634,7 @@ function ConsultationWorkspace({
   encounter: EncounterRecord;
   reload: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<"notes" | "rx" | "vitals" | "diagnoses" | "orders" | "history">("notes");
+  const [activeTab, setActiveTab] = useState<"notes" | "rx" | "vitals" | "diagnoses" | "orders" | "history">("history");
   const [actionMessage, setActionMessage] = useState<string | undefined>();
   const [completing, setCompleting] = useState(false);
   const [pausing, setPausing] = useState(false);
@@ -774,22 +889,13 @@ function ConsultationWorkspace({
         ) : null}
       </header>
 
-      {/* Navigation Glassmorphic Tabs */}
+      {/* Navigation Glassmorphic Tabs — Clinically Ordered: History -> Vitals -> Notes -> Dx -> Orders -> Rx */}
       <nav className="flex items-center gap-1.5 overflow-x-auto rounded-2xl border border-white/40 bg-slate-100/60 p-1.5 backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900/60">
         <TabButton
-          active={activeTab === "notes"}
-          onClick={() => setActiveTab("notes")}
-          icon={FilePenLine}
-          label="Clinical Notes"
-          badge={encounter.notes.length > 0 ? `${encounter.notes.length}` : undefined}
-        />
-        <TabButton
-          active={activeTab === "rx"}
-          onClick={() => setActiveTab("rx")}
-          icon={Pill}
-          label="Medications & Prescriptions"
-          badge={totalPrescriptions > 0 ? `${totalPrescriptions}` : undefined}
-          highlight
+          active={activeTab === "history"}
+          onClick={() => setActiveTab("history")}
+          icon={History}
+          label="Patient History"
         />
         <TabButton
           active={activeTab === "vitals"}
@@ -799,11 +905,19 @@ function ConsultationWorkspace({
           badge={patient.observations.length > 0 ? `${patient.observations.length}` : undefined}
         />
         <TabButton
+          active={activeTab === "notes"}
+          onClick={() => setActiveTab("notes")}
+          icon={FilePenLine}
+          label="Clinical Notes"
+          badge={encounter.notes.length > 0 ? `${encounter.notes.length}` : undefined}
+        />
+        <TabButton
           active={activeTab === "diagnoses"}
           onClick={() => setActiveTab("diagnoses")}
           icon={Stethoscope}
           label="Diagnoses & ICD"
           badge={encounter.diagnoses.length > 0 ? `${encounter.diagnoses.length}` : undefined}
+          highlight
         />
         <TabButton
           active={activeTab === "orders"}
@@ -813,17 +927,18 @@ function ConsultationWorkspace({
           badge={encounter.diagnosticOrders.length > 0 ? `${encounter.diagnosticOrders.length}` : undefined}
         />
         <TabButton
-          active={activeTab === "history"}
-          onClick={() => setActiveTab("history")}
-          icon={History}
-          label="Patient History"
+          active={activeTab === "rx"}
+          onClick={() => setActiveTab("rx")}
+          icon={Pill}
+          label="Medications & Prescriptions"
+          badge={totalPrescriptions > 0 ? `${totalPrescriptions}` : undefined}
         />
       </nav>
 
       {/* Tab Panels */}
       <main className="transition-all duration-300">
         {activeTab === "notes" && (
-          <ConsultationNotePanel encounter={encounter} onSaved={reload} isEditable={isEditable} />
+          <ConsultationNotePanel key={encounter.id} encounter={encounter} onSaved={reload} isEditable={isEditable} />
         )}
 
         {activeTab === "rx" && (
@@ -876,13 +991,28 @@ function ConsultationWorkspace({
               )}
 
               {/* Status */}
-              <div className="flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 dark:border-indigo-900/60 dark:bg-indigo-950/40">
-                <div className="flex items-center gap-2">
-                  <Globe className="text-indigo-600 dark:text-indigo-400" size={16} />
+              <div className="flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50/60 p-3.5 dark:border-indigo-900/60 dark:bg-indigo-950/40">
+                <div className="flex items-center gap-2.5">
+                  <Globe className="text-indigo-600 dark:text-indigo-400 shrink-0" size={18} />
                   <div>
                     <div className="text-xs font-black text-slate-900 dark:text-white">Portal Account Status</div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                      {portalStatus?.hasPortalAccess ? `Active (${portalStatus.email})` : "No active portal account"}
+                    <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                      {portalLoading ? (
+                        "Checking portal status…"
+                      ) : portalStatus?.hasPortalAccess ? (
+                        <div className="space-y-0.5">
+                          <p>
+                            <span className="font-semibold text-slate-500">Username / MR Number:</span>{" "}
+                            <strong className="font-mono text-indigo-700 dark:text-indigo-400">{patient.patientNumber}</strong>
+                          </p>
+                          <p>
+                            <span className="font-semibold text-slate-500">Email:</span>{" "}
+                            <span className="font-medium text-slate-700 dark:text-slate-300">{portalStatus.email}</span>
+                          </p>
+                        </div>
+                      ) : (
+                        "No active portal account"
+                      )}
                     </div>
                   </div>
                 </div>
@@ -901,53 +1031,103 @@ function ConsultationWorkspace({
                     <span>Portal Credentials Provisioned!</span>
                   </div>
                   <div className="grid gap-2 text-[11px]">
-                    <div className="flex items-center justify-between rounded-lg bg-white p-2 border border-emerald-100 dark:border-slate-800 dark:bg-slate-800">
+                    {/* Username / MR Number */}
+                    <div className="flex items-center justify-between rounded-lg bg-white p-2.5 border border-emerald-200/80 shadow-xs dark:border-slate-800 dark:bg-slate-900">
                       <div>
-                        <span className="text-[9px] font-bold text-slate-400">Login URL</span>
-                        <div className="font-bold text-indigo-700 dark:text-indigo-400">{typeof window !== "undefined" ? window.location.origin : ""}/patient</div>
+                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Username / MR Number</span>
+                        <div className="font-mono font-black text-sm text-indigo-700 dark:text-indigo-400">{patient.patientNumber}</div>
                       </div>
                       <button
                         type="button"
-                        onClick={() => copyText((typeof window !== "undefined" ? window.location.origin : "") + "/patient", "url")}
-                        className="rounded p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        onClick={() => copyText(patient.patientNumber, "mrn")}
+                        className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                       >
-                        {copiedField === "url" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                        {copiedField === "mrn" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                        <span className="text-[10px] font-bold">{copiedField === "mrn" ? "Copied" : "Copy"}</span>
                       </button>
                     </div>
 
-                    <div className="flex items-center justify-between rounded-lg bg-white p-2 border border-emerald-100 dark:border-slate-800 dark:bg-slate-800">
+                    {/* Login Email */}
+                    <div className="flex items-center justify-between rounded-lg bg-white p-2.5 border border-emerald-200/80 shadow-xs dark:border-slate-800 dark:bg-slate-900">
                       <div>
-                        <span className="text-[9px] font-bold text-slate-400">Login Email</span>
+                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Login Email</span>
                         <div className="font-bold text-slate-800 dark:text-slate-200">{portalProvisionResult.email}</div>
                       </div>
                       <button
                         type="button"
                         onClick={() => copyText(portalProvisionResult.email, "email")}
-                        className="rounded p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"
+                        className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                       >
                         {copiedField === "email" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                        <span className="text-[10px] font-bold">{copiedField === "email" ? "Copied" : "Copy"}</span>
                       </button>
                     </div>
 
+                    {/* Temporary Password */}
                     {portalProvisionResult.temporaryPassword && (
-                      <div className="flex items-center justify-between rounded-lg bg-white p-2 border border-emerald-100 dark:border-slate-800 dark:bg-slate-800">
+                      <div className="flex items-center justify-between rounded-lg bg-white p-2.5 border border-emerald-200/80 shadow-xs dark:border-slate-800 dark:bg-slate-900">
                         <div>
-                          <span className="text-[9px] font-bold text-slate-400">Temporary Password</span>
+                          <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Temporary Password</span>
                           <div className="font-mono font-black text-slate-900 dark:text-white">{portalProvisionResult.temporaryPassword}</div>
                         </div>
                         <button
                           type="button"
                           onClick={() => copyText(portalProvisionResult.temporaryPassword!, "pw")}
-                          className="rounded p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-700"
+                          className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                         >
                           {copiedField === "pw" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                          <span className="text-[10px] font-bold">{copiedField === "pw" ? "Copied" : "Copy"}</span>
                         </button>
                       </div>
                     )}
+
+                    {/* Login URL */}
+                    <div className="flex items-center justify-between rounded-lg bg-white p-2.5 border border-emerald-200/80 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+                      <div>
+                        <span className="text-[9px] font-black uppercase tracking-wider text-slate-400">Login URL</span>
+                        <div className="font-bold text-indigo-700 dark:text-indigo-400">{typeof window !== "undefined" ? window.location.origin : ""}/login?audience=patient</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => copyText((typeof window !== "undefined" ? window.location.origin : "") + "/login?audience=patient", "url")}
+                        className="flex items-center gap-1 rounded-md px-2 py-1 text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                      >
+                        {copiedField === "url" ? <Check className="text-emerald-600" size={14} /> : <Copy size={14} />}
+                        <span className="text-[10px] font-bold">{copiedField === "url" ? "Copied" : "Copy"}</span>
+                      </button>
+                    </div>
                   </div>
+                  <p className="text-[10px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                    The patient can use either their <strong>MR Number ({patient.patientNumber})</strong> or their <strong>Login Email</strong> with this password to log in to the portal.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-3">
+                  {/* Username / MR Number Display Field */}
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Username / MR Number (Patient Login ID)
+                    </label>
+                    <div className="mt-1 flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2 text-xs dark:border-indigo-900/60 dark:bg-indigo-950/40">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-500 dark:text-slate-400">MRN:</span>
+                        <span className="font-mono font-black text-indigo-950 dark:text-indigo-200">{patient.patientNumber}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => copyText(patient.patientNumber, "mrn_form")}
+                        className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-bold text-indigo-600 shadow-2xs hover:bg-indigo-50 dark:bg-slate-800 dark:text-indigo-300"
+                        title="Copy MR Number"
+                      >
+                        {copiedField === "mrn_form" ? <Check size={12} className="text-emerald-600" /> : <Copy size={12} />}
+                        <span>{copiedField === "mrn_form" ? "Copied" : "Copy MRN"}</span>
+                      </button>
+                    </div>
+                    <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                      Patients can sign in directly using this MR Number as their login username.
+                    </p>
+                  </div>
+
                   <div>
                     <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Patient Login Email (optional override)</label>
                     <input
@@ -1053,6 +1233,68 @@ function TabButton({
 // -------------------------------------------------------------
 // TAB 1: CLINICAL NOTES PANEL WITH DYNAMIC COMPLAINT SEARCH
 // -------------------------------------------------------------
+function extractComplaintsFromNoteText(text: string): string[] {
+  if (!text) return [];
+  const extracted: string[] = [];
+  for (const line of text.split("\n")) {
+    const prefixMatch = line.match(/^(\s*[•\u2022\-\*]?\s*Chief Complaints?:\s*)(.+)$/i);
+    if (prefixMatch && prefixMatch[2]) {
+      prefixMatch[2].split(",").forEach((item) => {
+        const clean = item.trim();
+        if (clean && clean.toLowerCase() !== "none recorded" && !extracted.includes(clean)) {
+          extracted.push(clean);
+        }
+      });
+    }
+  }
+  return extracted;
+}
+
+function removeComplaintFromText(text: string, complaintToRemove: string): string {
+  if (!text) return "";
+  const target = complaintToRemove.trim().toLowerCase();
+  if (!target) return text;
+
+  const lines = text.split("\n");
+  const resultLines: string[] = [];
+
+  for (const line of lines) {
+    const prefixMatch = line.match(/^(\s*[•\u2022\-\*]?\s*Chief Complaints?:\s*)(.+)$/i);
+
+    if (prefixMatch) {
+      const prefix = prefixMatch[1];
+      const content = prefixMatch[2].trim();
+
+      const items = content
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s && s.toLowerCase() !== "none recorded");
+
+      const remainingItems = items.filter((s) => s.toLowerCase() !== target);
+
+      if (items.length !== remainingItems.length) {
+        if (remainingItems.length === 0) {
+          const isSoapLine = /^\s*-\s*Chief Complaints?:/i.test(line);
+          if (isSoapLine) {
+            resultLines.push(`${prefix}None recorded`);
+          }
+          // Standalone bullet line with this complaint: completely remove the line
+          continue;
+        } else {
+          resultLines.push(`${prefix}${remainingItems.join(", ")}`);
+          continue;
+        }
+      }
+    }
+
+    resultLines.push(line);
+  }
+
+  const joined = resultLines.join("\n");
+  if (!joined.trim()) return "";
+  return joined.replace(/\n{3,}/g, "\n\n");
+}
+
 function ConsultationNotePanel({
   encounter,
   onSaved,
@@ -1078,8 +1320,10 @@ function ConsultationNotePanel({
     (entry) => entry.label,
   );
 
-  // Selected chief complaints as removable badge tags
-  const [selectedComplaints, setSelectedComplaints] = useState<string[]>([]);
+  // Selected chief complaints as removable badge tags, initialized from note content or empty
+  const [selectedComplaints, setSelectedComplaints] = useState<string[]>(() =>
+    extractComplaintsFromNoteText(readNoteText(currentNote?.content)),
+  );
 
   const lastSavedTextRef = useRef(noteText);
   const noteIdRef = useRef(noteId);
@@ -1122,17 +1366,47 @@ function ConsultationNotePanel({
     setAmending(true);
     setNoteText("");
     lastSavedTextRef.current = "";
+    setSelectedComplaints([]);
     setNoteId(undefined);
     setNoteVersion(undefined);
   }
 
-  function handleAddComplaint(complaint: string) {
+  function handleAddComplaint(rawComplaint: string) {
+    const complaint = rawComplaint.trim();
+    if (!complaint) return;
     if (!selectedComplaints.includes(complaint)) {
       setSelectedComplaints((prev) => [...prev, complaint]);
-      // Append to note
+
       if (textEditable) {
-        const prefix = noteText.trim() ? `${noteText}\n` : "";
-        setNoteText(`${prefix}• Chief Complaint: ${complaint}`);
+        const soapRegex = /^(\s*[•\-\*\u2022]?\s*Chief Complaints?:\s*)(.+)$/im;
+        if (soapRegex.test(noteText)) {
+          const newText = noteText.replace(soapRegex, (_match, prefix, existing) => {
+            const currentList = existing
+              .split(",")
+              .map((s: string) => s.trim())
+              .filter((s: string) => s && s.toLowerCase() !== "none recorded" && s.toLowerCase() !== complaint.toLowerCase());
+            currentList.push(complaint);
+            return `${prefix}${currentList.join(", ")}`;
+          });
+          setNoteText(newText);
+        } else {
+          // Standard bullet mode: place next to existing chief complaints or append
+          const lines = noteText.split("\n");
+          let lastComplaintIndex = -1;
+          for (let i = lines.length - 1; i >= 0; i--) {
+            if (/^[•\-\*\u2022]?\s*Chief Complaints?:/i.test(lines[i].trim())) {
+              lastComplaintIndex = i;
+              break;
+            }
+          }
+          if (lastComplaintIndex !== -1) {
+            lines.splice(lastComplaintIndex + 1, 0, `• Chief Complaint: ${complaint}`);
+            setNoteText(lines.join("\n"));
+          } else {
+            const prefix = noteText.trim() ? `${noteText}\n` : "";
+            setNoteText(`${prefix}• Chief Complaint: ${complaint}`);
+          }
+        }
       }
     }
     // Save to options if new
@@ -1141,7 +1415,58 @@ function ConsultationNotePanel({
 
   function handleRemoveComplaint(complaint: string) {
     setSelectedComplaints((prev) => prev.filter((c) => c !== complaint));
+    if (textEditable) {
+      setNoteText((current) => removeComplaintFromText(current, complaint));
+    }
   }
+
+  function syncNoteWithSelectedComplaints() {
+    if (!textEditable) return;
+    const lowerSelected = selectedComplaints.map((c) => c.toLowerCase());
+    const lines = noteText.split("\n");
+    const resultLines: string[] = [];
+
+    for (const line of lines) {
+      const prefixMatch = line.match(/^(\s*[•\u2022\-\*]?\s*Chief Complaints?:\s*)(.+)$/i);
+
+      if (prefixMatch) {
+        const prefix = prefixMatch[1];
+        const content = prefixMatch[2].trim();
+
+        const items = content
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s && s.toLowerCase() !== "none recorded");
+
+        const remainingItems = items.filter((s) => lowerSelected.includes(s.toLowerCase()));
+
+        if (remainingItems.length === 0) {
+          const isSoapLine = /^\s*-\s*Chief Complaints?:/i.test(line);
+          if (isSoapLine) {
+            resultLines.push(`${prefix}None recorded`);
+          }
+          // Standalone bullet line with unselected complaint: omit it!
+          continue;
+        } else {
+          resultLines.push(`${prefix}${remainingItems.join(", ")}`);
+          continue;
+        }
+      }
+
+      resultLines.push(line);
+    }
+
+    let newText = resultLines.join("\n");
+    if (!newText.trim()) newText = "";
+    setNoteText(newText.replace(/\n{3,}/g, "\n\n"));
+  }
+
+  const noteComplaints = useMemo(() => extractComplaintsFromNoteText(noteText), [noteText]);
+
+  const outOfSyncComplaints = useMemo(() => {
+    const lowerSelected = selectedComplaints.map((c) => c.toLowerCase());
+    return noteComplaints.filter((c) => !lowerSelected.includes(c.toLowerCase()));
+  }, [noteComplaints, selectedComplaints]);
 
   function applySoapTemplate() {
     if (!textEditable) return;
@@ -1202,14 +1527,28 @@ function ConsultationNotePanel({
               onSelect={(item) => handleAddComplaint(item.label)}
               onAddNew={(query) => handleAddComplaint(query)}
               accentColor="blue"
+              clearOnSelect={true}
             />
 
             {/* Selected Active Removable Complaint Tags */}
-            {selectedComplaints.length > 0 ? (
+            {selectedComplaints.length > 0 || outOfSyncComplaints.length > 0 ? (
               <div className="mt-3">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
-                  Active Chief Complaints ({selectedComplaints.length}):
-                </span>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    Active Chief Complaints ({selectedComplaints.length}):
+                  </span>
+                  {outOfSyncComplaints.length > 0 && textEditable ? (
+                    <button
+                      type="button"
+                      onClick={syncNoteWithSelectedComplaints}
+                      className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800 transition hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-300 cursor-pointer"
+                      title="Remove unselected chief complaints from clinical notes textarea"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      <span>Sync Details ({outOfSyncComplaints.length} removed still in text)</span>
+                    </button>
+                  ) : null}
+                </div>
                 <div className="mt-1.5 flex flex-wrap gap-1.5">
                   {selectedComplaints.map((c) => (
                     <span
@@ -1220,7 +1559,7 @@ function ConsultationNotePanel({
                       <button
                         type="button"
                         onClick={() => handleRemoveComplaint(c)}
-                        className="rounded-full p-0.5 text-blue-500 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950"
+                        className="rounded-full p-0.5 text-blue-500 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950 cursor-pointer"
                         title="Delete complaint"
                       >
                         <X className="h-3.5 w-3.5" />
@@ -1339,6 +1678,8 @@ function GlassmorphicPrescriptionPanel({
   const [route, setRoute] = useState("Oral");
   const [frequency, setFrequency] = useState("");
   const [duration, setDuration] = useState("");
+  const [isCustomDuration, setIsCustomDuration] = useState(false);
+  const [customDays, setCustomDays] = useState("");
   const [quantity, setQuantity] = useState<string>("");
   const [instructions, setInstructions] = useState("");
   const [overallInstructions, setOverallInstructions] = useState("");
@@ -1428,6 +1769,8 @@ function GlassmorphicPrescriptionPanel({
     setDose("");
     setFrequency("");
     setDuration("");
+    setCustomDays("");
+    setIsCustomDuration(false);
     setQuantity("");
     setInstructions("");
   }
@@ -1514,6 +1857,11 @@ function GlassmorphicPrescriptionPanel({
             <DynamicSearchCombobox
               label="Search Medication Formulary or Enter Custom Name"
               placeholder="Search generic/brand name (e.g. Panadol, Augmentin, Risek)…"
+              value={activeSelectedName}
+              onChange={(val) => {
+                setCustomMedName(val);
+                if (!val) setSelectedMedication(null);
+              }}
               items={comboboxItems}
               onSelect={(item) => handleSelectMedication(item.data as MedicationItem)}
               onAddNew={(query) => handleAddNewCustomMedicine(query)}
@@ -1603,16 +1951,111 @@ function GlassmorphicPrescriptionPanel({
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Duration</label>
-                <select
-                  value={duration}
-                  onChange={(e) => setDuration(e.target.value)}
-                  className="mt-1.5 h-11 w-full rounded-2xl border border-slate-200/80 bg-white/80 px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                >
-                  {DURATION_PRESETS.map((d) => (
-                    <option key={d} value={d}>{d}</option>
-                  ))}
-                </select>
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Duration</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isCustomDuration) {
+                        setIsCustomDuration(false);
+                        setCustomDays("");
+                        setDuration("");
+                      } else {
+                        setIsCustomDuration(true);
+                        const match = duration.match(/^(\d+)\s*days?$/i);
+                        setCustomDays(match ? match[1] : "");
+                      }
+                    }}
+                    className="text-[11px] font-bold text-indigo-600 transition hover:text-indigo-800 dark:text-indigo-400"
+                  >
+                    {isCustomDuration ? "Standard Presets" : "+ Custom Days"}
+                  </button>
+                </div>
+
+                {isCustomDuration ? (
+                  <div>
+                    <div className="relative mt-1.5 flex h-11 items-center rounded-2xl border border-indigo-400 bg-white/95 px-3 shadow-inner ring-2 ring-indigo-100 dark:border-indigo-600 dark:bg-slate-800">
+                      <input
+                        type="number"
+                        min="1"
+                        max="365"
+                        value={customDays}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setCustomDays(val);
+                          if (val && !isNaN(Number(val)) && Number(val) > 0) {
+                            const num = parseInt(val, 10);
+                            setDuration(num === 1 ? "1 day" : `${num} days`);
+                          } else {
+                            setDuration("");
+                          }
+                        }}
+                        placeholder="Enter days (e.g. 4)"
+                        className="h-full w-full bg-transparent text-xs font-bold text-slate-900 outline-none placeholder:text-slate-400 dark:text-white"
+                        autoFocus
+                      />
+                      <span className="mr-2 shrink-0 text-xs font-black text-indigo-600 dark:text-indigo-400">
+                        {customDays === "1" ? "day" : "days"}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomDuration(false);
+                          setCustomDays("");
+                          setDuration("");
+                        }}
+                        className="shrink-0 rounded-lg bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-600 transition hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-300"
+                        title="Switch back to presets"
+                      >
+                        Presets
+                      </button>
+                    </div>
+
+                    <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                      <span className="text-[10px] font-semibold text-slate-400">Quick:</span>
+                      {[1, 2, 4, 6, 15, 21, 28].map((d) => (
+                        <button
+                          key={d}
+                          type="button"
+                          onClick={() => {
+                            setCustomDays(String(d));
+                            setDuration(d === 1 ? "1 day" : `${d} days`);
+                          }}
+                          className={`rounded-md px-1.5 py-0.5 text-[10px] font-bold transition ${
+                            customDays === String(d)
+                              ? "bg-indigo-600 text-white"
+                              : "bg-slate-100 text-slate-600 hover:bg-indigo-50 hover:text-indigo-700 dark:bg-slate-800 dark:text-slate-300"
+                          }`}
+                        >
+                          {d}d
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <select
+                    value={duration}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "CUSTOM") {
+                        setIsCustomDuration(true);
+                        setCustomDays("");
+                        setDuration("");
+                      } else {
+                        setDuration(val);
+                      }
+                    }}
+                    className="mt-1.5 h-11 w-full rounded-2xl border border-slate-200/80 bg-white/80 px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  >
+                    <option value="">Select duration...</option>
+                    {DURATION_PRESETS.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                    <option value="CUSTOM">+ Custom days (enter number)...</option>
+                  </select>
+                )}
               </div>
             </div>
 
@@ -1821,7 +2264,7 @@ function GlassmorphicPrescriptionPanel({
                       <div>
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-black text-slate-900 dark:text-white">
-                            {item.medication?.name ?? item.medicationId}
+                            {getPrescriptionItemMedicineName(item, medicationsCatalog)}
                           </span>
                           <span className="rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
                             {item.dose}
@@ -1872,8 +2315,40 @@ function ObservationsPanel({
   const [customObsName, setCustomObsName] = useState("");
   const [customObsValue, setCustomObsValue] = useState("");
   const [customObsUnit, setCustomObsUnit] = useState("");
+  const [deletingObsId, setDeletingObsId] = useState<string | null>(null);
+  const [isDeletingBatch, setIsDeletingBatch] = useState(false);
 
   const { mutate: recordObs, saveState, error } = useRecordObservation(encounter.id);
+
+  async function handleDeleteObservation(id: string) {
+    if (!window.confirm("Are you sure you want to remove this vital measurement?")) {
+      return;
+    }
+    setDeletingObsId(id);
+    try {
+      await fetch(`/api/v1/doctor/encounters/${encounter.id}/observations?observationId=${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      });
+      onSaved();
+    } catch {} finally {
+      setDeletingObsId(null);
+    }
+  }
+
+  async function handleClearAllVitals() {
+    if (!window.confirm("Are you sure you want to remove all vitals recorded for this patient?")) {
+      return;
+    }
+    setIsDeletingBatch(true);
+    try {
+      await fetch(`/api/v1/doctor/encounters/${encounter.id}/observations?clearEncounter=true`, {
+        method: "DELETE",
+      });
+      onSaved();
+    } catch {} finally {
+      setIsDeletingBatch(false);
+    }
+  }
 
   // BMI Calculation
   const bmi = useMemo(() => {
@@ -2096,20 +2571,59 @@ function ObservationsPanel({
 
       {/* Observation Records History */}
       <section className="overflow-hidden rounded-3xl border border-white/60 bg-white/80 p-6 shadow-xl backdrop-blur-2xl dark:border-slate-800/80 dark:bg-slate-900/80">
-        <h3 className="mb-4 text-base font-black text-slate-950 dark:text-white">Observation History</h3>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3 dark:border-slate-800">
+          <div>
+            <h3 className="text-base font-black text-slate-950 dark:text-white">
+              Observation History ({encounter.patient.observations.length})
+            </h3>
+            <p className="text-xs text-slate-500">
+              Recorded vitals and clinical measurements. Click the trash icon on any entry to remove it.
+            </p>
+          </div>
+          {isEditable && encounter.patient.observations.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => void handleClearAllVitals()}
+              disabled={isDeletingBatch}
+              className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100 dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-300"
+              title="Remove all vitals recorded for this visit"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              <span>{isDeletingBatch ? "Removing…" : "Clear All Recorded Vitals"}</span>
+            </button>
+          ) : null}
+        </div>
+
         {encounter.patient.observations.length === 0 ? (
           <p className="py-6 text-center text-xs font-semibold text-slate-500">No vitals or observations recorded yet.</p>
         ) : (
           <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
             {encounter.patient.observations.map((obs) => (
-              <div key={obs.id} className="rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-sm dark:border-slate-700 dark:bg-slate-800">
-                <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">{obs.display}</div>
-                <div className="mt-1 text-sm font-black text-slate-900 dark:text-white">
-                  {obs.valueText ?? obs.valueNumber ?? "—"} {obs.unit ?? ""}
+              <div
+                key={obs.id}
+                className="flex items-start justify-between gap-2 rounded-2xl border border-slate-200/80 bg-white p-3.5 shadow-sm transition hover:border-slate-300 dark:border-slate-700 dark:bg-slate-800"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-slate-400">{obs.display}</div>
+                  <div className="mt-1 text-sm font-black text-slate-900 dark:text-white">
+                    {obs.valueText ?? obs.valueNumber ?? "—"} {obs.unit ?? ""}
+                  </div>
+                  <div className="mt-1 text-[10px] text-slate-400">
+                    {new Date(obs.observedAt).toLocaleString()}
+                  </div>
                 </div>
-                <div className="mt-1 text-[10px] text-slate-400">
-                  {new Date(obs.observedAt).toLocaleString()}
-                </div>
+
+                {isEditable ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteObservation(obs.id)}
+                    disabled={deletingObsId === obs.id}
+                    className="rounded-xl border border-rose-200 bg-rose-50 p-2 text-rose-600 transition hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-400 shrink-0"
+                    title={`Delete ${obs.display}`}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                ) : null}
               </div>
             ))}
           </div>
@@ -2213,6 +2727,9 @@ function DiagnosesPanel({
   }
 
   async function handleDeleteDiagnosis(id: string) {
+    if (!window.confirm("Are you sure you want to remove this diagnosis?")) {
+      return;
+    }
     setDeletingId(id);
     try {
       await fetch(`/api/v1/doctor/encounters/${encounter.id}/diagnoses?diagnosisId=${encodeURIComponent(id)}`, {
@@ -2248,41 +2765,65 @@ function DiagnosesPanel({
             </h2>
           </div>
 
-          {/* Searchable Diagnosis Combobox */}
-          <div className="mb-4">
-            <DynamicSearchCombobox
-              label="Search or Enter Diagnosis (Dropdown with Search & Custom Field)"
-              placeholder="Search ICD-10 conditions (e.g. Hypertension, Diabetes) or type custom diagnosis…"
-              items={comboboxItems}
-              onSelect={(item) => {
-                const d = item.data as typeof INITIAL_DIAGNOSES[number];
-                setDisplay(d.display);
-                setCode(d.code || "");
-                setCertainty(d.certainty);
-              }}
-              onAddNew={(query) => {
-                setDisplay(query);
-                setCode("CUSTOM");
-              }}
-              accentColor="amber"
-              icon={Stethoscope}
-            />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3">
+          {/* Unified Searchable Diagnosis Combobox & Certainty */}
+          <div className="grid gap-3 sm:grid-cols-3 items-start">
             <div className="sm:col-span-2">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Diagnosis Name (Selected / Editable)</label>
-              <input
-                className="mt-1 h-11 w-full rounded-2xl border border-slate-200/80 bg-white px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                onChange={(e) => setDisplay(e.target.value)}
-                placeholder="e.g. Essential Hypertension"
+              <DynamicSearchCombobox
+                label="Diagnosis Name (Search ICD-10 or Enter Custom)"
+                placeholder="Search ICD-10 conditions (e.g. Hypertension, Diabetes) or type custom diagnosis…"
                 value={display}
+                onChange={(val) => {
+                  setDisplay(val);
+                  if (!code || code === "CUSTOM") setCode("CUSTOM");
+                }}
+                items={comboboxItems}
+                onSelect={(item) => {
+                  const d = item.data as (typeof INITIAL_DIAGNOSES)[number];
+                  setDisplay(d.display);
+                  setCode(d.code || "CUSTOM");
+                  if (d.certainty) {
+                    setCertainty(d.certainty as DiagnosisCertainty);
+                  }
+                }}
+                onAddNew={(query) => {
+                  setDisplay(query);
+                  setCode("CUSTOM");
+                }}
+                accentColor="amber"
+                icon={Stethoscope}
               />
+
+              {display.trim() ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-amber-50 px-2 py-0.5 font-bold text-amber-800">
+                    <span>Diagnosis:</span>
+                    <strong className="text-amber-950">{display}</strong>
+                  </span>
+                  {code ? (
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-bold text-slate-700">
+                      ICD-10: {code}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDisplay("");
+                      setCode("");
+                    }}
+                    className="text-[11px] font-bold text-slate-400 hover:text-rose-600 underline"
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : null}
             </div>
+
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Certainty Level</label>
+              <label className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Certainty Level
+              </label>
               <select
-                className="mt-1 h-11 w-full rounded-2xl border border-slate-200/80 bg-white px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                className="h-11 w-full rounded-2xl border border-slate-200/90 bg-white px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 onChange={(e) => setCertainty(e.target.value as DiagnosisCertainty)}
                 value={certainty}
               >
@@ -2423,6 +2964,9 @@ function OrdersPanel({
   }
 
   async function handleDeleteOrder(id: string) {
+    if (!window.confirm("Are you sure you want to cancel this diagnostic order?")) {
+      return;
+    }
     setDeletingId(id);
     try {
       await fetch(`/api/v1/doctor/encounters/${encounter.id}/orders?orderId=${encodeURIComponent(id)}`, {
@@ -2482,41 +3026,63 @@ function OrdersPanel({
             </button>
           </div>
 
-          {/* Searchable Test Combobox */}
-          <div className="mb-4">
-            <DynamicSearchCombobox
-              label={`Search or Enter ${type === "LABORATORY" ? "Lab Test" : "Radiology Scan"} (Dropdown & Custom)`}
-              placeholder={`Search popular ${type.toLowerCase()} procedures or type custom requisition…`}
-              items={comboboxItems}
-              onSelect={(item) => {
-                const d = item.data as { name: string; code: string; priority: string };
-                setName(d.name);
-                setCode(d.code);
-                setPriority(d.priority);
-              }}
-              onAddNew={(query) => {
-                setName(query);
-                setCode(`ORD-${Date.now().toString(36).toUpperCase()}`);
-              }}
-              accentColor="emerald"
-              icon={type === "LABORATORY" ? FlaskConical : Radio}
-            />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-3">
+          {/* Unified Searchable Test Combobox & Priority */}
+          <div className="grid gap-3 sm:grid-cols-3 items-start">
             <div className="sm:col-span-2">
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Test / Procedure Name</label>
-              <input
-                className="mt-1 h-11 w-full rounded-2xl border border-slate-200/80 bg-white px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Complete Blood Count (CBC)"
+              <DynamicSearchCombobox
+                label={`Search or Enter ${type === "LABORATORY" ? "Lab Test" : "Radiology Scan"} (Dropdown & Custom)`}
+                placeholder={`Search popular ${type.toLowerCase()} procedures or type custom requisition…`}
                 value={name}
+                onChange={(val) => {
+                  setName(val);
+                  if (!code || code.startsWith("ORD-")) setCode(`ORD-${Date.now().toString(36).toUpperCase()}`);
+                }}
+                items={comboboxItems}
+                onSelect={(item) => {
+                  const d = item.data as { name: string; code: string; priority: string };
+                  setName(d.name);
+                  setCode(d.code);
+                  setPriority(d.priority);
+                }}
+                onAddNew={(customQuery) => {
+                  setName(customQuery);
+                  setCode(`ORD-${Date.now().toString(36).toUpperCase()}`);
+                }}
+                accentColor="emerald"
+                icon={type === "LABORATORY" ? FlaskConical : Radio}
               />
+
+              {name.trim() ? (
+                <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-bold text-emerald-800">
+                    <span>Selected Order:</span>
+                    <strong className="text-emerald-950">{name}</strong>
+                  </span>
+                  {code ? (
+                    <span className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-0.5 font-mono text-[11px] font-bold text-slate-700">
+                      Code: {code}
+                    </span>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setName("");
+                      setCode("");
+                    }}
+                    className="text-[11px] font-bold text-slate-400 hover:text-rose-600 underline"
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : null}
             </div>
+
             <div>
-              <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Priority</label>
+              <label className="mb-1.5 block text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Priority
+              </label>
               <select
-                className="mt-1 h-11 w-full rounded-2xl border border-slate-200/80 bg-white px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                className="h-11 w-full rounded-2xl border border-slate-200/80 bg-white px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
                 onChange={(e) => setPriority(e.target.value)}
                 value={priority}
               >
@@ -3226,7 +3792,7 @@ function ConsultationReportModal({
                         <tr key={item.id} className="font-semibold hover:bg-slate-50">
                           <td className="py-2 px-2 font-black text-slate-400">{idx + 1}</td>
                           <td className="py-2 px-2 font-black text-slate-900">
-                            {item.medication?.name ?? item.medicationId}
+                            {getPrescriptionItemMedicineName(item)}
                           </td>
                           <td className="py-2 px-2 font-bold text-indigo-950">{item.dose}</td>
                           <td className="py-2 px-2">{item.frequency}</td>

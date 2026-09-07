@@ -115,7 +115,7 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
   return (
     <article className="relative overflow-hidden rounded-3xl border border-slate-200/80 bg-white p-5 shadow-xs transition hover:shadow-md dark:border-slate-800 dark:bg-slate-900">
       <div className="flex items-start gap-4">
-        <div className="grid shrink-0 place-items-center rounded-2xl bg-gradient-to-b from-blue-600 to-indigo-600 px-3.5 py-2.5 text-center text-white shadow-sm">
+        <div className="grid shrink-0 place-items-center rounded-2xl bg-linear-to-b from-blue-600 to-indigo-600 px-3.5 py-2.5 text-center text-white shadow-sm">
           <span className="text-[10px] font-black uppercase tracking-wider text-blue-100">
             {new Intl.DateTimeFormat("en-PK", { month: "short" }).format(startsAt)}
           </span>
@@ -168,7 +168,7 @@ function AppointmentCard({ appointment }: { appointment: Appointment }) {
 
           {appointment.consultationMode === "ONLINE" && !["CANCELLED", "NO_SHOW"].includes(appointment.status) ? (
             <Link
-              className="mt-3.5 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-xs font-black text-white shadow-xs transition hover:from-blue-700 hover:to-indigo-700"
+              className="mt-3.5 inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-4 py-2 text-xs font-black text-white shadow-xs transition hover:from-blue-700 hover:to-indigo-700"
               href={`/patient/appointments/${appointment.id}/video`}
             >
               <Video aria-hidden className="size-4" />
@@ -206,25 +206,43 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
   const [paymentHref, setPaymentHref] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [nextAvailableDate, setNextAvailableDate] = useState<string | null>(null);
+  const [autoSwitched, setAutoSwitched] = useState(false);
 
   const load = useCallback(async () => {
     setError("");
     setLoading(true);
     try {
       const response = await fetch(`/api/v1/patient/booking?date=${date}`, { cache: "no-store" });
-      const body = (await response.json()) as { catalog?: { options: Option[]; slots: Slot[]; blockers?: Blocker[] }; appointments?: Appointment[]; error?: string };
+      const body = (await response.json()) as {
+        catalog?: {
+          options: Option[];
+          slots: Slot[];
+          blockers?: Blocker[];
+          nextAvailableDate?: string | null;
+        };
+        appointments?: Appointment[];
+        error?: string;
+      };
       if (!response.ok || !body.catalog) throw new Error(body.error || "Appointments could not be loaded. Please try again.");
       setOptions(body.catalog.options);
       setSlots(body.catalog.slots);
       setBlockers(body.catalog.blockers ?? []);
+      setNextAvailableDate(body.catalog.nextAvailableDate ?? null);
       setAppointments(body.appointments ?? []);
       setRuleId((current) => (current && body.catalog!.options.some((option) => option.ruleId === current) ? current : body.catalog!.options[0]?.ruleId ?? ""));
+
+      // If initial selected day (e.g. tomorrow Sunday) has 0 slots, auto-advance to next clinic date
+      if (!autoSwitched && body.catalog.slots.length === 0 && body.catalog.nextAvailableDate) {
+        setAutoSwitched(true);
+        setDate(body.catalog.nextAvailableDate);
+      }
     } catch (cause) {
       setError(cause instanceof Error && cause.message ? cause.message : "Appointments could not be loaded. Please try again.");
     } finally {
       setLoading(false);
     }
-  }, [date]);
+  }, [date, autoSwitched]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -234,7 +252,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
 
   const availableSlots = useMemo(() => slots.filter((slot) => slot.ruleId === ruleId), [ruleId, slots]);
   const selectedOption = options.find((option) => option.ruleId === ruleId);
-  const mode = selectedOption?.consultationModes.length === 1 ? selectedOption.consultationModes[0]! : chosenMode;
+  const mode = chosenMode || (selectedOption?.consultationModes[0] ?? "");
   const modeRequiresChoice = (selectedOption?.consultationModes.length ?? 0) > 1;
   const requiresPrepayment = mode === "ONLINE" && selectedOption?.requiresPrepayment === true;
 
@@ -287,7 +305,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
         <WonFlowPageHeader
           actions={
             <Link
-              className="inline-flex min-h-11 items-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 text-sm font-black text-white shadow-md transition hover:from-blue-700 hover:to-indigo-700"
+              className="inline-flex min-h-11 items-center gap-2 rounded-2xl bg-linear-to-r from-blue-600 to-indigo-600 px-5 text-sm font-black text-white shadow-md transition hover:from-blue-700 hover:to-indigo-700"
               href="/patient/appointments/book"
             >
               <CalendarPlus aria-hidden className="size-4" />
@@ -326,7 +344,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
                 <EmptyState
                   action={
                     label === "Upcoming" ? (
-                      <Link className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-xs font-black text-white shadow-sm" href="/patient/appointments/book">
+                      <Link className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-xs font-black text-white shadow-sm" href="/patient/appointments/book">
                         <CalendarPlus className="size-4" />
                         Book Appointment
                       </Link>
@@ -389,6 +407,19 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
               type="date"
               value={date}
             />
+            {date ? (
+              <p className="mt-1.5 flex items-center gap-1.5 text-xs font-bold text-blue-600 dark:text-blue-400">
+                <CalendarDays className="size-3.5" />
+                <span>
+                  {new Date(`${date}T00:00:00`).toLocaleDateString("en-PK", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric",
+                  })}
+                </span>
+              </p>
+            ) : null}
           </label>
 
           <label className="block">
@@ -412,6 +443,37 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
           </label>
         </div>
 
+        {!loading && nextAvailableDate && nextAvailableDate !== date ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-200 bg-blue-50/80 p-4 text-xs font-semibold text-blue-950 dark:border-blue-900/50 dark:bg-blue-950/40 dark:text-blue-200">
+            <div className="flex items-center gap-2">
+              <CalendarDays className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />
+              <span>
+                Next available clinic date is{" "}
+                <strong className="font-black">
+                  {new Date(`${nextAvailableDate}T00:00:00`).toLocaleDateString("en-PK", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "short",
+                    year: "numeric",
+                  })}
+                </strong>
+                .
+              </span>
+            </div>
+            <button
+              className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-black text-white shadow-xs transition hover:bg-blue-700"
+              onClick={() => {
+                setDate(nextAvailableDate);
+                setSlotId("");
+              }}
+              type="button"
+            >
+              <CalendarCheck className="size-3.5" />
+              Switch to {new Date(`${nextAvailableDate}T00:00:00`).toLocaleDateString("en-PK", { weekday: "short", day: "numeric", month: "short" })}
+            </button>
+          </div>
+        ) : null}
+
         {!loading && blockers.length ? (
           <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 p-4.5 dark:border-amber-900/50 dark:bg-amber-950/40">
             <p className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
@@ -428,7 +490,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
 
         {selectedOption ? (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-blue-200/80 bg-gradient-to-r from-blue-50 to-indigo-50/50 p-4 text-xs font-bold text-slate-700 dark:border-blue-900/50 dark:from-blue-950/40 dark:to-slate-900 dark:text-slate-300">
+            <div className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-blue-200/80 bg-linear-to-r from-blue-50 to-indigo-50/50 p-4 text-xs font-bold text-slate-700 dark:border-blue-900/50 dark:from-blue-950/40 dark:to-slate-900 dark:text-slate-300">
               <span className="inline-flex items-center gap-1.5 text-sm font-black text-slate-900 dark:text-white">
                 <Stethoscope aria-hidden className="size-4 text-blue-600" />
                 {selectedOption.doctorName}
@@ -514,14 +576,29 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
               })}
             </div>
           ) : (
-            <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-6 text-center text-xs font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-900/40">
-              {loading
-                ? "Loading available consultation slots…"
-                : ruleId
-                  ? "No consultation times remain for this doctor on this date. Please select another date."
-                  : options.length
-                    ? "Select a doctor and date to view bookable consultation slots."
-                    : blockers[0]?.message ?? "No consultation slots are available on this date. Please select another date."}
+            <div className="mt-3 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 p-6 text-center text-xs font-semibold text-slate-500 dark:border-slate-800 dark:bg-slate-900/40">
+              <p>
+                {loading
+                  ? "Loading available consultation slots…"
+                  : ruleId
+                    ? "No consultation times remain for this doctor on this date. Please select another date."
+                    : options.length
+                      ? "Select a doctor and date to view bookable consultation slots."
+                      : blockers[0]?.message ?? "No consultation slots are available on this date. Please select another date."}
+              </p>
+              {!loading && nextAvailableDate && nextAvailableDate !== date ? (
+                <button
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white shadow-xs transition hover:bg-blue-700"
+                  onClick={() => {
+                    setDate(nextAvailableDate);
+                    setSlotId("");
+                  }}
+                  type="button"
+                >
+                  <CalendarDays className="size-3.5" />
+                  View slots on {new Date(`${nextAvailableDate}T00:00:00`).toLocaleDateString("en-PK", { weekday: "long", month: "short", day: "numeric" })}
+                </button>
+              ) : null}
             </div>
           )}
         </fieldset>
@@ -538,7 +615,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
         </label>
 
         <button
-          className="w-full rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-sm font-black text-white shadow-md transition hover:from-blue-700 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded-2xl bg-linear-to-r from-blue-600 to-indigo-600 p-4 text-sm font-black text-white shadow-md transition hover:from-blue-700 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={busy || !slotId || !mode}
           type="submit"
         >

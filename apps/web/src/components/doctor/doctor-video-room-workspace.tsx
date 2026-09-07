@@ -158,17 +158,17 @@ export function DoctorVideoRoomWorkspace() {
 
   // Clinical Documentation / Charting State (Simultaneous while on call!)
   const [chiefComplaints, setChiefComplaints] = useState("");
-  const [bp, setBp] = useState("120/80");
-  const [pulse, setPulse] = useState("76");
-  const [temperature, setTemperature] = useState("98.6");
-  const [spO2, setSpO2] = useState("99");
+  const [bp, setBp] = useState("");
+  const [pulse, setPulse] = useState("");
+  const [temperature, setTemperature] = useState("");
+  const [spO2, setSpO2] = useState("");
   const [bloodSugar, setBloodSugar] = useState("");
   const [weightKg, setWeightKg] = useState("");
   const [primaryDiagnosis, setPrimaryDiagnosis] = useState("");
   const [clinicalNotes, setClinicalNotes] = useState("");
   const [followUpPlan, setFollowUpPlan] = useState("");
   const [prescriptions, setPrescriptions] = useState<PrescriptionRow[]>([
-    { id: "1", medicineName: "", dosage: "1 Tab", frequency: "Twice daily (BD / 1-0-1)", duration: "5 Days", instructions: "After food" },
+    { id: "1", medicineName: "", dosage: "", frequency: "", duration: "", instructions: "" },
   ]);
   const [isSavingChart, setIsSavingChart] = useState(false);
   const [chartSavedSuccess, setChartSavedSuccess] = useState(false);
@@ -185,18 +185,13 @@ export function DoctorVideoRoomWorkspace() {
       if (res.ok) {
         const data = await res.json();
         setCallsData(data);
-        if (!selectedCall && data.liveCall) {
-          setSelectedCall(data.liveCall);
-        } else if (!selectedCall && data.calls.length > 0) {
-          setSelectedCall(data.calls[0]);
-        }
       }
     } catch {
       // transient
     } finally {
       setLoading(false);
     }
-  }, [selectedCall]);
+  }, []);
 
   /*
    * The call list: one fetch on mount, then a refresh every fifteen seconds.
@@ -265,10 +260,41 @@ export function DoctorVideoRoomWorkspace() {
 
   // Initialize Room when Selected Call Changes
   useEffect(() => {
-    if (!selectedCall) return;
+    if (!selectedCall) {
+      setChiefComplaints("");
+      setBp("");
+      setPulse("");
+      setTemperature("");
+      setSpO2("");
+      setBloodSugar("");
+      setWeightKg("");
+      setPrimaryDiagnosis("");
+      setClinicalNotes("");
+      setFollowUpPlan("");
+      setPrescriptions([
+        { id: "1", medicineName: "", dosage: "", frequency: "", duration: "", instructions: "" },
+      ]);
+      setChartSavedSuccess(false);
+      setCallConfig(null);
+      setCallStatus("Ready to start video call");
+      setCallError("");
+      return;
+    }
     stopMedia();
     setChartSavedSuccess(false);
     setChiefComplaints(selectedCall.reason || "");
+    setBp("");
+    setPulse("");
+    setTemperature("");
+    setSpO2("");
+    setBloodSugar("");
+    setWeightKg("");
+    setPrimaryDiagnosis("");
+    setClinicalNotes("");
+    setFollowUpPlan("");
+    setPrescriptions([
+      { id: "1", medicineName: "", dosage: "", frequency: "", duration: "", instructions: "" },
+    ]);
 
     let active = true;
     fetch(`/api/v1/video-consultations/${selectedCall.id}`, { cache: "no-store" })
@@ -486,7 +512,7 @@ export function DoctorVideoRoomWorkspace() {
   const addPrescriptionRow = () => {
     setPrescriptions((prev) => [
       ...prev,
-      { id: String(Date.now()), medicineName: "", dosage: "1 Tab", frequency: "Twice daily (BD / 1-0-1)", duration: "5 Days", instructions: "After food" },
+      { id: String(Date.now()), medicineName: "", dosage: "", frequency: "", duration: "", instructions: "" },
     ]);
   };
 
@@ -532,6 +558,7 @@ export function DoctorVideoRoomWorkspace() {
       setChartSavedSuccess(true);
       if (completeCall) {
         await endCall();
+        setSelectedCall(null);
       }
       void loadCalls();
     } catch (e) {
@@ -949,210 +976,291 @@ export function DoctorVideoRoomWorkspace() {
                 </h3>
               </div>
               {selectedCall ? (
-                <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
-                  MRN: {selectedCall.patientNumber}
-                </span>
-              ) : null}
-            </div>
-
-            {chartSavedSuccess ? (
-              <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200">
                 <div className="flex items-center gap-2">
-                  <CheckCircle2 className="size-5 text-emerald-600" />
-                  <h4 className="font-black text-xs">Consultation Chart &amp; Digital Rx Issued!</h4>
-                </div>
-                <p className="mt-1 text-[11px]">
-                  The prescription and clinical notes are now active and synced to the patient portal at <strong>/patient</strong>.
-                </p>
-              </div>
-            ) : null}
-
-            {/* Vitals Input Row */}
-            <div className="mt-4 space-y-3">
-              <span className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Patient Vitals
-              </span>
-              <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-                <div>
-                  <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">BP (mmHg)</label>
-                  <input className={INPUT_CLASS} onChange={(e) => setBp(e.target.value)} value={bp} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">Pulse (bpm)</label>
-                  <input className={INPUT_CLASS} onChange={(e) => setPulse(e.target.value)} value={pulse} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">Temp (°F)</label>
-                  <input className={INPUT_CLASS} onChange={(e) => setTemperature(e.target.value)} value={temperature} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">SpO2 (%)</label>
-                  <input className={INPUT_CLASS} onChange={(e) => setSpO2(e.target.value)} value={spO2} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">Sugar (mg/dL)</label>
-                  <input className={INPUT_CLASS} onChange={(e) => setBloodSugar(e.target.value)} placeholder="110" value={bloodSugar} />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">Weight (kg)</label>
-                  <input className={INPUT_CLASS} onChange={(e) => setWeightKg(e.target.value)} placeholder="70" value={weightKg} />
-                </div>
-              </div>
-            </div>
-
-            {/* Chief Complaints & History */}
-            <div className="mt-4 space-y-1.5">
-              <label className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Chief Complaints &amp; Clinical History
-              </label>
-              <textarea
-                className={`${INPUT_CLASS} min-h-16 py-2`}
-                onChange={(e) => setChiefComplaints(e.target.value)}
-                placeholder="Patient symptoms, fever onset, duration, previous medication response..."
-                value={chiefComplaints}
-              />
-            </div>
-
-            {/* Diagnosis Selection */}
-            <div className="mt-4 space-y-1.5">
-              <label className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                Primary Diagnosis (ICD-10)
-              </label>
-              <input
-                className={INPUT_CLASS}
-                onChange={(e) => setPrimaryDiagnosis(e.target.value)}
-                placeholder="e.g. Acute Bronchitis, Essential Hypertension, Viral Fever"
-                value={primaryDiagnosis}
-              />
-              <div className="mt-1.5 flex flex-wrap gap-1">
-                {COMMON_DIAGNOSES.slice(0, 4).map((d) => (
+                  <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300">
+                    MRN: {selectedCall.patientNumber}
+                  </span>
                   <button
-                    className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 dark:bg-slate-800 dark:text-slate-300"
-                    key={d}
-                    onClick={() => setPrimaryDiagnosis(d)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-bold text-slate-500 hover:border-slate-300 hover:text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                    onClick={() => {
+                      stopMedia();
+                      setSelectedCall(null);
+                    }}
+                    title="Deselect patient"
                     type="button"
                   >
-                    + {d.split("(")[0]}
+                    <X size={12} /> Deselect
                   </button>
-                ))}
-              </div>
+                </div>
+              ) : (
+                <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                  No Patient Selected
+                </span>
+              )}
             </div>
 
-            {/* Interactive Prescription Pad */}
-            <div className="mt-5 space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5 text-xs font-black text-slate-900 dark:text-white">
-                  <Pill className="size-4 text-indigo-600" />
-                  <span>Digital Prescription (Rx)</span>
-                </div>
-                <button
-                  className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-black text-white hover:bg-indigo-700"
-                  onClick={addPrescriptionRow}
-                  type="button"
-                >
-                  <Plus size={12} /> Add Medicine
-                </button>
-              </div>
-
-              <div className="space-y-2.5">
-                {prescriptions.map((row, idx) => (
-                  <div
-                    className="grid gap-2 rounded-xl border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-800 sm:grid-cols-[1.5fr_0.8fr_1fr_0.8fr_auto]"
-                    key={row.id}
-                  >
+            {selectedCall ? (
+              <>
+                {/* Active Consultation Patient Strip */}
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 dark:border-slate-800 dark:bg-slate-800/40">
+                  <div className="flex items-center gap-3">
+                    <span className="grid size-9 place-items-center rounded-xl bg-indigo-600 text-xs font-black text-white shadow-xs">
+                      {selectedCall.patientName.slice(0, 2).toUpperCase()}
+                    </span>
                     <div>
-                      <label className="text-[9px] font-bold text-slate-500">Medicine Name</label>
-                      <input
-                        className={INPUT_CLASS}
-                        onChange={(e) => updatePrescriptionRow(row.id, "medicineName", e.target.value)}
-                        placeholder="e.g. Tab Panadol 500mg, Cap Augmentin 625mg"
-                        value={row.medicineName}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-bold text-slate-500">Dosage</label>
-                      <input
-                        className={INPUT_CLASS}
-                        onChange={(e) => updatePrescriptionRow(row.id, "dosage", e.target.value)}
-                        placeholder="1 Tab"
-                        value={row.dosage}
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-bold text-slate-500">Frequency</label>
-                      <select
-                        className={INPUT_CLASS}
-                        onChange={(e) => updatePrescriptionRow(row.id, "frequency", e.target.value)}
-                        value={row.frequency}
-                      >
-                        {FREQUENCIES.map((f) => (
-                          <option key={f} value={f}>
-                            {f}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[9px] font-bold text-slate-500">Duration</label>
-                      <input
-                        className={INPUT_CLASS}
-                        onChange={(e) => updatePrescriptionRow(row.id, "duration", e.target.value)}
-                        placeholder="5 Days"
-                        value={row.duration}
-                      />
-                    </div>
-                    <div className="flex items-end">
-                      <button
-                        className="mb-1 rounded-lg p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950"
-                        onClick={() => removePrescriptionRow(row.id)}
-                        title="Remove medicine"
-                        type="button"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-black text-slate-950 dark:text-white">
+                          {selectedCall.patientName}
+                        </h4>
+                        <span className="rounded-md bg-indigo-100 px-1.5 py-0.5 text-[9px] font-bold text-indigo-800 dark:bg-indigo-900/80 dark:text-indigo-200">
+                          MRN: {selectedCall.patientNumber}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        {selectedCall.patientAge ? `${selectedCall.patientAge} yrs • ` : ""}
+                        {selectedCall.patientGender !== "unknown" ? `${selectedCall.patientGender} • ` : ""}
+                        {selectedCall.reason || selectedCall.serviceName}
+                      </p>
                     </div>
                   </div>
-                ))}
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-lg bg-white px-2.5 py-1 text-[10px] font-bold text-slate-700 shadow-2xs dark:bg-slate-900 dark:text-slate-300">
+                      {new Date(selectedCall.startsAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    </span>
+                  </div>
+                </div>
+
+                {chartSavedSuccess ? (
+                  <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-200">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="size-5 text-emerald-600" />
+                      <h4 className="font-black text-xs">Consultation Chart &amp; Digital Rx Issued!</h4>
+                    </div>
+                    <p className="mt-1 text-[11px]">
+                      The prescription and clinical notes are now active and synced to the patient portal at <strong>/patient</strong>.
+                    </p>
+                  </div>
+                ) : null}
+
+                {/* Vitals Input Row */}
+                <div className="mt-4 space-y-3">
+                  <span className="block text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Patient Vitals
+                  </span>
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">BP (mmHg)</label>
+                      <input className={INPUT_CLASS} onChange={(e) => setBp(e.target.value)} placeholder="120/80" value={bp} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">Pulse (bpm)</label>
+                      <input className={INPUT_CLASS} onChange={(e) => setPulse(e.target.value)} placeholder="76" value={pulse} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">Temp (°F)</label>
+                      <input className={INPUT_CLASS} onChange={(e) => setTemperature(e.target.value)} placeholder="98.6" value={temperature} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">SpO2 (%)</label>
+                      <input className={INPUT_CLASS} onChange={(e) => setSpO2(e.target.value)} placeholder="99" value={spO2} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">Sugar (mg/dL)</label>
+                      <input className={INPUT_CLASS} onChange={(e) => setBloodSugar(e.target.value)} placeholder="110" value={bloodSugar} />
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-slate-600 dark:text-slate-400">Weight (kg)</label>
+                      <input className={INPUT_CLASS} onChange={(e) => setWeightKg(e.target.value)} placeholder="70" value={weightKg} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Chief Complaints & History */}
+                <div className="mt-4 space-y-1.5">
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Chief Complaints &amp; Clinical History
+                  </label>
+                  <textarea
+                    className={`${INPUT_CLASS} min-h-16 py-2`}
+                    onChange={(e) => setChiefComplaints(e.target.value)}
+                    placeholder="Patient symptoms, fever onset, duration, previous medication response..."
+                    value={chiefComplaints}
+                  />
+                </div>
+
+                {/* Diagnosis Selection */}
+                <div className="mt-4 space-y-1.5">
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                    Primary Diagnosis (ICD-10)
+                  </label>
+                  <input
+                    className={INPUT_CLASS}
+                    onChange={(e) => setPrimaryDiagnosis(e.target.value)}
+                    placeholder="e.g. Acute Bronchitis, Essential Hypertension, Viral Fever"
+                    value={primaryDiagnosis}
+                  />
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {COMMON_DIAGNOSES.slice(0, 4).map((d) => (
+                      <button
+                        className="rounded-lg bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 dark:bg-slate-800 dark:text-slate-300"
+                        key={d}
+                        onClick={() => setPrimaryDiagnosis(d)}
+                        type="button"
+                      >
+                        + {d.split("(")[0]}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Interactive Prescription Pad */}
+                <div className="mt-5 space-y-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5 text-xs font-black text-slate-900 dark:text-white">
+                      <Pill className="size-4 text-indigo-600" />
+                      <span>Digital Prescription (Rx)</span>
+                    </div>
+                    <button
+                      className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-black text-white hover:bg-indigo-700"
+                      onClick={addPrescriptionRow}
+                      type="button"
+                    >
+                      <Plus size={12} /> Add Medicine
+                    </button>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {prescriptions.map((row, idx) => (
+                      <div
+                        className="grid gap-2 rounded-xl border border-slate-200 bg-white p-2.5 dark:border-slate-700 dark:bg-slate-800 sm:grid-cols-[1.5fr_0.8fr_1fr_0.8fr_auto]"
+                        key={row.id}
+                      >
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-500">Medicine Name</label>
+                          <input
+                            className={INPUT_CLASS}
+                            onChange={(e) => updatePrescriptionRow(row.id, "medicineName", e.target.value)}
+                            placeholder="e.g. Tab Panadol 500mg, Cap Augmentin 625mg"
+                            value={row.medicineName}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-500">Dosage</label>
+                          <input
+                            className={INPUT_CLASS}
+                            onChange={(e) => updatePrescriptionRow(row.id, "dosage", e.target.value)}
+                            placeholder="1 Tab"
+                            value={row.dosage}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-500">Frequency</label>
+                          <select
+                            className={INPUT_CLASS}
+                            onChange={(e) => updatePrescriptionRow(row.id, "frequency", e.target.value)}
+                            value={row.frequency}
+                          >
+                            {FREQUENCIES.map((f) => (
+                              <option key={f} value={f}>
+                                {f}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[9px] font-bold text-slate-500">Duration</label>
+                          <input
+                            className={INPUT_CLASS}
+                            onChange={(e) => updatePrescriptionRow(row.id, "duration", e.target.value)}
+                            placeholder="5 Days"
+                            value={row.duration}
+                          />
+                        </div>
+                        <div className="flex items-end">
+                          <button
+                            className="mb-1 rounded-lg p-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950"
+                            onClick={() => removePrescriptionRow(row.id)}
+                            title="Remove medicine"
+                            type="button"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Clinical Notes & Follow-up Plan */}
+                <div className="mt-4 space-y-3">
+                  <div>
+                    <label className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Follow-up &amp; Patient Advice
+                    </label>
+                    <input
+                      className={INPUT_CLASS}
+                      onChange={(e) => setFollowUpPlan(e.target.value)}
+                      placeholder="e.g. Rest, drink plenty of fluids, follow-up in 5 days if fever persists"
+                      value={followUpPlan}
+                    />
+                  </div>
+                </div>
+
+                {/* Chart Action Buttons */}
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
+                  <button
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-700 px-5 text-xs font-black text-white shadow-lg shadow-indigo-500/25 transition hover:scale-[1.02] disabled:opacity-50"
+                    disabled={isSavingChart || !selectedCall}
+                    onClick={() => void handleSaveChart(false)}
+                    type="button"
+                  >
+                    <Send className="size-4" />
+                    {isSavingChart ? "Saving & Syncing Rx…" : "💾 Save & Issue Prescription to Patient"}
+                  </button>
+
+                  <button
+                    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-black text-white hover:bg-emerald-700 disabled:opacity-50"
+                    disabled={isSavingChart || !selectedCall}
+                    onClick={() => void handleSaveChart(true)}
+                    type="button"
+                  >
+                    <Check className="size-4" />
+                    Complete &amp; Conclude Visit
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
+                <div className="relative grid size-16 place-items-center rounded-3xl bg-gradient-to-tr from-indigo-500/10 via-indigo-500/20 to-purple-500/20 text-indigo-600 shadow-inner dark:bg-indigo-950/40 dark:text-indigo-400">
+                  <Stethoscope className="size-8" />
+                </div>
+                <h4 className="mt-4 text-base font-black text-slate-900 dark:text-white">
+                  No Patient Selected
+                </h4>
+                <p className="mt-1.5 max-w-sm text-xs text-slate-500 dark:text-slate-400">
+                  Patient vitals, clinical history, and digital prescription pad will be visible once you select a patient in the online appointment.
+                </p>
+
+                <div className="mt-6 w-full max-w-sm space-y-2.5">
+                  <div className="flex items-center gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 text-left transition dark:border-indigo-950 dark:bg-indigo-950/30">
+                    <div className="grid size-7 shrink-0 place-items-center rounded-xl bg-indigo-600 text-[11px] font-black text-white shadow-xs">
+                      1
+                    </div>
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                      <strong className="text-slate-900 dark:text-white">From Schedule:</strong> Click any scheduled consultation under &ldquo;Today&apos;s Video Consultation Schedule&rdquo;.
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-3 rounded-2xl border border-violet-100 bg-violet-50/60 p-3 text-left transition dark:border-violet-950 dark:bg-violet-950/30">
+                    <div className="grid size-7 shrink-0 place-items-center rounded-xl bg-violet-600 text-[11px] font-black text-white shadow-xs">
+                      2
+                    </div>
+                    <div className="text-[11px] text-slate-600 dark:text-slate-300">
+                      <strong className="text-slate-900 dark:text-white">Instant Call:</strong> Search any registered patient in the search box above to start an instant tele-consult.
+                    </div>
+                  </div>
+                </div>
               </div>
-            </div>
-
-            {/* Clinical Notes & Follow-up Plan */}
-            <div className="mt-4 space-y-3">
-              <div>
-                <label className="text-[11px] font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  Follow-up &amp; Patient Advice
-                </label>
-                <input
-                  className={INPUT_CLASS}
-                  onChange={(e) => setFollowUpPlan(e.target.value)}
-                  placeholder="e.g. Rest, drink plenty of fluids, follow-up in 5 days if fever persists"
-                  value={followUpPlan}
-                />
-              </div>
-            </div>
-
-            {/* Chart Action Buttons */}
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
-              <button
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-700 px-5 text-xs font-black text-white shadow-lg shadow-indigo-500/25 transition hover:scale-[1.02] disabled:opacity-50"
-                disabled={isSavingChart || !selectedCall}
-                onClick={() => void handleSaveChart(false)}
-                type="button"
-              >
-                <Send className="size-4" />
-                {isSavingChart ? "Saving & Syncing Rx…" : "💾 Save & Issue Prescription to Patient"}
-              </button>
-
-              <button
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 text-xs font-black text-white hover:bg-emerald-700 disabled:opacity-50"
-                disabled={isSavingChart || !selectedCall}
-                onClick={() => void handleSaveChart(true)}
-                type="button"
-              >
-                <Check className="size-4" />
-                Complete &amp; Conclude Visit
-              </button>
-            </div>
+            )}
           </div>
         </section>
       </div>

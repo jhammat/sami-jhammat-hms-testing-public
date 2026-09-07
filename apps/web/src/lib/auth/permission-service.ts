@@ -67,6 +67,36 @@ export async function requireRequestContext(): Promise<WonFlowRequestContext> {
   if (session.role === "platform" && !session.tenantId) return { scope: "platform", requestId: crypto.randomUUID(),
     userId: session.identityId, identityId: session.identityId, membershipId: null, sessionId: session.sessionId, workspace: "platform", locale: "en", timezone: "UTC",
     currencyCode: "PKR", permissionCodes: session.permissionCodes, sourceApplication: "web", tenantId: null, organizationId: null, branchId: null };
+
+  if (session.role === "patient") {
+    if (!session.tenantId) throw new WonFlowRequestContextError("tenant-context-required", "Patient tenant is required.");
+    const [organization, timezone] = await Promise.all([
+      session.organizationId
+        ? Promise.resolve({ id: session.organizationId })
+        : database.organization.findFirst({ where: { tenantId: session.tenantId, status: "ACTIVE" }, select: { id: true } }),
+      resolveTimezone({ tenantId: session.tenantId, branchId: session.branchId }),
+    ]);
+    if (!organization) throw new WonFlowRequestContextError("tenant-context-required", "Hospital organization not found.");
+    const context: WonFlowTenantRequestContext = {
+      scope: "tenant",
+      requestId: crypto.randomUUID(),
+      userId: session.identityId,
+      identityId: session.identityId,
+      membershipId: session.membershipId ?? null,
+      sessionId: session.sessionId,
+      workspace: "patient",
+      locale: "en",
+      timezone,
+      currencyCode: "PKR",
+      permissionCodes: session.permissionCodes,
+      sourceApplication: "web",
+      tenantId: session.tenantId,
+      organizationId: organization.id,
+      branchId: session.branchId ?? null,
+    };
+    return context;
+  }
+
   if (!session.membershipId || !session.tenantId || !session.organizationId) throw new WonFlowRequestContextError("tenant-context-required", "Select an organization and workspace.");
   const [permissionCodes, timezone] = await Promise.all([
     resolvePermissionCodes({ membershipId: session.membershipId, tenantId: session.tenantId, branchId: session.branchId }),

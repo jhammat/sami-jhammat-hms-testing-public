@@ -1,4 +1,4 @@
-﻿# Dependencies
+# Dependencies
 node_modules/
 .pnpm-store/
 
@@ -93,3 +93,4 @@ zero-baseline-audit.txt
 # Standalone front-end showcase site and its raw capture set — local demo only
 /wonflow-showcase/
 /screenshots/
+scratch/

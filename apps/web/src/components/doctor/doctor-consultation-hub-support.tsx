@@ -257,7 +257,7 @@ function getAllergySummary(
             safeText(record.reaction),
           ]
             .filter(Boolean)
-            .join(" â€” "),
+            .join(" — "),
         )
         .filter(Boolean);
 
@@ -446,13 +446,13 @@ export function printPrescription(
     .map(
       (item) => `
         <tr>
-          <td>${escapeHtml(safeText(item.medicineName) ?? "â€”")}</td>
-          <td>${escapeHtml(safeText(item.strength) ?? "â€”")}</td>
-          <td>${escapeHtml(safeText(item.dosage) ?? "â€”")}</td>
-          <td>${escapeHtml(safeText(item.route) === undefined ? "â€”" : humanize(item.route))}</td>
-          <td>${escapeHtml(safeText(item.frequency) ?? "â€”")}</td>
-          <td>${escapeHtml(safeText(item.duration) ?? "â€”")}</td>
-          <td>${escapeHtml(safeText(item.instructions) ?? "â€”")}</td>
+          <td>${escapeHtml(safeText(item.medicineName) ?? "—")}</td>
+          <td>${escapeHtml(safeText(item.strength) ?? "—")}</td>
+          <td>${escapeHtml(safeText(item.dosage) ?? "—")}</td>
+          <td>${escapeHtml(safeText(item.route) === undefined ? "—" : humanize(item.route))}</td>
+          <td>${escapeHtml(safeText(item.frequency) ?? "—")}</td>
+          <td>${escapeHtml(safeText(item.duration) ?? "—")}</td>
+          <td>${escapeHtml(safeText(item.instructions) ?? "—")}</td>
         </tr>`,
     )
     .join("");
@@ -719,9 +719,9 @@ export function requestedQueueMessage(
 
   switch (entry.status) {
     case "waiting":
-      return `${entry.tokenNumber} is waiting. Call the patient from Todayâ€™s Queue before starting a consultation.`;
+      return `${entry.tokenNumber} is waiting. Call the patient from Today's Queue before starting a consultation.`;
     case "skipped":
-      return `${entry.tokenNumber} is skipped. Return the patient from Todayâ€™s Queue before continuing.`;
+      return `${entry.tokenNumber} is skipped. Return the patient from Today's Queue before continuing.`;
     case "serving":
       return `${entry.tokenNumber} is serving, but its clinical encounter link is unavailable. Restore the encounter below.`;
     case "completed":

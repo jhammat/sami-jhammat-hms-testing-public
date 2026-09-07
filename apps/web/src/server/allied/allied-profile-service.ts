@@ -71,6 +71,11 @@ export interface AlliedProfileView {
   permissions: string[];
   branches: { id: string; name: string }[];
   caseload: AlliedProfileCaseload;
+  preferences: {
+    clinicalFocus: string[];
+    dailyStepGoal: string;
+    spirometryGoal: string;
+  };
 }
 
 export interface UpdateAlliedProfileInput {
@@ -79,6 +84,9 @@ export interface UpdateAlliedProfileInput {
   staffType?: string;
   primaryBranchId?: string | null;
   preferredLocale?: string;
+  clinicalFocus?: string[];
+  dailyStepGoal?: string;
+  spirometryGoal?: string;
 }
 
 /**
@@ -228,6 +236,45 @@ export async function readAlliedProfile(
     },
   });
 
+  const defaultFocus =
+    specialty === "NUTRITION"
+      ? [
+          "Surgical Oncology Nutrition",
+          "PERT (Creon) Titration & Monitoring",
+        ]
+      : [
+          "ERAS® Post-Surgical Mobilization",
+          "HPB & Upper GI Rehabilitation",
+        ];
+  const defaultDailyStepGoal = specialty === "NUTRITION" ? "25-30 kcal/kg/day" : "100m (corridor)";
+  const defaultSpirometryGoal = specialty === "NUTRITION" ? "1.5 g/kg/day" : "1500 mL q1h";
+
+  const latestPreferencesEvent = await database.auditEvent.findFirst({
+    where: {
+      tenantId: context.tenantId,
+      action: "allied.preferences.updated",
+      entityId: staff.id,
+    },
+    orderBy: { createdAt: "desc" },
+    select: { metadata: true },
+  });
+
+  const rawMetadata = (latestPreferencesEvent?.metadata as Record<string, unknown> | null) ?? null;
+  const preferences = {
+    clinicalFocus:
+      Array.isArray(rawMetadata?.clinicalFocus) && rawMetadata.clinicalFocus.length > 0
+        ? (rawMetadata.clinicalFocus as string[])
+        : defaultFocus,
+    dailyStepGoal:
+      typeof rawMetadata?.dailyStepGoal === "string" && rawMetadata.dailyStepGoal.trim()
+        ? rawMetadata.dailyStepGoal.trim()
+        : defaultDailyStepGoal,
+    spirometryGoal:
+      typeof rawMetadata?.spirometryGoal === "string" && rawMetadata.spirometryGoal.trim()
+        ? rawMetadata.spirometryGoal.trim()
+        : defaultSpirometryGoal,
+  };
+
   return {
     identity: { email: membership.identity?.email ?? null },
     membership: {
@@ -262,14 +309,16 @@ export async function readAlliedProfile(
       plansPublished,
       patientsSeen: new Set(referrals.map((referral) => referral.patientId)).size,
     },
+    preferences,
   };
 }
 
 export async function updateAlliedProfile(
   requestContext: WonFlowRequestContext,
   input: UpdateAlliedProfileInput,
+  specialtyHint?: AlliedSpecialty,
 ): Promise<AlliedProfileView> {
-  const { context, membership, staff } = await resolveOwnStaffProfile(requestContext);
+  const { context, membership, staff } = await resolveOwnStaffProfile(requestContext, specialtyHint);
 
   const displayName = input.displayName?.trim();
   if (displayName !== undefined && displayName.length === 0) {
@@ -356,9 +405,34 @@ export async function updateAlliedProfile(
         sourceApplication: context.sourceApplication,
       },
     });
+
+    if (
+      input.clinicalFocus !== undefined ||
+      input.dailyStepGoal !== undefined ||
+      input.spirometryGoal !== undefined
+    ) {
+      await tx.auditEvent.create({
+        data: {
+          tenantId: context.tenantId,
+          actorMembershipId: context.membershipId,
+          sessionId: context.sessionId,
+          requestId: context.requestId,
+          action: "allied.preferences.updated",
+          entityType: "staff_profile",
+          entityId: staff.id,
+          severity: "INFORMATION",
+          metadata: {
+            clinicalFocus: input.clinicalFocus ?? [],
+            dailyStepGoal: input.dailyStepGoal?.trim() || null,
+            spirometryGoal: input.spirometryGoal?.trim() || null,
+          },
+          sourceApplication: context.sourceApplication,
+        },
+      });
+    }
   });
 
-  return readAlliedProfile(requestContext);
+  return readAlliedProfile(requestContext, specialtyHint);
 }
 
 export async function uploadAlliedAvatar(

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   AlertCircle,
   Bell,
@@ -205,12 +206,22 @@ export function PatientMedicationScheduleView() {
             </div>
           </div>
 
-          <button
-            onClick={() => void loadSchedule()}
-            className="rounded-2xl border border-slate-200 p-2.5 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/patient/care"
+              className="inline-flex items-center gap-1.5 rounded-2xl bg-indigo-50 px-3.5 py-2 text-xs font-black text-indigo-700 hover:bg-indigo-100 dark:bg-indigo-950/60 dark:text-indigo-300"
+            >
+              <Pill className="size-3.5" />
+              <span>Doctor Prescriptions</span>
+              <ChevronRight className="size-3.5" />
+            </Link>
+            <button
+              onClick={() => void loadSchedule()}
+              className="rounded-2xl border border-slate-200 p-2.5 text-slate-600 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-300"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
         </div>
 
         {/* Adherence is one ratio against one limit, so it is a meter —
@@ -279,11 +290,21 @@ export function PatientMedicationScheduleView() {
 
         <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
           {pendingDoses.length === 0 ? (
-            <p className="py-6 text-center text-xs text-slate-400">
-              {doses.length === 0
-                ? "No medicines are scheduled for you today. Doses appear here automatically once a doctor prescribes them — you do not need to add anything yourself."
-                : "All caught up. No pending medication doses for today."}
-            </p>
+            <div className="py-6 text-center">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {doses.length === 0
+                  ? "No medication doses are currently scheduled for today."
+                  : "All caught up! No pending medication doses for today."}
+              </p>
+              <Link
+                href="/patient/care"
+                className="mt-3 inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-4 py-2 text-xs font-black text-white shadow-xs hover:bg-indigo-700 active:scale-98"
+              >
+                <Pill className="size-3.5" />
+                <span>View Full Doctor Prescriptions</span>
+                <ChevronRight className="size-3.5" />
+              </Link>
+            </div>
           ) : (
             pendingDoses.map((dose) => (
               <div key={dose.id} className="flex flex-col justify-between gap-3 py-4 sm:flex-row sm:items-center">
@@ -333,73 +354,78 @@ export function PatientMedicationScheduleView() {
         </div>
       </div>
 
-      {/* Section 2: Taken Today */}
-      {completedDoses.length > 0 && (
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center space-x-2 border-b border-slate-100 pb-3 dark:border-slate-800">
-            <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-            <h3 className="text-base font-black text-slate-900 dark:text-white">
-              Taken Today ({completedDoses.length})
-            </h3>
-          </div>
+      {/* Sections 2 & 3: Taken and Skipped History */}
+      {(completedDoses.length > 0 || skippedOrMissedDoses.length > 0) && (
+        <div className={`grid gap-6 ${completedDoses.length > 0 && skippedOrMissedDoses.length > 0 ? "lg:grid-cols-2" : ""}`}>
+          {/* Section 2: Taken Today */}
+          {completedDoses.length > 0 && (
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex items-center space-x-2 border-b border-slate-100 pb-3 dark:border-slate-800">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600" />
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  Taken Today ({completedDoses.length})
+                </h3>
+              </div>
 
-          <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
-            {completedDoses.map((dose) => (
-              <div key={dose.id} className="flex items-center justify-between py-3">
-                <div className="flex items-center space-x-3">
-                  <span className="grid size-8 place-items-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">
-                    <CheckCircle2 className="size-4" />
-                  </span>
-                  <div>
-                    <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                      {dose.medicationName} {dose.dose}
-                    </h4>
-                    <span className="text-[10px] text-slate-400">
-                      Logged at {dose.completedAt ? new Date(dose.completedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Today"}
+              <div className="mt-4 divide-y divide-slate-100 dark:divide-slate-800">
+                {completedDoses.map((dose) => (
+                  <div key={dose.id} className="flex items-center justify-between py-3">
+                    <div className="flex items-center space-x-3">
+                      <span className="grid size-8 place-items-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950 dark:text-emerald-400">
+                        <CheckCircle2 className="size-4" />
+                      </span>
+                      <div>
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                          {dose.medicationName} {dose.dose}
+                        </h4>
+                        <span className="text-[10px] text-slate-400">
+                          Logged at {dose.completedAt ? new Date(dose.completedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "Today"}
+                        </span>
+                      </div>
+                    </div>
+                    <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-black uppercase text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      Taken
                     </span>
                   </div>
-                </div>
-                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-black uppercase text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                  Taken
-                </span>
+                ))}
               </div>
-            ))}
-          </div>
-        </div>
-      )}
+            </div>
+          )}
 
-      {/* Section 3: Skipped or Missed */}
-      {skippedOrMissedDoses.length > 0 && (
-        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center space-x-2 border-b border-slate-100 pb-3 dark:border-slate-800">
-            <Info className="h-5 w-5 text-slate-500" />
-            <h3 className="text-base font-black text-slate-900 dark:text-white">
-              Skipped / Not Taken ({skippedOrMissedDoses.length})
-            </h3>
-          </div>
-
-          <p className="mt-2 text-[11px] text-slate-400">
-            A missed dose is a fact, not a failure. This history helps your clinician adjust your care plan safely.
-          </p>
-
-          <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
-            {skippedOrMissedDoses.map((dose) => (
-              <div key={dose.id} className="flex items-center justify-between py-3">
-                <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                    {dose.medicationName} {dose.dose}
-                  </h4>
-                  <span className="text-[10px] text-slate-400">
-                    Scheduled for {new Date(dose.scheduledFor).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    {dose.skipReason ? ` • Reason: ${dose.skipReason}` : ""}
-                  </span>
-                </div>
-                <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-black uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                  {dose.status}
-                </span>
+          {/* Section 3: Skipped or Missed */}
+          {skippedOrMissedDoses.length > 0 && (
+            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex items-center space-x-2 border-b border-slate-100 pb-3 dark:border-slate-800">
+                <Info className="h-5 w-5 text-slate-500" />
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  Skipped / Not Taken ({skippedOrMissedDoses.length})
+                </h3>
               </div>
-            ))}
-          </div>
+
+              <p className="mt-2 text-[11px] text-slate-400">
+                A missed dose is a fact, not a failure. This history helps your clinician adjust your care plan safely.
+              </p>
+
+              <div className="mt-3 divide-y divide-slate-100 dark:divide-slate-800">
+                {skippedOrMissedDoses.map((dose) => (
+                  <div key={dose.id} className="flex items-center justify-between py-3">
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                        {dose.medicationName} {dose.dose}
+                      </h4>
+                      <span className="text-[10px] text-slate-400">
+                        Scheduled for {new Date(dose.scheduledFor).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        {dose.skipReason ? ` • Reason: ${dose.skipReason}` : ""}
+                      </span>
+                    </div>
+                    <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-black uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                      {dose.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

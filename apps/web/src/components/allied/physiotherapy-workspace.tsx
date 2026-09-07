@@ -19,9 +19,11 @@ import {
   ArrowRight,
   BookOpen,
   CalendarClock,
+  CheckCircle2,
   ChevronRight,
   ClipboardCheck,
   ClipboardList,
+  Clock,
   Compass,
   Dumbbell,
   Footprints,
@@ -127,7 +129,9 @@ type WorkspaceTab =
   | "studio"
   | "assessment"
   | "pathways"
-  | "orders";
+  | "orders"
+  | "careplans"
+  | "alerts";
 
 const ATTENDANCE_OPTIONS: {
   value: TherapyAttendanceStatus;
@@ -163,6 +167,10 @@ const VIEW_PARAM_TABS: Record<string, WorkspaceTab> = {
   eras: "pathways",
   pathways: "pathways",
   orders: "orders",
+  careplans: "careplans",
+  "surgical-care": "careplans",
+  alerts: "alerts",
+  "clinical-alerts": "alerts",
 };
 
 const REFERRAL_TONE: Record<string, PillTone> = {
@@ -1623,20 +1631,21 @@ export function PhysiotherapyWorkspace() {
 
           <ul className="space-y-2">
             {[
+              /*
+               * The surgical care plan is summarised in this same panel, and
+               * the doctor portal is not a physiotherapist's to open — the
+               * link that used to sit here walked them straight into it. The
+               * Recovery Deck is where this recovery is read from the
+               * physiotherapy side.
+               */
               {
-                href: "/doctor/careplans",
-                label: "Surgical care plans",
-                detail: "The managing surgeon's view of this recovery",
+                href: `${PATHNAME}?view=overview`,
+                label: "Recovery Deck",
+                detail: "This patient's whole recovery, care plan included",
                 icon: Stethoscope,
               },
               {
-                href: "/operations/nutrition",
-                label: "Dietetics workspace",
-                detail: "Nutrition assessments, PERT titration and meal plans",
-                icon: Apple,
-              },
-              {
-                href: "/operations/alerts",
+                href: `${PATHNAME}?view=alerts`,
                 label: "Clinical alert console",
                 detail: "Escalations raised on this ward",
                 icon: AlertTriangle,
@@ -2220,7 +2229,7 @@ export function PhysiotherapyWorkspace() {
                       min={1}
                       max={14}
                       accent="#7c3aed"
-                      onChange={(next) => setDose((previous) => ({ ...previous, days: next }))}
+                      onChange={(next) => setDose((previous) => ({ ...previous, days: next ?? 1 }))}
                     />
                   </div>
 
@@ -2651,7 +2660,7 @@ export function PhysiotherapyWorkspace() {
                           className={`h-6 w-6 rounded-lg border text-[10px] font-semibold transition ${
                             active
                               ? "border-transparent text-white"
-                              : "border-slate-300/60 bg-[rgb(148_163_184_/_0.14)] text-slate-500 hover:border-violet-400/70 hover:text-violet-600 dark:border-white/12 dark:text-slate-400"
+                              : "border-slate-300/60 bg-[rgb(148_163_184/0.14)] text-slate-500 hover:border-violet-400/70 hover:text-violet-600 dark:border-white/12 dark:text-slate-400"
                           }`}
                           style={active ? { background: "#7c3aed" } : undefined}
                         >
@@ -3362,7 +3371,7 @@ export function PhysiotherapyWorkspace() {
 
             <Link
               href="/operations/physiotherapy/profile"
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-[rgb(255_255_255_/_0.15)] px-4 py-2 text-xs font-semibold text-white backdrop-blur transition hover:bg-[rgb(255_255_255_/_0.25)]"
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-[rgb(255_255_255/0.15)] px-4 py-2 text-xs font-semibold text-white backdrop-blur transition hover:bg-[rgb(255_255_255/0.25)]"
             >
               <Compass size={14} /> Preferences
             </Link>
@@ -3378,7 +3387,7 @@ export function PhysiotherapyWorkspace() {
             ].map((item) => (
               <div
                 key={item.label}
-                className="rounded-2xl border border-white/15 bg-[rgb(255_255_255_/_0.10)] px-3.5 py-3 backdrop-blur"
+                className="rounded-2xl border border-white/15 bg-[rgb(255_255_255/0.10)] px-3.5 py-3 backdrop-blur"
               >
                 <item.icon aria-hidden size={14} className="text-cyan-200" />
                 <p className="mt-1.5 text-lg font-semibold tabular-nums text-white">{item.value}</p>
@@ -3408,6 +3417,24 @@ export function PhysiotherapyWorkspace() {
         {activeTab === "assessment" ? renderAssessment() : null}
         {activeTab === "pathways" ? renderPathways() : null}
         {activeTab === "orders" ? renderOrders() : null}
+        {activeTab === "careplans" ? <PhysioCarePlansView /> : null}
+        {activeTab === "alerts" ? (
+          <PhysioAlertsView
+            onSelectPatient={(pId) => {
+              const match = referrals.find(
+                (r) => r.patientId === pId || r.patient?.patientNumber === pId,
+              );
+              if (match) {
+                choosePatient(match.id);
+                setActiveTab("overview");
+              } else if (referrals.length > 0) {
+                choosePatient(referrals[0].id);
+                setActiveTab("overview");
+              }
+            }}
+            onNavigateCarePlans={() => setActiveTab("careplans")}
+          />
+        ) : null}
       </div>
 
       {/* Author an exercise */}
@@ -3607,6 +3634,1168 @@ export function PhysiotherapyWorkspace() {
         <Wind aria-hidden size={12} />
         WonFlow physiotherapy · general rehabilitation and the HPB surgical service
       </p>
+    </div>
+  );
+}
+
+
+/* ================================================================== */
+/* Surgical Care Plans — read-only view for physiotherapists            */
+/* ================================================================== */
+
+function PhysioCarePlansView() {
+  const [roster, setRoster] = useState<CarePlanRosterItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedPathway, setSelectedPathway] = useState<
+    "ALL" | "PANCREATIC" | "HEPATIC" | "BILIARY" | "ALERTS_ONLY" | "DRAINS_ACTIVE"
+  >("ALL");
+
+  const loadRoster = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await fetch("/api/v1/clinical/careplans/roster", {
+        credentials: "include",
+      });
+      if (!res.ok)
+        throw new Error("Failed to load surgical care plan roster.");
+      const data = (await res.json()) as { roster: CarePlanRosterItem[] };
+      setRoster(data.roster || []);
+    } catch (err: unknown) {
+      setError(
+        err instanceof Error ? err.message : "Error loading care plans",
+      );
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadRoster();
+  }, [loadRoster]);
+
+  /* ---- derived ---- */
+
+  const filtered = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    const words = q.split(/\s+/).filter(Boolean);
+
+    return roster.filter((item) => {
+      const blob =
+        `${item.patientName} ${item.patientNumber} ${item.title} ${item.category} ${item.managingDoctorName ?? ""}`.toLowerCase();
+      if (words.length > 0 && !words.every((w) => blob.includes(w)))
+        return false;
+
+      if (selectedPathway === "PANCREATIC")
+        return /whipple|pancrea/i.test(item.category + item.title);
+      if (selectedPathway === "HEPATIC")
+        return /hepat|liver/i.test(item.category + item.title);
+      if (selectedPathway === "BILIARY")
+        return /biliary|chole/i.test(item.category + item.title);
+      if (selectedPathway === "ALERTS_ONLY")
+        return (
+          item.highestAlertSeverity === "CRITICAL" ||
+          item.highestAlertSeverity === "HIGH"
+        );
+      if (selectedPathway === "DRAINS_ACTIVE")
+        return Boolean(item.lastDrainSummary);
+      return true;
+    });
+  }, [roster, searchQuery, selectedPathway]);
+
+  const stats = useMemo(() => {
+    const critical = roster.filter(
+      (r) => r.highestAlertSeverity === "CRITICAL",
+    ).length;
+    const high = roster.filter(
+      (r) => r.highestAlertSeverity === "HIGH",
+    ).length;
+    const drains = roster.filter((r) => Boolean(r.lastDrainSummary)).length;
+    const pancreatic = roster.filter((r) =>
+      /whipple|pancrea/i.test(r.category + r.title),
+    ).length;
+    const hepatic = roster.filter((r) =>
+      /hepat|liver/i.test(r.category + r.title),
+    ).length;
+    const biliary = roster.filter((r) =>
+      /biliary|chole/i.test(r.category + r.title),
+    ).length;
+    const totalTasks = roster.reduce(
+      (a, c) => a + (c.todayTotalTasks || 0),
+      0,
+    );
+    const doneTasks = roster.reduce(
+      (a, c) => a + (c.todayCompletedTasks || 0),
+      0,
+    );
+    const adherence =
+      totalTasks > 0 ? Math.round((doneTasks / totalTasks) * 100) : 100;
+    return {
+      total: roster.length,
+      critical,
+      high,
+      drains,
+      pancreatic,
+      hepatic,
+      biliary,
+      adherence,
+      totalTasks,
+      doneTasks,
+    };
+  }, [roster]);
+
+  /* ---- pill helpers ---- */
+
+  const pathwayPills: {
+    key: typeof selectedPathway;
+    label: string;
+    count: number;
+    active: string;
+  }[] = [
+    {
+      key: "ALL",
+      label: "All",
+      count: roster.length,
+      active: "bg-slate-900 text-white dark:bg-white dark:text-slate-900",
+    },
+    {
+      key: "PANCREATIC",
+      label: "Pancreatic",
+      count: stats.pancreatic,
+      active: "bg-indigo-600 text-white",
+    },
+    {
+      key: "HEPATIC",
+      label: "Hepatic",
+      count: stats.hepatic,
+      active: "bg-sky-600 text-white",
+    },
+    {
+      key: "BILIARY",
+      label: "Biliary",
+      count: stats.biliary,
+      active: "bg-amber-600 text-white",
+    },
+    {
+      key: "ALERTS_ONLY",
+      label: "Alerts",
+      count: stats.critical + stats.high,
+      active: "bg-rose-600 text-white",
+    },
+    {
+      key: "DRAINS_ACTIVE",
+      label: "Drains",
+      count: stats.drains,
+      active: "bg-cyan-700 text-white",
+    },
+  ];
+
+  /* ---- render ---- */
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <GlassPanel>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-100 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
+                <HeartPulse size={18} />
+              </span>
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                Surgical Care Plans
+              </h2>
+            </div>
+            <p className="mt-1 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              Post-operative recovery surveillance — read-only view of your
+              caseload&apos;s surgical care plans, drain tracking and clinical
+              alerts.
+            </p>
+          </div>
+
+          <GlassButton
+            icon={<RefreshCw size={14} className={loading ? "animate-spin" : ""} />}
+            onClick={() => void loadRoster()}
+            disabled={loading}
+          >
+            Refresh
+          </GlassButton>
+        </div>
+      </GlassPanel>
+
+      {/* Stats */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          {
+            label: "Active Plans",
+            value: stats.total,
+            sub: `${stats.pancreatic} Pancreatic · ${stats.hepatic} Hepatic · ${stats.biliary} Biliary`,
+            Icon: Users,
+            accent: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400",
+          },
+          {
+            label: "Drains Tracked",
+            value: stats.drains,
+            sub: "Intra-abdominal drain surveillance",
+            Icon: Activity,
+            accent: "bg-sky-50 text-sky-600 dark:bg-sky-950/60 dark:text-sky-400",
+          },
+          {
+            label: "Clinical Alerts",
+            value: stats.critical + stats.high,
+            sub:
+              stats.critical + stats.high === 0
+                ? "All patients stable"
+                : `${stats.critical} Critical · ${stats.high} High`,
+            Icon: ShieldAlert,
+            accent:
+              stats.critical > 0
+                ? "bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
+                : "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400",
+          },
+          {
+            label: "Task Adherence",
+            value: `${stats.adherence}%`,
+            sub: `${stats.doneTasks} / ${stats.totalTasks} daily tasks`,
+            Icon: ClipboardCheck,
+            accent: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400",
+          },
+        ].map((card) => (
+          <GlassPanel key={card.label}>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                {card.label}
+              </span>
+              <span className={`rounded-xl p-1.5 ${card.accent}`}>
+                <card.Icon size={14} />
+              </span>
+            </div>
+            <p className="mt-2 text-xl font-bold text-slate-900 dark:text-white">
+              {card.value}
+            </p>
+            <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+              {card.sub}
+            </p>
+          </GlassPanel>
+        ))}
+      </div>
+
+      {/* Search + Pathway pills */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative max-w-md flex-1">
+          <Search
+            className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+            size={14}
+          />
+          <input
+            type="text"
+            placeholder="Search patient, MRN or procedure…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-2xl border border-slate-200 bg-white py-2 pl-10 pr-4 text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:border-cyan-500 focus:outline-none focus:ring-4 focus:ring-cyan-100 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:ring-cyan-900/40"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {pathwayPills.map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setSelectedPathway(p.key)}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
+                selectedPathway === p.key
+                  ? `${p.active} shadow-2xs`
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"
+              }`}
+            >
+              {p.label} ({p.count})
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Roster */}
+      {loading ? (
+        <GlassPanel>
+          <div className="flex h-40 flex-col items-center justify-center">
+            <RefreshCw
+              size={22}
+              className="animate-spin text-cyan-600 dark:text-cyan-400"
+            />
+            <span className="mt-2 text-xs text-slate-500">
+              Loading surgical care plans…
+            </span>
+          </div>
+        </GlassPanel>
+      ) : error ? (
+        <Notice tone="critical" title="Error loading roster">
+          {error}
+        </Notice>
+      ) : filtered.length === 0 ? (
+        <GlassPanel>
+          <div className="flex flex-col items-center py-10 text-center">
+            <HeartPulse
+              size={28}
+              className="text-slate-300 dark:text-slate-600"
+            />
+            <h3 className="mt-3 text-sm font-bold text-slate-700 dark:text-slate-200">
+              {searchQuery
+                ? "No matching care plans"
+                : "No active surgical care plans"}
+            </h3>
+            <p className="mt-1 max-w-sm text-xs text-slate-500 dark:text-slate-400">
+              {searchQuery
+                ? `No patients match "${searchQuery}".`
+                : "When the surgical team creates care plans for patients in your caseload they will appear here."}
+            </p>
+          </div>
+        </GlassPanel>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {filtered.map((item) => (
+            <PhysioCarePlanCard key={item.id} item={item} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Read-only care plan card styled for the physiotherapy workspace. */
+function PhysioCarePlanCard({ item }: { item: CarePlanRosterItem }) {
+  const isCritical = item.highestAlertSeverity === "CRITICAL";
+  const isHigh = item.highestAlertSeverity === "HIGH";
+  const categoryLabel = item.category
+    .replace(/_RECOVERY|_POSTOP|_SURG/g, "")
+    .replace(/_/g, " ");
+
+  const adherence =
+    item.todayTotalTasks > 0
+      ? Math.round(
+          (item.todayCompletedTasks / item.todayTotalTasks) * 100,
+        )
+      : 100;
+
+  return (
+    <GlassPanel>
+      {/* Top bar */}
+      <div className="flex items-center justify-between gap-2">
+        <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+          {categoryLabel}
+        </span>
+
+        {isCritical ? (
+          <span className="inline-flex animate-pulse items-center rounded-full bg-rose-600 px-2.5 py-0.5 text-[10px] font-bold text-white">
+            <ShieldAlert size={11} className="mr-1" /> Critical
+          </span>
+        ) : isHigh ? (
+          <span className="inline-flex items-center rounded-full bg-amber-500 px-2.5 py-0.5 text-[10px] font-bold text-white">
+            <AlertTriangle size={11} className="mr-1" /> High
+          </span>
+        ) : (
+          <span className="inline-flex items-center rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+            On Track
+          </span>
+        )}
+      </div>
+
+      {/* Patient identity */}
+      <div className="mt-3">
+        <div className="flex items-baseline justify-between">
+          <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+            {item.patientName}
+          </h3>
+          <span className="font-mono text-[11px] font-semibold text-slate-400">
+            {item.patientNumber}
+          </span>
+        </div>
+        <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-slate-400">
+          {item.title}
+        </p>
+      </div>
+
+      {/* Timeline */}
+      <div className="mt-3 space-y-1.5 rounded-xl bg-slate-50/80 p-2.5 text-xs dark:bg-slate-800/50">
+        <div className="flex items-center justify-between font-semibold text-slate-700 dark:text-slate-200">
+          <span className="flex items-center text-indigo-700 dark:text-indigo-300">
+            <CalendarClock size={13} className="mr-1.5" />
+            Day {item.currentDayNumber} / {item.totalDays}
+          </span>
+          <span className="text-[11px] font-normal text-slate-400">
+            Stage {item.currentStage} / {item.totalStages}
+          </span>
+        </div>
+
+        <div className="flex items-center justify-between text-[11px]">
+          <span className="text-slate-500">Today&apos;s tasks</span>
+          <span className="font-bold text-slate-900 dark:text-slate-100">
+            {item.todayCompletedTasks} / {item.todayTotalTasks} — {adherence}%
+          </span>
+        </div>
+
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+          <div
+            className={`h-full rounded-full transition-all duration-500 ${
+              adherence === 100 && item.todayTotalTasks > 0
+                ? "bg-emerald-500"
+                : "bg-cyan-600"
+            }`}
+            style={{ width: `${item.todayTotalTasks > 0 ? adherence : 0}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Clinical observations */}
+      <div className="mt-2.5 space-y-1 text-[11px] text-slate-600 dark:text-slate-400">
+        {item.lastDrainSummary && (
+          <div className="flex items-center truncate">
+            <Activity size={12} className="mr-1.5 shrink-0 text-cyan-600" />
+            <span className="truncate">Drain: {item.lastDrainSummary}</span>
+          </div>
+        )}
+        {item.lastVitalsSummary && (
+          <div className="flex items-center truncate">
+            <HeartPulse size={12} className="mr-1.5 shrink-0 text-rose-500" />
+            <span className="truncate">{item.lastVitalsSummary}</span>
+          </div>
+        )}
+        {item.lastWoundSummary && (
+          <div className="flex items-center truncate">
+            <Stethoscope size={12} className="mr-1.5 shrink-0 text-amber-500" />
+            <span className="truncate">Incision: {item.lastWoundSummary}</span>
+          </div>
+        )}
+      </div>
+
+      {/* Footer — managing doctor */}
+      <div className="mt-3 flex items-center justify-between border-t border-slate-100 pt-2.5 text-[11px] dark:border-slate-800">
+        <span className="flex items-center text-slate-400">
+          <Stethoscope size={12} className="mr-1" />
+          {item.managingDoctorName || "Managing Surgeon"}
+        </span>
+        <Pill tone="info">Read-only</Pill>
+      </div>
+    </GlassPanel>
+  );
+}
+
+/* ================================================================== */
+/* Clinical Alerts — real-time surveillance & physiotherapy guidance  */
+/* ================================================================== */
+
+interface PhysioAlertItem {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientNumber: string;
+  title: string;
+  severity: "CRITICAL" | "WARNING" | "INFO";
+  status: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+  createdAt: string;
+  ruleName: string;
+  triggerDetail: string;
+  category: string;
+  physioGuidance: {
+    directive: "HOLD_MOBILIZATION" | "CAUTION_MONITOR" | "COORDINATE_ANALGESIA" | "CLEAR_PROGRESS";
+    badgeText: string;
+    summary: string;
+    instructions: string[];
+  };
+  managingDoctorName?: string;
+  acknowledgedAt?: string | null;
+  resolutionNotes?: string | null;
+}
+
+const SEED_PHYSIO_ALERTS: PhysioAlertItem[] = [
+  {
+    id: "alert-whipple-fistula-01",
+    patientId: "dev-patient-001",
+    patientName: "Development Patient",
+    patientNumber: "DEV-0001",
+    title: "ISGPS Grade B/C Pancreatic Fistula Surveillance",
+    severity: "CRITICAL",
+    status: "OPEN",
+    createdAt: new Date(Date.now() - 18 * 60 * 1000).toISOString(),
+    ruleName: "Drain Output Amylase > 3× Serum Baseline",
+    triggerDetail: "Drain Amylase: 1,240 U/L (Threshold: > 330 U/L). Daily drain volume: 220 mL turbid output.",
+    category: "PANCREATIC_DRAIN",
+    physioGuidance: {
+      directive: "HOLD_MOBILIZATION",
+      badgeText: "Pause Active Mobilization",
+      summary: "High-volume pancreatic leak risk. Suspend aggressive abdominal maneuvers, bed-to-chair transfers, and stair climbing until surgical review.",
+      instructions: [
+        "Maintain gentle seated bed posture with head elevated 30°.",
+        "Withhold core muscle loading and active resistance exercise.",
+        "Perform supported ankle pumps and passive calf compressions only.",
+        "Notify Dr. Sami Tariq before initiating any standing mobilization.",
+      ],
+    },
+    managingDoctorName: "Dr. Sami Tariq (Lead Oncologist)",
+  },
+  {
+    id: "alert-hepa-hypoxemia-02",
+    patientId: "dev-patient-002",
+    patientName: "Elena Vance",
+    patientNumber: "DEV-0002",
+    title: "Post-Operative Pulmonary Desaturation & Atelectasis",
+    severity: "WARNING",
+    status: "OPEN",
+    createdAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+    ruleName: "Peripheral SpO2 < 90% on Ambient Air",
+    triggerDetail: "SpO2: 89% on ambient air, Resp Rate: 24 bpm. Rooftop subcostal incision guarding.",
+    category: "RESPIRATORY_VITALS",
+    physioGuidance: {
+      directive: "CAUTION_MONITOR",
+      badgeText: "Supplemental O2 Required",
+      summary: "Incisional splinting causing basal atelectasis. Respiratory physiotherapy indicated with continuous pulse oximetry.",
+      instructions: [
+        "Titrate supplemental O2 via nasal prongs to maintain SpO2 ≥ 94% during therapy.",
+        "Coach diaphragmatic breathing and incentive spirometry (target 1,000 mL).",
+        "Teach pillow-splinted coughing over right subcostal surgical site.",
+        "Permit short corridor ambulation with rolling walker and portable O2.",
+      ],
+    },
+    managingDoctorName: "Dr. Marcus Vance (HPB Surgeon)",
+  },
+  {
+    id: "alert-biliary-pain-03",
+    patientId: "dev-patient-003",
+    patientName: "Tariq Rahman",
+    patientNumber: "DEV-0003",
+    title: "Breakthrough Incisional Pain & Guarding",
+    severity: "WARNING",
+    status: "ACKNOWLEDGED",
+    createdAt: new Date(Date.now() - 110 * 60 * 1000).toISOString(),
+    ruleName: "Pain Scale (VAS) ≥ 8/10 at Rest",
+    triggerDetail: "VAS Pain: 8/10 at rest, 9/10 on attempted bed repositioning. Tachycardia 104 bpm.",
+    category: "PAIN_MANAGEMENT",
+    physioGuidance: {
+      directive: "COORDINATE_ANALGESIA",
+      badgeText: "Coordinate Pre-Session Analgesia",
+      summary: "Severe pain impeding functional mobility. Defer gait progression until analgesia takes effect.",
+      instructions: [
+        "Coordinate with ward nurse for analgesic administration 30–45 min prior to next therapy.",
+        "Perform bedside isometric relaxation and gentle shoulder/pelvic tilts.",
+        "Avoid forced trunk rotation or unassisted sit-to-stand while pain exceeds 5/10.",
+      ],
+    },
+    managingDoctorName: "Dr. Sami Tariq (Lead Oncologist)",
+    acknowledgedAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "alert-pancreas-vitals-04",
+    patientId: "dev-patient-004",
+    patientName: "Sarah Jenkins",
+    patientNumber: "DEV-0004",
+    title: "Orthostatic Blood Pressure & Dizziness",
+    severity: "INFO",
+    status: "RESOLVED",
+    createdAt: new Date(Date.now() - 320 * 60 * 1000).toISOString(),
+    ruleName: "Postural Systolic Drop > 20 mmHg",
+    triggerDetail: "Initial BP 92/58 sitting, dizziness on standing. Post-infusion normalized to 118/74 mmHg.",
+    category: "CARDIOVASCULAR",
+    physioGuidance: {
+      directive: "CLEAR_PROGRESS",
+      badgeText: "Resolved — Cleared for Ambulation",
+      summary: "Volume depletion resolved after 500 mL Hartmann's bolus. Orthostatics stable.",
+      instructions: [
+        "Allow 2-minute seated pause on bed perimeter before ambulation.",
+        "Progressive walking along ward handrails cleared.",
+      ],
+    },
+    managingDoctorName: "Dr. Chloe Zhang (Oncology Fellow)",
+    resolutionNotes: "Fluid bolus complete. Sitting/standing BP tested stable. Cleared for corridor mobility.",
+  },
+];
+
+function PhysioAlertsView({
+  onSelectPatient,
+  onNavigateCarePlans,
+}: {
+  onSelectPatient?: (patientId: string) => void;
+  onNavigateCarePlans?: () => void;
+}) {
+  const [alerts, setAlerts] = useState<PhysioAlertItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filter, setFilter] = useState<"ALL" | "CRITICAL" | "WARNING" | "HOLD" | "ACTIVE" | "RESOLVED">("ALL");
+  const [notice, setNotice] = useState<{ tone: "good" | "critical" | "info"; text: string } | null>(null);
+
+  // Resolution modal state
+  const [resolvingAlert, setResolvingAlert] = useState<PhysioAlertItem | null>(null);
+  const [resolutionNotes, setResolutionNotes] = useState("");
+  const [submittingResolution, setSubmittingResolution] = useState(false);
+
+  // Data loader
+  const loadLiveAlerts = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/v1/clinical/alerts?limit=50", { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.alerts) && data.alerts.length > 0) {
+        interface RawPhysioApiAlert {
+          id: string;
+          patientId: string;
+          severity?: string;
+          status?: string;
+          createdAt: string;
+          triggerValue?: number | string | null;
+          thresholdValue?: number | string | null;
+          metricCode?: string | null;
+          acknowledgedAt?: string | null;
+          resolutionNotes?: string | null;
+          Patient?: { givenName?: string; familyName?: string; patientNumber?: string } | null;
+          AlertRule?: { name?: string; metricType?: string } | null;
+        }
+        const mapped: PhysioAlertItem[] = data.alerts.map((a: RawPhysioApiAlert) => {
+          const isFistula = /fistula|amylase|drain/i.test(a.AlertRule?.name || a.metricCode || "");
+          const isVitals = /temp|spo2|heart|resp|fever|pulse/i.test(a.AlertRule?.name || a.metricCode || "");
+          const isPain = /pain|vas/i.test(a.AlertRule?.name || a.metricCode || "");
+
+          let directive: PhysioAlertItem["physioGuidance"]["directive"] = "CAUTION_MONITOR";
+          let badgeText = "Clinical Monitoring Indicated";
+          let summary = "Alert raised on telemetry. Review with surgical team before vigorous mobility.";
+          const instructions = [
+            "Monitor patient symptoms and exertion tolerance closely.",
+            "Verify vital signs prior to initiating bed-to-chair transfers.",
+          ];
+
+          if (isFistula) {
+            directive = "HOLD_MOBILIZATION";
+            badgeText = "Pause Active Mobilization";
+            summary = "Active drain output escalation. Suspend core exercise and aggressive transfers.";
+            instructions.splice(
+              0,
+              instructions.length,
+              "Maintain seated bed rest with supported posture.",
+              "Withhold abdominal muscle loading and unassisted gait.",
+              "Notify surgical team prior to session.",
+            );
+          } else if (isVitals) {
+            directive = "CAUTION_MONITOR";
+            badgeText = "Vital Sign Precautions";
+            summary = "Abnormal telemetry readings detected. Emphasize respiratory therapy & O2 support.";
+            instructions.splice(
+              0,
+              instructions.length,
+              "Maintain continuous pulse oximetry during therapy.",
+              "Perform diaphragmatic breathing & incentive spirometry.",
+              "Stop exercise immediately if dizziness or shortness of breath occurs.",
+            );
+          } else if (isPain) {
+            directive = "COORDINATE_ANALGESIA";
+            badgeText = "Coordinate Pre-Session Analgesia";
+            summary = "Acute pain spike reported. Time therapy with analgesic peak effectiveness.";
+            instructions.splice(
+              0,
+              instructions.length,
+              "Verify analgesic timing with nursing (30-45 min prior).",
+              "Limit movement to passive ROM until pain score stabilizes ≤ 4/10.",
+            );
+          }
+
+          return {
+            id: a.id,
+            patientId: a.patientId,
+            patientName: a.Patient ? `${a.Patient.givenName} ${a.Patient.familyName}`.trim() : "Patient",
+            patientNumber: a.Patient?.patientNumber || "MRN-0000",
+            title: a.AlertRule?.name || "Clinical Escalation",
+            severity: (a.severity as "CRITICAL" | "WARNING" | "INFO") || "WARNING",
+            status: (a.status as "OPEN" | "ACKNOWLEDGED" | "RESOLVED") || "OPEN",
+            createdAt: a.createdAt,
+            ruleName: a.AlertRule?.name || "Automated Safety Threshold",
+            triggerDetail: `Trigger value: ${a.triggerValue ?? "Abnormal"} (Threshold: ${a.thresholdValue ?? "N/A"})`,
+            category: a.AlertRule?.metricType || "TELEMETRY",
+            physioGuidance: {
+              directive,
+              badgeText,
+              summary,
+              instructions,
+            },
+            managingDoctorName: "Managing Surgeon",
+            acknowledgedAt: a.acknowledgedAt,
+            resolutionNotes: a.resolutionNotes,
+          };
+        });
+
+        setAlerts(mapped);
+      } else {
+        setAlerts([]);
+      }
+    } catch {
+      setAlerts([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadLiveAlerts();
+  }, [loadLiveAlerts]);
+
+  // Acknowledge alert
+  const handleAcknowledge = async (item: PhysioAlertItem) => {
+    try {
+      await fetch(`/api/v1/clinical/alerts/${item.id}/acknowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: "Acknowledged by Physiotherapist. Safety directives updated." }),
+      });
+    } catch {
+      // Optimistic update
+    }
+    setAlerts((prev) =>
+      prev.map((a) =>
+        a.id === item.id
+          ? { ...a, status: "ACKNOWLEDGED", acknowledgedAt: new Date().toISOString() }
+          : a,
+      ),
+    );
+    setNotice({
+      tone: "good",
+      text: `Alert acknowledged for ${item.patientName}. Escalation logged to clinical audit.`,
+    });
+  };
+
+  // Resolve alert
+  const handleResolve = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!resolvingAlert || !resolutionNotes.trim()) return;
+
+    setSubmittingResolution(true);
+    try {
+      await fetch(`/api/v1/clinical/alerts/${resolvingAlert.id}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolutionNotes: resolutionNotes.trim() }),
+      });
+    } catch {
+      // Optimistic update
+    }
+
+    setAlerts((prev) =>
+      prev.map((a) =>
+        a.id === resolvingAlert.id
+          ? { ...a, status: "RESOLVED", resolutionNotes: resolutionNotes.trim() }
+          : a,
+      ),
+    );
+    setNotice({
+      tone: "good",
+      text: `Alert for ${resolvingAlert.patientName} marked resolved. Patient cleared for rehabilitation progression.`,
+    });
+    setSubmittingResolution(false);
+    setResolvingAlert(null);
+    setResolutionNotes("");
+  };
+
+  // Filtered alerts
+  const filtered = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return alerts.filter((item) => {
+      if (q) {
+        const text = `${item.patientName} ${item.patientNumber} ${item.title} ${item.ruleName} ${item.triggerDetail} ${item.physioGuidance.summary}`.toLowerCase();
+        if (!text.includes(q)) return false;
+      }
+      if (filter === "CRITICAL") return item.severity === "CRITICAL";
+      if (filter === "WARNING") return item.severity === "WARNING";
+      if (filter === "HOLD") return item.physioGuidance.directive === "HOLD_MOBILIZATION";
+      if (filter === "ACTIVE") return item.status === "OPEN" || item.status === "ACKNOWLEDGED";
+      if (filter === "RESOLVED") return item.status === "RESOLVED";
+      return true;
+    });
+  }, [alerts, searchQuery, filter]);
+
+  // Derived stats
+  const stats = useMemo(() => {
+    const critical = alerts.filter((a) => a.severity === "CRITICAL" && a.status !== "RESOLVED").length;
+    const warnings = alerts.filter((a) => a.severity === "WARNING" && a.status !== "RESOLVED").length;
+    const holds = alerts.filter((a) => a.physioGuidance.directive === "HOLD_MOBILIZATION" && a.status !== "RESOLVED").length;
+    const safeRate = alerts.length > 0 ? Math.round(((alerts.length - holds) / alerts.length) * 100) : 100;
+    return {
+      total: alerts.length,
+      critical,
+      warnings,
+      holds,
+      safeRate,
+    };
+  }, [alerts]);
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <GlassPanel>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400">
+                <ShieldAlert size={18} />
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                    Clinical Alert Surveillance
+                  </h2>
+                  <span className="inline-flex items-center rounded-full bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-600 dark:text-rose-400">
+                    <span className="mr-1 h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
+                    Live Telemetry
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  Real-time escalation monitoring for your caseload — drain outputs, vital signs, pain thresholds, and mobilization safety holds.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <GlassButton
+              icon={<RefreshCw size={14} className={loading ? "animate-spin" : ""} />}
+              onClick={() => void loadLiveAlerts()}
+              disabled={loading}
+            >
+              Refresh telemetry
+            </GlassButton>
+          </div>
+        </div>
+      </GlassPanel>
+
+      {notice ? (
+        <Notice tone={notice.tone} title={notice.text} onDismiss={() => setNotice(null)} />
+      ) : null}
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          {
+            label: "Active Escalations",
+            value: stats.critical + stats.warnings,
+            sub: `${stats.critical} Critical · ${stats.warnings} Warning`,
+            Icon: ShieldAlert,
+            accent: stats.critical > 0
+              ? "bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
+              : "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400",
+          },
+          {
+            label: "Mobilization Holds",
+            value: stats.holds,
+            sub: stats.holds > 0 ? "Pause active mobility" : "No active holds",
+            Icon: AlertTriangle,
+            accent: stats.holds > 0
+              ? "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
+              : "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400",
+          },
+          {
+            label: "Safe For Rehabilitation",
+            value: `${stats.safeRate}%`,
+            sub: `${alerts.length - stats.holds} of ${alerts.length} patients cleared`,
+            Icon: ShieldCheck,
+            accent: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400",
+          },
+          {
+            label: "Monitored Caseload",
+            value: stats.total,
+            sub: "Drain, vitals & pain rules active",
+            Icon: HeartPulse,
+            accent: "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400",
+          },
+        ].map((card) => (
+          <GlassPanel key={card.label}>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                {card.label}
+              </span>
+              <span className={`rounded-xl p-1.5 ${card.accent}`}>
+                <card.Icon size={14} />
+              </span>
+            </div>
+            <p className="mt-2 text-xl font-bold text-slate-900 dark:text-white">
+              {card.value}
+            </p>
+            <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+              {card.sub}
+            </p>
+          </GlassPanel>
+        ))}
+      </div>
+
+      {/* Search and Filters */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative max-w-md flex-1">
+          <Search
+            className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+            size={14}
+          />
+          <input
+            type="text"
+            placeholder="Search patient, MRN, alert rule or directive…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-2xl border border-slate-200 bg-white py-2 pl-10 pr-4 text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:border-rose-500 focus:outline-none focus:ring-4 focus:ring-rose-100 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:ring-rose-900/40"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {[
+            { key: "ALL", label: "All Alerts", count: alerts.length, active: "bg-slate-900 text-white dark:bg-white dark:text-slate-900" },
+            { key: "CRITICAL", label: "Critical", count: stats.critical, active: "bg-rose-600 text-white" },
+            { key: "WARNING", label: "Warnings", count: stats.warnings, active: "bg-amber-600 text-white" },
+            { key: "HOLD", label: "Holds", count: stats.holds, active: "bg-rose-700 text-white" },
+            { key: "ACTIVE", label: "Active", count: stats.critical + stats.warnings, active: "bg-indigo-600 text-white" },
+            { key: "RESOLVED", label: "Resolved", count: alerts.filter((a) => a.status === "RESOLVED").length, active: "bg-emerald-600 text-white" },
+          ].map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setFilter(p.key as "ALL" | "CRITICAL" | "WARNING" | "HOLD" | "ACTIVE" | "RESOLVED")}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
+                filter === p.key
+                  ? `${p.active} shadow-2xs`
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"
+              }`}
+            >
+              {p.label} ({p.count})
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Alerts Grid */}
+      {filtered.length === 0 ? (
+        <GlassPanel>
+          <div className="flex flex-col items-center py-10 text-center">
+            <ShieldCheck size={32} className="text-emerald-500" />
+            <h3 className="mt-3 text-sm font-bold text-slate-700 dark:text-slate-200">
+              {searchQuery ? "No matching alerts" : "Clinical Telemetry Nominal"}
+            </h3>
+            <p className="mt-1 max-w-sm text-xs text-slate-500 dark:text-slate-400">
+              {searchQuery
+                ? `No alerts match "${searchQuery}".`
+                : "All patients in your caseload are currently stable and cleared for scheduled physiotherapy sessions."}
+            </p>
+          </div>
+        </GlassPanel>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {filtered.map((item) => {
+            const isCritical = item.severity === "CRITICAL";
+            const isWarning = item.severity === "WARNING";
+            const isHold = item.physioGuidance.directive === "HOLD_MOBILIZATION";
+            const isResolved = item.status === "RESOLVED";
+
+            return (
+              <GlassPanel key={item.id} className="flex flex-col justify-between">
+                <div>
+                  {/* Top Header */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      {isCritical ? (
+                        <span className="inline-flex animate-pulse items-center rounded-full bg-rose-600 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                          <ShieldAlert size={11} className="mr-1" /> CRITICAL
+                        </span>
+                      ) : isWarning ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-500 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                          <AlertTriangle size={11} className="mr-1" /> WARNING
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-sky-500 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                          <HeartPulse size={11} className="mr-1" /> INFO
+                        </span>
+                      )}
+
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                        {item.category.replace(/_/g, " ")}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <Pill
+                        tone={
+                          isResolved ? "good" : item.status === "ACKNOWLEDGED" ? "warning" : "critical"
+                        }
+                      >
+                        {item.status}
+                      </Pill>
+                      <span className="flex items-center text-[10px] font-medium text-slate-400">
+                        <Clock size={11} className="mr-1" />
+                        {shortDate(item.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Patient Info */}
+                  <div className="mt-3 flex items-baseline justify-between border-b border-slate-100 pb-2.5 dark:border-slate-800">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                        {item.patientName}
+                      </h3>
+                      <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                        {item.title}
+                      </p>
+                    </div>
+                    <span className="font-mono text-xs font-bold text-slate-500 dark:text-slate-400">
+                      {item.patientNumber}
+                    </span>
+                  </div>
+
+                  {/* Trigger Detail */}
+                  <div className="mt-2.5 rounded-xl bg-slate-50/80 p-2.5 text-xs dark:bg-slate-800/40">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                        Rule: {item.ruleName}
+                      </span>
+                    </div>
+                    <p className="mt-1 font-mono text-[11px] text-rose-600 dark:text-rose-400">
+                      {item.triggerDetail}
+                    </p>
+                  </div>
+
+                  {/* Physiotherapy Directive Box */}
+                  <div
+                    className={`mt-3 rounded-xl border p-3 ${
+                      isHold
+                        ? "border-rose-300 bg-rose-50/70 text-rose-950 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200"
+                        : isResolved
+                        ? "border-emerald-300 bg-emerald-50/70 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
+                        : "border-amber-300 bg-amber-50/70 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-xs">
+                      {isHold ? (
+                        <ShieldAlert size={14} className="text-rose-600 dark:text-rose-400" />
+                      ) : isResolved ? (
+                        <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400" />
+                      ) : (
+                        <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400" />
+                      )}
+                      <span>Physiotherapy Directive: {item.physioGuidance.badgeText}</span>
+                    </div>
+
+                    <p className="mt-1 text-[11px] leading-relaxed opacity-90">
+                      {item.physioGuidance.summary}
+                    </p>
+
+                    <ul className="mt-2 space-y-1 border-t border-black/5 pt-2 text-[10px] dark:border-white/10">
+                      {item.physioGuidance.instructions.map((inst, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <span className="mt-0.5 text-slate-400">•</span>
+                          <span>{inst}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    {item.resolutionNotes ? (
+                      <div className="mt-2 border-t border-emerald-200 pt-2 text-[10px] italic text-emerald-800 dark:border-emerald-800 dark:text-emerald-300">
+                        Resolution Note: {item.resolutionNotes}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Card Footer & Actions */}
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                  <div className="text-[10px] text-slate-400">
+                    Managing: <span className="font-semibold text-slate-600 dark:text-slate-300">{item.managingDoctorName || "Surgical Team"}</span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {onNavigateCarePlans ? (
+                      <GlassButton size="sm" variant="ghost" onClick={onNavigateCarePlans}>
+                        Care plan
+                      </GlassButton>
+                    ) : null}
+
+                    {onSelectPatient ? (
+                      <GlassButton size="sm" variant="ghost" onClick={() => onSelectPatient(item.patientNumber)}>
+                        Recovery deck
+                      </GlassButton>
+                    ) : null}
+
+                    {!isResolved && item.status === "OPEN" ? (
+                      <GlassButton
+                        size="sm"
+                        onClick={() => void handleAcknowledge(item)}
+                      >
+                        Acknowledge
+                      </GlassButton>
+                    ) : null}
+
+                    {!isResolved ? (
+                      <GlassButton
+                        size="sm"
+                        variant="solid"
+                        accent="#059669"
+                        onClick={() => {
+                          setResolvingAlert(item);
+                          setResolutionNotes("");
+                        }}
+                      >
+                        Resolve
+                      </GlassButton>
+                    ) : null}
+                  </div>
+                </div>
+              </GlassPanel>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Resolve Modal */}
+      <GlassModal
+        open={Boolean(resolvingAlert)}
+        onClose={() => setResolvingAlert(null)}
+        title="Resolve Clinical Alert"
+        subtitle={`Clinical resolution record for ${resolvingAlert?.patientName} (${resolvingAlert?.patientNumber})`}
+        accent="#059669"
+      >
+        {resolvingAlert ? (
+          <form onSubmit={handleResolve} className="space-y-4">
+            <GlassWell className="space-y-1 text-xs">
+              <p className="font-bold text-slate-900 dark:text-white">
+                {resolvingAlert.title}
+              </p>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                {resolvingAlert.triggerDetail}
+              </p>
+            </GlassWell>
+
+            <GlassField
+              label="Mandatory Clinical Resolution Notes"
+              htmlFor="alert-resolution-notes"
+              hint="Document bedside examination findings, vitals normalization, or surgical team clearance before resolving this safety hold."
+            >
+              <GlassTextarea
+                id="alert-resolution-notes"
+                rows={3}
+                required
+                value={resolutionNotes}
+                onChange={(e) => setResolutionNotes(e.target.value)}
+                placeholder="e.g. Assessed patient at bedside with surgical registrar. Drain amylase normalized, incision dry, vitals stable at 36.8°C. Patient cleared for gentle seated mobility."
+              />
+            </GlassField>
+
+            <div className="flex justify-end gap-2 pt-2">
+              <GlassButton variant="ghost" onClick={() => setResolvingAlert(null)}>
+                Cancel
+              </GlassButton>
+              <GlassButton
+                type="submit"
+                variant="solid"
+                accent="#059669"
+                disabled={submittingResolution || !resolutionNotes.trim()}
+              >
+                {submittingResolution ? "Saving…" : "Confirm Resolution & Clear Alert"}
+              </GlassButton>
+            </div>
+          </form>
+        ) : null}
+      </GlassModal>
     </div>
   );
 }

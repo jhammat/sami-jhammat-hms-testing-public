@@ -13,3 +13,4 @@ export * from "./platform-subscriptions-panel";
 export * from "./platform-support-access-panel";
 export * from "./platform-audit-panel";
 export * from "./platform-system-settings";
+export * from "./platform-profile-panel";

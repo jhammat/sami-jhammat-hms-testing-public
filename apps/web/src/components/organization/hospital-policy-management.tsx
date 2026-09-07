@@ -1,8 +1,8 @@
 "use client";
 
 import type { FormEvent, ReactNode } from "react";
-import { useState } from "react";
-import { FileCheck2, Plus, ShieldAlert } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Check, Copy, Eye, FileCheck2, FileText, Plus, Printer, ShieldAlert, X } from "lucide-react";
 
 import { WonFlowAsyncDataBoundary, WonFlowEmptyState, WonFlowPagination, useWonFlowConfirm, useWonFlowPagination } from "@/components/feedback";
 import { phaseOneApi } from "@/lib/api/phase-one-api";
@@ -38,23 +38,218 @@ const policyCategories = [
 
 const categoryLabel = (code: string) => policyCategories.find((category) => category.code === code)?.label ?? code;
 
-const fieldClass = "min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
+const fieldClass = "min-h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white dark:focus:border-blue-400";
 const buttonClass = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60";
-const secondaryButtonClass = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60";
+const secondaryButtonClass = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800";
 
 const statusStyles: Record<PolicyStatus, string> = {
-  DRAFT: "bg-amber-50 text-amber-700",
-  PUBLISHED: "bg-emerald-50 text-emerald-700",
-  ARCHIVED: "bg-slate-100 text-slate-600",
+  DRAFT: "bg-amber-50 text-amber-700 border border-amber-200 dark:border-amber-800/40 dark:bg-amber-950/60 dark:text-amber-300",
+  PUBLISHED: "bg-emerald-50 text-emerald-700 border border-emerald-200 dark:border-emerald-800/40 dark:bg-emerald-950/60 dark:text-emerald-300",
+  ARCHIVED: "bg-slate-100 text-slate-600 border border-slate-200 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400",
 };
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
-  return <label className="block space-y-1.5"><span className="block text-xs font-bold text-slate-700">{label}</span>{children}</label>;
+  return <label className="block space-y-1.5"><span className="block text-xs font-bold text-slate-700 dark:text-slate-300">{label}</span>{children}</label>;
 }
 
-const formatDate = (value: string) => new Intl.DateTimeFormat("en-PK", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+const formatDate = (value: string | null | undefined) => {
+  if (!value) return "";
+  try {
+    return new Intl.DateTimeFormat("en-PK", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
+  } catch {
+    return value;
+  }
+};
+
+const formatShortDate = (value: string | null | undefined) => {
+  if (!value) return "";
+  try {
+    return new Intl.DateTimeFormat("en-PK", { dateStyle: "medium" }).format(new Date(value));
+  } catch {
+    return value;
+  }
+};
 
 const emptyForm = { title: "", category: "CONSENT", summary: "", body: "", effectiveFrom: "" };
+
+function PolicyPreviewModal({
+  policy,
+  onClose,
+  onEdit,
+}: {
+  policy: PolicyRecord;
+  onClose: () => void;
+  onEdit: (policy: PolicyRecord) => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  const handleCopy = async () => {
+    try {
+      const textToCopy = `${policy.title}\n${policy.code} · ${categoryLabel(policy.category)}\nStatus: ${policy.status} (v${policy.version})\n\n${policy.summary ? `Summary:\n${policy.summary}\n\n` : ""}Full Policy Content:\n${policy.body}`;
+      await navigator.clipboard.writeText(textToCopy);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // ignore clipboard error
+    }
+  };
+
+  const handlePrint = () => {
+    window.print();
+  };
+
+  return (
+    <div
+      aria-labelledby="policy-preview-title"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/60 p-4 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={onClose}
+      role="dialog"
+    >
+      <div
+        className="relative my-8 flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-[26px] border border-white/60 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900 animate-in zoom-in-95 duration-200"
+        onClick={(event) => event.stopPropagation()}
+      >
+        {/* Header */}
+        <header className="border-b border-slate-100 bg-gradient-to-r from-slate-50 via-white to-blue-50/40 px-6 py-5 dark:border-slate-800 dark:from-slate-900 dark:via-slate-900 dark:to-slate-800">
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-100/80 px-2.5 py-0.5 text-[11px] font-bold text-blue-700 dark:bg-blue-950/80 dark:text-blue-300">
+                  <FileText size={12} />
+                  {categoryLabel(policy.category)}
+                </span>
+                <span className="rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-mono font-bold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  {policy.code}
+                </span>
+                <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-extrabold ${statusStyles[policy.status]}`}>
+                  {policy.status}
+                </span>
+              </div>
+              <h2 id="policy-preview-title" className="text-xl font-bold tracking-tight text-slate-950 dark:text-white sm:text-2xl">
+                {policy.title}
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {policy.status === "PUBLISHED" && policy.publishedAt
+                  ? `Version ${policy.version} · Published ${formatDate(policy.publishedAt)}`
+                  : `Version ${policy.version} · Last edited ${formatDate(policy.updatedAt)}`}
+                {policy.effectiveFrom ? ` · Effective from ${formatShortDate(policy.effectiveFrom)}` : ""}
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                onClick={handlePrint}
+                title="Print document"
+                type="button"
+              >
+                <Printer size={14} />
+                <span className="hidden sm:inline">Print</span>
+              </button>
+              <button
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                onClick={handleCopy}
+                title="Copy policy content to clipboard"
+                type="button"
+              >
+                {copied ? (
+                  <>
+                    <Check className="text-emerald-600 dark:text-emerald-400" size={14} />
+                    <span className="text-emerald-600 dark:text-emerald-400">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy size={14} />
+                    <span className="hidden sm:inline">Copy</span>
+                  </>
+                )}
+              </button>
+              <button
+                aria-label="Close popup"
+                className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-white"
+                onClick={onClose}
+                type="button"
+              >
+                <X size={18} />
+              </button>
+            </div>
+          </div>
+        </header>
+
+        {/* Scrollable Content Body */}
+        <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          {policy.summary ? (
+            <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4 text-xs leading-relaxed text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200">
+              <p className="mb-1 text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                Policy Summary
+              </p>
+              <p>{policy.summary}</p>
+            </div>
+          ) : null}
+
+          <div>
+            <h3 className="mb-2 text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+              Full Policy Content
+            </h3>
+            <div className="whitespace-pre-wrap select-text rounded-2xl border border-slate-200/80 bg-slate-50/60 p-5 font-sans text-sm leading-relaxed text-slate-800 dark:border-slate-800 dark:bg-slate-950/40 dark:text-slate-200">
+              {policy.body}
+            </div>
+          </div>
+
+          {policy.versions.length > 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Published Version History ({policy.versions.length})
+              </p>
+              <div className="mt-2 divide-y divide-slate-200/60 dark:divide-slate-800">
+                {policy.versions.map((ver) => (
+                  <div className="flex items-center justify-between py-1.5 text-xs text-slate-600 dark:text-slate-300" key={ver.id}>
+                    <span className="font-semibold">Version {ver.version} · {ver.title}</span>
+                    <span className="text-[11px] text-slate-400">{formatDate(ver.publishedAt)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        {/* Footer */}
+        <footer className="flex items-center justify-between border-t border-slate-100 bg-slate-50/80 px-6 py-4 dark:border-slate-800 dark:bg-slate-900/90">
+          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+            Document ID: <code className="font-mono">{policy.id.slice(0, 8)}...</code>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="min-h-9 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              onClick={onClose}
+              type="button"
+            >
+              Close
+            </button>
+            <button
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white transition hover:bg-blue-700"
+              onClick={() => {
+                onClose();
+                onEdit(policy);
+              }}
+              type="button"
+            >
+              <span>Edit policy</span>
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+  );
+}
 
 function PolicyManager({ policies, onChanged }: { policies: PolicyRecord[]; onChanged(): void }) {
   const [form, setForm] = useState(emptyForm);
@@ -63,6 +258,7 @@ function PolicyManager({ policies, onChanged }: { policies: PolicyRecord[]; onCh
   const [saving, setSaving] = useState(false);
   const [busyAction, setBusyAction] = useState("");
   const [error, setError] = useState("");
+  const [previewingPolicy, setPreviewingPolicy] = useState<PolicyRecord | null>(null);
   const pages = useWonFlowPagination(policies, 6);
   const { confirm, dialog: confirmDialog } = useWonFlowConfirm();
   const editing = policies.find((policy) => policy.id === editingId) ?? null;
@@ -122,6 +318,16 @@ function PolicyManager({ policies, onChanged }: { policies: PolicyRecord[]; onCh
   return (
     <div className="grid gap-4 xl:grid-cols-[1.25fr_0.75fr]">
       {confirmDialog}
+      {previewingPolicy ? (
+        <PolicyPreviewModal
+          onClose={() => setPreviewingPolicy(null)}
+          onEdit={(policy) => {
+            void edit(policy);
+          }}
+          policy={previewingPolicy}
+        />
+      ) : null}
+
       <section className="wf-admin-panel rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
         <h2 className="font-bold text-slate-950">Policy library</h2>
         <p className="mt-1 text-xs text-slate-500">{policies.length} {policies.length === 1 ? "document" : "documents"}. Publishing snapshots the wording so an earlier version can always be produced.</p>
@@ -145,12 +351,21 @@ function PolicyManager({ policies, onChanged }: { policies: PolicyRecord[]; onCh
                     {policy.status === "PUBLISHED" && policy.publishedAt ? `Version ${policy.version} published ${formatDate(policy.publishedAt)}` : `Last edited ${formatDate(policy.updatedAt)}`}
                     {policy.versions.length > 0 ? ` · ${policy.versions.length === 1 ? "1 published version" : `${policy.versions.length} published versions`}` : " · never published"}
                   </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     <button className="min-h-9 rounded-xl border border-blue-200 px-3 text-xs font-bold text-blue-700 hover:bg-blue-50" onClick={() => void edit(policy)} type="button">{policy.id === editingId ? "Editing" : "Edit"}</button>
                     {policy.status !== "ARCHIVED" ? <button className="min-h-9 rounded-xl border border-emerald-200 px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-50 disabled:opacity-60" disabled={busyAction !== ""} onClick={() => void act(policy, "publish")} type="button">{busyAction === `${policy.id}:publish` ? "Publishing" : policy.status === "PUBLISHED" ? "Republish" : "Publish"}</button> : null}
                     {policy.status === "ARCHIVED"
                       ? <button className="min-h-9 rounded-xl border border-slate-200 px-3 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60" disabled={busyAction !== ""} onClick={() => void act(policy, "restore")} type="button">{busyAction === `${policy.id}:restore` ? "Restoring" : "Restore"}</button>
                       : <button className="min-h-9 rounded-xl border border-rose-200 px-3 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-60" disabled={busyAction !== ""} onClick={() => void act(policy, "archive")} type="button">{busyAction === `${policy.id}:archive` ? "Archiving" : "Archive"}</button>}
+                    <button
+                      className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-indigo-200 bg-indigo-50/50 px-3 text-xs font-bold text-indigo-700 transition hover:bg-indigo-100/70 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 dark:hover:bg-indigo-900/60"
+                      onClick={() => setPreviewingPolicy(policy)}
+                      title="View full policy content"
+                      type="button"
+                    >
+                      <Eye aria-hidden="true" size={13} />
+                      <span>Preview</span>
+                    </button>
                   </div>
                 </article>
               ))}
@@ -160,8 +375,32 @@ function PolicyManager({ policies, onChanged }: { policies: PolicyRecord[]; onCh
         )}
       </section>
       <section className="wf-admin-panel rounded-[22px] border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="font-bold text-slate-950">{editing ? "Edit policy" : "Add policy"}</h2>
-        <p className="mt-1 text-xs text-slate-500">{editing ? `${editing.code} · saving keeps it a draft until you publish.` : "Drafts are private until published."}</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="font-bold text-slate-950">{editing ? "Edit policy" : "Add policy"}</h2>
+            <p className="mt-1 text-xs text-slate-500">{editing ? `${editing.code} · saving keeps it a draft until you publish.` : "Drafts are private until published."}</p>
+          </div>
+          {editing ? (
+            <button
+              className="inline-flex min-h-8 items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50/40 px-2.5 text-xs font-bold text-indigo-700 transition hover:bg-indigo-100/70"
+              onClick={() =>
+                setPreviewingPolicy({
+                  ...editing,
+                  title: form.title || editing.title,
+                  category: form.category,
+                  summary: form.summary || null,
+                  body: form.body,
+                  effectiveFrom: form.effectiveFrom || null,
+                })
+              }
+              title="Preview changes"
+              type="button"
+            >
+              <Eye aria-hidden="true" size={13} />
+              <span>Preview</span>
+            </button>
+          ) : null}
+        </div>
         <form className="mt-4 space-y-3" onSubmit={save}>
           <Field label="Title"><input className={fieldClass} required value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} /></Field>
           <Field label="Category"><select className={fieldClass} required value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })}>{policyCategories.map((category) => <option key={category.code} value={category.code}>{category.label}</option>)}</select></Field>
@@ -207,3 +446,4 @@ export function HospitalPolicyManagementPage() {
     </div>
   );
 }
+

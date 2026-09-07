@@ -1103,6 +1103,28 @@ export default function DoctorDocumentsPage() {
                 </div>
 
                 <div className="space-y-3 pt-1">
+                  <div>
+                    <span className="block text-xs font-bold text-slate-700">Username / MR Number (Patient Login ID)</span>
+                    <div className="mt-1 flex items-center justify-between rounded-xl border border-indigo-200 bg-indigo-50/60 px-3.5 py-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-500">MRN:</span>
+                        <span className="font-mono font-black text-indigo-950">{selectedPatient.patientNumber}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(selectedPatient.patientNumber, "mrn_form")}
+                        className="flex items-center gap-1 rounded-md bg-white px-2 py-1 text-[10px] font-bold text-indigo-600 shadow-2xs hover:bg-indigo-50"
+                        title="Copy MR Number"
+                      >
+                        {copiedKey === "mrn_form" ? <Check className="h-3 w-3 text-emerald-600" /> : <Copy className="h-3 w-3" />}
+                        <span>{copiedKey === "mrn_form" ? "Copied" : "Copy MRN"}</span>
+                      </button>
+                    </div>
+                    <span className="mt-1 block text-[10px] text-slate-500">
+                      Patients can sign in directly using this MR Number as their login username.
+                    </span>
+                  </div>
+
                   <label className="block text-xs font-bold text-slate-700">
                     Login Email (Optional — auto-generated if empty)
                     <input
@@ -1162,14 +1184,34 @@ export default function DoctorDocumentsPage() {
                   </div>
 
                   <div className="mt-3 space-y-2.5">
+                    {/* Username / MR Number */}
+                    <div className="flex items-center justify-between rounded-xl bg-white p-2.5 shadow-sm">
+                      <div className="text-left">
+                        <span className="block text-[9px] font-bold text-slate-400 uppercase">Username / MR Number</span>
+                        <span className="font-mono text-xs font-black text-indigo-700">{credentialsResult.patientNumber}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleCopy(credentialsResult.patientNumber, "mrn")}
+                        className="rounded-lg border border-slate-200 bg-slate-50 p-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                        title="Copy MR Number"
+                      >
+                        {copiedKey === "mrn" ? (
+                          <Check className="h-3.5 w-3.5 text-emerald-600" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
+
                     {/* Portal URL */}
                     <div className="flex items-center justify-between rounded-xl bg-white p-2.5 shadow-sm">
                       <div className="text-left">
                         <span className="block text-[9px] font-bold text-slate-400 uppercase">Patient App URL</span>
                         <span className="font-mono text-xs font-black text-indigo-700">
                           {typeof window !== "undefined"
-                            ? `${window.location.origin}/patient`
-                            : "https://wonflow.com/patient"}
+                            ? `${window.location.origin}/login?audience=patient`
+                            : "https://wonflow.com/login?audience=patient"}
                         </span>
                       </div>
                       <button
@@ -1177,8 +1219,8 @@ export default function DoctorDocumentsPage() {
                         onClick={() =>
                           handleCopy(
                             typeof window !== "undefined"
-                              ? `${window.location.origin}/patient`
-                              : "https://wonflow.com/patient",
+                              ? `${window.location.origin}/login?audience=patient`
+                              : "https://wonflow.com/login?audience=patient",
                             "url",
                           )
                         }

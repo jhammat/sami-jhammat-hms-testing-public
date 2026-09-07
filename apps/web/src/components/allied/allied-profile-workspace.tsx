@@ -79,6 +79,11 @@ interface AlliedProfileView {
     plansPublished: number;
     patientsSeen: number;
   };
+  preferences?: {
+    clinicalFocus: string[];
+    dailyStepGoal: string;
+    spirometryGoal: string;
+  };
 }
 
 const SPECIALTY_PRESENTATION: Record<
@@ -148,8 +153,11 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
   const [primaryBranchId, setPrimaryBranchId] = useState("");
   const [preferredLocale, setPreferredLocale] = useState("en");
   const [selectedFocus, setSelectedFocus] = useState<string[]>([]);
+  const [initialFocus, setInitialFocus] = useState<string[]>([]);
   const [dailyStepGoal, setDailyStepGoal] = useState("100m (corridor)");
+  const [initialDailyStepGoal, setInitialDailyStepGoal] = useState("100m (corridor)");
   const [spirometryGoal, setSpirometryGoal] = useState("1500 mL q1h");
+  const [initialSpirometryGoal, setInitialSpirometryGoal] = useState("1500 mL q1h");
 
   const [photoVersion, setPhotoVersion] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -161,11 +169,27 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
     setStaffType(next.staff.staffType || (specialty === "NUTRITION" ? "NUTRITIONIST" : "PHYSIOTHERAPIST"));
     setPrimaryBranchId(next.membership.primaryBranchId ?? next.staff.branchId ?? "");
     setPreferredLocale(next.membership.preferredLocale || "en");
-    setSelectedFocus(
+
+    const defaultFocus =
       specialty === "NUTRITION"
         ? [NUTRITION_FOCUS_AREAS[0]!, NUTRITION_FOCUS_AREAS[1]!]
-        : [PT_FOCUS_AREAS[0]!, PT_FOCUS_AREAS[1]!],
-    );
+        : [PT_FOCUS_AREAS[0]!, PT_FOCUS_AREAS[1]!];
+    const loadedFocus =
+      next.preferences?.clinicalFocus && Array.isArray(next.preferences.clinicalFocus)
+        ? next.preferences.clinicalFocus
+        : defaultFocus;
+    setSelectedFocus(loadedFocus);
+    setInitialFocus(loadedFocus);
+
+    const defaultStep = specialty === "NUTRITION" ? "25-30 kcal/kg/day" : "100m (corridor)";
+    const loadedStep = next.preferences?.dailyStepGoal || defaultStep;
+    setDailyStepGoal(loadedStep);
+    setInitialDailyStepGoal(loadedStep);
+
+    const defaultSpirometry = specialty === "NUTRITION" ? "1.5 g/kg/day" : "1500 mL q1h";
+    const loadedSpirometry = next.preferences?.spirometryGoal || defaultSpirometry;
+    setSpirometryGoal(loadedSpirometry);
+    setInitialSpirometryGoal(loadedSpirometry);
   }, [specialty]);
 
   const load = useCallback(async () => {
@@ -221,7 +245,7 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
     setNotice(null);
 
     try {
-      const response = await fetch("/api/v1/allied/profile", {
+      const response = await fetch(`/api/v1/allied/profile?specialty=${specialty}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -231,6 +255,9 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
           staffType,
           primaryBranchId: primaryBranchId || null,
           preferredLocale,
+          clinicalFocus: selectedFocus,
+          dailyStepGoal: dailyStepGoal.trim(),
+          spirometryGoal: spirometryGoal.trim(),
         }),
       });
 
@@ -241,7 +268,7 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
       }
 
       applyProfile(data.profile);
-      setNotice({ tone: "success", message: "Your clinician profile has been successfully saved." });
+      setNotice({ tone: "success", message: "Your clinician profile and practice preferences have been successfully saved." });
     } catch (error) {
       setNotice({
         tone: "error",
@@ -313,15 +340,37 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
 
   const isDirty = useMemo(() => {
     if (!profile) return false;
+    const focusChanged =
+      JSON.stringify([...selectedFocus].sort()) !==
+      JSON.stringify([...initialFocus].sort());
+    const stepGoalChanged = dailyStepGoal.trim() !== initialDailyStepGoal.trim();
+    const spirometryGoalChanged = spirometryGoal.trim() !== initialSpirometryGoal.trim();
+
     return (
       displayName !== profile.membership.displayName ||
       title !== (profile.staff.title ?? "") ||
       staffType !== profile.staff.staffType ||
       primaryBranchId !==
         (profile.membership.primaryBranchId ?? profile.staff.branchId ?? "") ||
-      preferredLocale !== (profile.membership.preferredLocale || "en")
+      preferredLocale !== (profile.membership.preferredLocale || "en") ||
+      focusChanged ||
+      stepGoalChanged ||
+      spirometryGoalChanged
     );
-  }, [profile, displayName, title, staffType, primaryBranchId, preferredLocale]);
+  }, [
+    profile,
+    displayName,
+    title,
+    staffType,
+    primaryBranchId,
+    preferredLocale,
+    selectedFocus,
+    initialFocus,
+    dailyStepGoal,
+    initialDailyStepGoal,
+    spirometryGoal,
+    initialSpirometryGoal,
+  ]);
 
   const initials = useMemo(() => {
     if (!profile) return "—";
@@ -365,7 +414,7 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
       ) : null}
 
       {/* Discipline Quick Navigation Bridge */}
-      <div className="rounded-3xl border border-slate-200/80 bg-gradient-to-r from-slate-50 via-white to-slate-100/50 p-4 sm:p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
+      <div className="rounded-3xl border border-slate-200/80 bg-linear-to-r from-slate-50 via-white to-slate-100/50 p-4 sm:p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
@@ -415,11 +464,21 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
               </>
             )}
 
+            {/*
+              This opened `/doctor/careplans`, which is the surgeon's portal
+              and not an allied clinician's to enter. Their own deck shows the
+              same recovery — care plan, day number and managing surgeon —
+              from the side of it they actually work on.
+            */}
             <Link
-              href="/doctor/careplans"
+              href={
+                specialty === "PHYSIOTHERAPY"
+                  ? "/operations/physiotherapy?view=overview"
+                  : "/operations/nutrition?view=overview"
+              }
               className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-2xs transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
             >
-              <HeartPulse size={13} /> Surgical Care Plans
+              <HeartPulse size={13} /> Care Plan Overview
             </Link>
           </div>
         </div>
@@ -489,7 +548,7 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
                     ) : (
                       <span
                         aria-hidden="true"
-                        className={`flex h-28 w-28 items-center justify-center rounded-full bg-gradient-to-br ${presentation.gradient} text-3xl font-bold text-white ring-4 ring-white shadow-md`}
+                        className={`flex h-28 w-28 items-center justify-center rounded-full bg-linear-to-br ${presentation.gradient} text-3xl font-bold text-white ring-4 ring-white shadow-md`}
                       >
                         {initials}
                       </span>
@@ -713,6 +772,67 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
                             );
                           },
                         )}
+                      </div>
+                    </div>
+
+                    {/* Clinical Practice Protocols & Default Targets */}
+                    <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-slate-50/60 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+                      <div>
+                        <label className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                          <Activity className="h-4 w-4 text-teal-600" />
+                          {specialty === "PHYSIOTHERAPY"
+                            ? "Rehabilitation Protocol Targets"
+                            : "Nutritional Protocol Targets"}
+                        </label>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {specialty === "PHYSIOTHERAPY"
+                            ? "Default baseline targets assigned to newly referred inpatient recovery pathways"
+                            : "Standard metabolic baseline targets assigned to newly referred dietary care plans"}
+                        </p>
+                      </div>
+
+                      <div className="grid gap-4 sm:grid-cols-2 pt-1">
+                        <PhaseOneField
+                          label={
+                            specialty === "PHYSIOTHERAPY"
+                              ? "Daily Mobility Target"
+                              : "Caloric Target Formula"
+                          }
+                          htmlFor="allied-daily-step-goal"
+                          hint={
+                            specialty === "PHYSIOTHERAPY"
+                              ? "e.g. 100m (corridor), 3x daily ambulation"
+                              : "e.g. 25-30 kcal/kg/day"
+                          }
+                        >
+                          <PhaseOneInput
+                            id="allied-daily-step-goal"
+                            value={dailyStepGoal}
+                            onChange={(event) => setDailyStepGoal(event.target.value)}
+                            maxLength={80}
+                          />
+                        </PhaseOneField>
+
+                        <PhaseOneField
+                          label={
+                            specialty === "PHYSIOTHERAPY"
+                              ? "Incentive Spirometry Target"
+                              : "Daily Protein Target"
+                          }
+                          htmlFor="allied-spirometry-goal"
+                          hint={
+                            specialty === "PHYSIOTHERAPY"
+                              ? "e.g. 1500 mL q1h, 10 breaths/hr"
+                              : "e.g. 1.5 g/kg/day"
+                          }
+                        >
+                          <PhaseOneInput
+                            id="allied-spirometry-goal"
+                            value={spirometryGoal}
+                            onChange={(event) => setSpirometryGoal(event.target.value)}
+                            maxLength={80}
+                          />
+                        </PhaseOneField>
                       </div>
                     </div>
 

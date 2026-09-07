@@ -122,7 +122,7 @@ export function assertWonFlowRequestContext(
     "identityId",
   );
 
-  if (context.scope === "tenant" && !context.membershipId) {
+  if (context.scope === "tenant" && !context.membershipId && context.workspace !== "patient") {
     throw new WonFlowRequestContextError(
       "invalid-request-context",
       "membershipId is required for tenant context.",

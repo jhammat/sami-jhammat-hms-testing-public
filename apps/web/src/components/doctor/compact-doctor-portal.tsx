@@ -69,7 +69,7 @@ export function CompactDoctorPortal({
           businessDate: portal.businessDate,
           startsMinute: 9 * 60,
           endsMinute: 17 * 60,
-          roomLabel: portal.sitting?.roomLabel || "OPD Room 1",
+          roomLabel: portal.sitting?.roomLabel || "",
           status: "AVAILABLE",
         });
         portal.reload();

@@ -81,12 +81,15 @@ export function POST(request: Request) {
     requirePermission(context, "pharmacy.dispensing.manage");
     const branchId = requireBranchId(context);
 
+    const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
     const body = (await request.json()) as {
       patientId?: string;
       customerName?: string;
       customerPhone?: string;
       items: Array<{
-        medicationId: string;
+        medicationId?: string;
+        medicationName?: string;
         inventoryBatchId?: string;
         quantity: number;
         unitPricePkr: number;
@@ -108,24 +111,20 @@ export function POST(request: Request) {
     const taxPercent = Math.max(0, Math.min(100, Number(body.taxPercent) || 0));
 
     const receipt = await database.$transaction(async (tx) => {
-      // 1. Resolve Patient (or fallback walk-in patient in database)
+      // 1. Resolve Patient (or create walk-in patient record with customer's actual details)
       let patientId = body.patientId;
       if (!patientId) {
-        let walkInPatient = await tx.patient.findFirst({
-          where: { tenantId: context.tenantId, patientNumber: "WALK-IN-POS" },
+        const uniqueSuffix = `${Date.now().toString(36).toUpperCase()}-${Math.floor(Math.random() * 900 + 100)}`;
+        const walkInPatient = await tx.patient.create({
+          data: {
+            tenantId: context.tenantId,
+            patientNumber: `POS-${uniqueSuffix}`,
+            givenName: customerName.split(" ")[0] || "Walk-in",
+            familyName: customerName.split(" ").slice(1).join(" ") || "Customer",
+            phone: body.customerPhone || null,
+            status: "ACTIVE",
+          },
         });
-        if (!walkInPatient) {
-          walkInPatient = await tx.patient.create({
-            data: {
-              tenantId: context.tenantId,
-              patientNumber: "WALK-IN-POS",
-              givenName: customerName.split(" ")[0] || "Walk-in",
-              familyName: customerName.split(" ").slice(1).join(" ") || "Customer",
-              phone: body.customerPhone || null,
-              status: "ACTIVE",
-            },
-          });
-        }
         patientId = walkInPatient.id;
       }
 
@@ -146,21 +145,79 @@ export function POST(request: Request) {
 
       for (const item of body.items) {
         const qty = Math.max(1, Number(item.quantity) || 1);
-        const unitPrice = Math.max(0, Number(item.unitPricePkr) || 15);
+        if (
+          item.unitPricePkr === undefined ||
+          item.unitPricePkr === null ||
+          Number.isNaN(Number(item.unitPricePkr)) ||
+          Number(item.unitPricePkr) <= 0
+        ) {
+          throw new WonFlowApiError(400, "invalid-unit-price", "Each item requires a valid positive unit price in PKR.");
+        }
+        const unitPrice = Number(item.unitPricePkr);
         const lineTotal = unitPrice * qty;
         subtotalPkr += lineTotal;
 
         // Try finding existing medication
-        let med = await tx.medication.findFirst({
-          where: { id: item.medicationId, tenantId: context.tenantId },
-        });
+        let med = null;
+        if (item.medicationId && UUID_REGEX.test(item.medicationId)) {
+          med = await tx.medication.findFirst({
+            where: { id: item.medicationId, tenantId: context.tenantId },
+          });
+        }
+        if (!med && item.medicationId) {
+          med = await tx.medication.findFirst({
+            where: {
+              tenantId: context.tenantId,
+              OR: [
+                { code: item.medicationId },
+                { genericName: { equals: item.medicationId, mode: "insensitive" } },
+                { brandName: { equals: item.medicationId, mode: "insensitive" } },
+              ],
+            },
+          });
+        }
+        if (!med && (item.medicationName || item.medicationId)) {
+          const searchKey = (item.medicationName || item.medicationId || "").trim();
+          const namePart = searchKey.split(/[\s-]+/)[0] || searchKey;
+
+          // First try to find a medication that actually has available stock at this branch
+          med = await tx.medication.findFirst({
+            where: {
+              tenantId: context.tenantId,
+              OR: [
+                { genericName: { contains: namePart, mode: "insensitive" } },
+                { brandName: { contains: namePart, mode: "insensitive" } },
+              ],
+              inventoryBatches: {
+                some: {
+                  branchId,
+                  status: "AVAILABLE",
+                  quantity: { gt: 0 },
+                  expiryDate: { gt: new Date() },
+                },
+              },
+            },
+          });
+
+          // Fallback to general match if no stock at branch
+          if (!med) {
+            med = await tx.medication.findFirst({
+              where: {
+                tenantId: context.tenantId,
+                OR: [
+                  { genericName: { equals: searchKey, mode: "insensitive" } },
+                  { brandName: { equals: searchKey, mode: "insensitive" } },
+                  { genericName: { contains: namePart, mode: "insensitive" } },
+                  { brandName: { contains: namePart, mode: "insensitive" } },
+                ],
+              },
+            });
+          }
+        }
 
         if (!med) {
           // Check if custom or unlisted medication
-          const genericName = item.medicationId.startsWith("CUSTOM-")
-            ? item.instructions || "Custom OTC Item"
-            : item.medicationId;
-
+          const genericName = (item.medicationName || item.instructions || item.medicationId || "Custom OTC Item").trim();
           med = await tx.medication.create({
             data: {
               tenantId: context.tenantId,
@@ -173,46 +230,78 @@ export function POST(request: Request) {
           });
         }
 
-        // Find or create an available inventory batch
-        let batch = await tx.inventoryBatch.findFirst({
-          where: {
-            tenantId: context.tenantId,
-            branchId,
-            medicationId: med.id,
-            status: "AVAILABLE",
-          },
-        });
-
-        if (!batch) {
-          batch = await tx.inventoryBatch.create({
-            data: {
+        // Find available inventory batch following FEFO (First-Expired, First-Out)
+        const now = new Date();
+        let batch = null;
+        if (item.inventoryBatchId && UUID_REGEX.test(item.inventoryBatchId)) {
+          batch = await tx.inventoryBatch.findFirst({
+            where: {
+              id: item.inventoryBatchId,
               tenantId: context.tenantId,
               branchId,
               medicationId: med.id,
-              batchNumber: `BAT-${Date.now().toString(36).toUpperCase()}`,
-              quantity: `${Math.max(500, qty + 100)}`,
-              expiryDate: new Date(Date.now() + 1000 * 60 * 60 * 24 * 730), // 2 years
               status: "AVAILABLE",
-            },
-          });
-        } else if (Number(batch.quantity) < qty) {
-          // Auto top-up batch for smooth counter operation
-          batch = await tx.inventoryBatch.update({
-            where: { id: batch.id },
-            data: {
-              quantity: `${Number(batch.quantity) + qty + 100}`,
+              expiryDate: { gt: now },
             },
           });
         }
 
-        // Decrement stock
-        await tx.inventoryBatch.update({
-          where: { id: batch.id },
+        if (!batch) {
+          batch = await tx.inventoryBatch.findFirst({
+            where: {
+              tenantId: context.tenantId,
+              branchId,
+              medicationId: med.id,
+              status: "AVAILABLE",
+              expiryDate: { gt: now },
+            },
+            orderBy: { expiryDate: "asc" },
+          });
+        }
+
+        if (!batch) {
+          throw new WonFlowApiError(
+            409,
+            "insufficient-stock",
+            `No available, unexpired stock found for ${med.genericName}${med.brandName ? ` (${med.brandName})` : ""}.`
+          );
+        }
+
+        const currentQty = Number(batch.quantity);
+        if (currentQty < qty) {
+          throw new WonFlowApiError(
+            409,
+            "insufficient-stock",
+            `Insufficient stock for ${med.genericName} (Batch ${batch.batchNumber}). Requested: ${qty}, available: ${currentQty}.`
+          );
+        }
+
+        // Concurrency-safe stock deduction
+        const decrementResult = await tx.inventoryBatch.updateMany({
+          where: {
+            id: batch.id,
+            quantity: { gte: `${qty}` },
+          },
           data: {
             quantity: { decrement: `${qty}` },
             version: { increment: 1 },
           },
         });
+
+        if (decrementResult.count === 0) {
+          throw new WonFlowApiError(
+            409,
+            "insufficient-stock",
+            `Stock for ${med.genericName} changed before sale completion. Please re-check stock.`
+          );
+        }
+
+        if (currentQty - qty <= 0) {
+          await tx.inventoryBatch.update({
+            where: { id: batch.id },
+            data: { status: "DEPLETED" },
+          });
+        }
 
         const medName = med.brandName ? `${med.genericName} (${med.brandName})` : med.genericName;
         verifiedItems.push({

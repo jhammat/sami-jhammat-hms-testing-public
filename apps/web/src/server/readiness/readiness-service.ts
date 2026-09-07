@@ -250,7 +250,7 @@ export async function checkStartConsultationReadiness(
 
   const appointment = await database.appointment.findFirst({
     where: { id: input.appointmentId, tenantId: context.tenantId },
-    include: { service: true, patient: { select: { givenName: true, familyName: true } } },
+    include: { service: true, branch: true, patient: { select: { givenName: true, familyName: true } } },
   });
 
   if (!appointment) {
@@ -271,7 +271,8 @@ export async function checkStartConsultationReadiness(
     }]);
   }
 
-  const businessDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "UTC" });
+  const tz = appointment.branch?.timezone || "Asia/Karachi";
+  const businessDateFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: tz });
   const appointmentDate = businessDateFormatter.format(appointment.startsAt);
   const activeSitting = await database.doctorSitting.findFirst({
     where: {

@@ -47,10 +47,13 @@ import type { WonFlowRole } from "@/lib/auth/accounts";
  * error message, so the screen fell through to "Invalid email or password" and
  * anyone with two roles was locked out of their own hospital.
  *
- * Step one is a filter and a signpost, not a gate. It decides which portals to
- * show first and what the form says; the server decides what anyone may enter.
- * If a patient signs in on the staff side they are not refused — they are
- * shown the portal they do have.
+ * Step one is the boundary between the two sides, not decoration. It used to
+ * decide nothing at all: the answer was never sent anywhere, so patient
+ * credentials typed under "Hospital staff" signed in exactly as if they had
+ * been typed under "Patient". The chosen side now goes with the request, the
+ * server refuses an account that holds nothing on it, and step three can only
+ * offer portals from that side. Someone who picked the wrong door is told so
+ * and offered the right one, rather than being let through it.
  */
 
 const ROLE_ICONS: Record<WonFlowRole, LucideIcon> = {
@@ -166,9 +169,21 @@ function serverFaultMessage(status: number): string {
 
 function LoginFlow() {
   const searchParams = useSearchParams();
+  const requestedPath = searchParams.get("next");
+  const audienceQuery = searchParams.get("audience");
 
-  const [step, setStep] = useState<"audience" | "credentials" | "portal">("audience");
-  const [audience, setAudience] = useState<PortalAudience>("hospital");
+  const initialAudience: PortalAudience =
+    audienceQuery === "patient" || (requestedPath && requestedPath.startsWith("/patient"))
+      ? "patient"
+      : "hospital";
+  const shouldSkipDoorSelection = Boolean(
+    audienceQuery || (requestedPath && requestedPath !== "/" && !requestedPath.startsWith("/auth")),
+  );
+
+  const [step, setStep] = useState<"audience" | "credentials" | "portal">(
+    shouldSkipDoorSelection ? "credentials" : "audience",
+  );
+  const [audience, setAudience] = useState<PortalAudience>(initialAudience);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -176,18 +191,25 @@ function LoginFlow() {
   const [showPassword, setShowPassword] = useState(false);
 
   const [error, setError] = useState<string>();
+  /** Set when the password was right but typed on the other side of the platform. */
+  const [wrongAudience, setWrongAudience] = useState<PortalAudience>();
   const [busy, setBusy] = useState(false);
 
   const [contexts, setContexts] = useState<LoginContext[]>([]);
   const [displayName, setDisplayName] = useState("");
   const [choosing, setChoosing] = useState<string | null>(null);
 
-  const requestedPath = searchParams.get("next");
-
   function go(homePath: string, passwordChangeRequired?: boolean) {
+    const isSafeRequestedPath =
+      requestedPath &&
+      requestedPath.startsWith("/") &&
+      requestedPath !== "/" &&
+      !requestedPath.startsWith("/login") &&
+      !requestedPath.startsWith("/auth");
+
     const destination = passwordChangeRequired
       ? "/auth/change-password"
-      : requestedPath && requestedPath.startsWith("/") && requestedPath !== "/"
+      : isSafeRequestedPath
         ? requestedPath
         : homePath;
 
@@ -197,9 +219,11 @@ function LoginFlow() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(undefined);
+    setWrongAudience(undefined);
 
-    if (!/^\S+@\S+\.\S+$/.test(email)) {
-      setError("Enter a valid email address.");
+    const cleanInput = email.trim();
+    if (!cleanInput) {
+      setError("Enter your email address or username.");
       return;
     }
 
@@ -208,17 +232,32 @@ function LoginFlow() {
       return;
     }
 
+    await signIn(audience);
+  }
+
+  /**
+   * Sign in against one side of the platform.
+   *
+   * Taking the side as an argument is what lets "try the patient side
+   * instead" work without asking for the password a second time — the
+   * password is still in this component's state because the refusal was not a
+   * credential failure.
+   */
+  async function signIn(chosenAudience: PortalAudience) {
     setBusy(true);
 
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: email.trim(), password }),
+        credentials: "same-origin",
+        body: JSON.stringify({ email: email.trim(), password, audience: chosenAudience }),
       });
 
       const data = await readJsonBody<{
         error?: string;
+        code?: string;
+        audience?: PortalAudience;
         homePath?: string;
         passwordChangeRequired?: boolean;
         requiresContextSelection?: boolean;
@@ -238,6 +277,7 @@ function LoginFlow() {
         // The password is accepted and held server-side for two minutes; it is
         // dropped from this component the moment it is no longer needed.
         setPassword("");
+        setAudience(chosenAudience);
         setContexts(data.contexts);
         setDisplayName(data.displayName ?? "");
         setStep("portal");
@@ -247,10 +287,12 @@ function LoginFlow() {
 
       if (!response.ok || !data.homePath) {
         setError(data.error ?? "Invalid email or password.");
+        setWrongAudience(data.code === "wrong-audience" ? data.audience : undefined);
         setBusy(false);
         return;
       }
 
+      setAudience(chosenAudience);
       go(data.homePath, data.passwordChangeRequired);
     } catch {
       // Only reached when the request never completed at all, which is the
@@ -268,6 +310,7 @@ function LoginFlow() {
       const response = await fetch("/api/auth/select-context", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({
           role: context.role,
           membershipId: context.membershipId,
@@ -294,7 +337,8 @@ function LoginFlow() {
         return;
       }
 
-      go(data.homePath, data.passwordChangeRequired);
+      const destination = data.passwordChangeRequired ? "/auth/change-password" : data.homePath;
+      window.location.replace(destination);
     } catch {
       setError("Could not reach the server. Please check your connection and try again.");
       setChoosing(null);
@@ -320,6 +364,7 @@ function LoginFlow() {
               onClick={() => {
                 setAudience(option.id);
                 setError(undefined);
+                setWrongAudience(undefined);
                 setStep("credentials");
               }}
               className="group flex h-full flex-col items-start gap-2 rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:border-transparent hover:shadow-[0_18px_40px_rgba(30,64,175,0.16)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 dark:border-slate-800 dark:bg-slate-950/50 dark:hover:shadow-[0_18px_40px_rgba(0,0,0,0.6)]"
@@ -371,12 +416,17 @@ function LoginFlow() {
   /* ---------------------------------------------------------------- */
 
   if (step === "portal") {
-    const preferred = contexts.filter(
+    /*
+     * The server already filtered to the side that was chosen at step one, so
+     * there is nothing here from the other side to list. This screen used to
+     * show a second group of "also on this account" portals, which is what
+     * carried a staff member into the patient view — and a patient into a
+     * staff one — after a sign-in they had aimed at the other side.
+     */
+    const matchingPortals = contexts.filter(
       (context) => PORTAL_DIRECTORY[context.role]?.audience === audience,
     );
-    const others = contexts.filter(
-      (context) => PORTAL_DIRECTORY[context.role]?.audience !== audience,
-    );
+    const portals = matchingPortals.length > 0 ? matchingPortals : contexts;
 
     return (
       <AuthFrame
@@ -391,6 +441,7 @@ function LoginFlow() {
               setStep("credentials");
               setContexts([]);
               setError(undefined);
+              setWrongAudience(undefined);
             }}
           />
         }
@@ -405,7 +456,7 @@ function LoginFlow() {
         ) : null}
 
         <PortalGroup
-          contexts={preferred}
+          contexts={portals}
           choosing={choosing}
           onChoose={chooseContext}
           emptyNote={
@@ -414,15 +465,6 @@ function LoginFlow() {
               : "This account has no hospital portal on it."
           }
         />
-
-        {others.length > 0 ? (
-          <div className="mt-6">
-            <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              {audience === "hospital" ? "Also on this account" : "Staff access on this account"}
-            </p>
-            <PortalGroup contexts={others} choosing={choosing} onChoose={chooseContext} />
-          </div>
-        ) : null}
       </AuthFrame>
     );
   }
@@ -444,7 +486,14 @@ function LoginFlow() {
       }
       eyebrow={
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <BackLink label="Change" onClick={() => setStep("audience")} />
+          <BackLink
+            label="Change"
+            onClick={() => {
+              setError(undefined);
+              setWrongAudience(undefined);
+              setStep("audience");
+            }}
+          />
 
           <span
             className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold text-white"
@@ -462,7 +511,7 @@ function LoginFlow() {
             className="text-sm font-semibold text-slate-700 dark:text-slate-300"
             htmlFor="login-email"
           >
-            Email address
+            {audience === "patient" ? "Email or MR Number (Username)" : "Email address"}
           </label>
 
           <div className="relative mt-1.5">
@@ -474,12 +523,17 @@ function LoginFlow() {
 
             <input
               aria-describedby={error ? "login-error" : undefined}
-              autoComplete="email"
+              autoComplete="username email"
               autoFocus
               className={`${inputClassName} pl-10`}
               id="login-email"
               onChange={(event) => setEmail(event.target.value)}
-              type="email"
+              placeholder={
+                audience === "patient"
+                  ? "e.g. P-20260904-BE7CA1 or email"
+                  : "name@hospital.com"
+              }
+              type="text"
               value={email}
             />
           </div>
@@ -541,17 +595,44 @@ function LoginFlow() {
         </label>
 
         {error ? (
-          <p
+          <div
             className="rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-3 text-sm font-medium text-rose-700 dark:border-rose-900/50 dark:bg-rose-950/40 dark:text-rose-300"
             id="login-error"
             role="alert"
           >
-            {error}
-          </p>
+            <p>{error}</p>
+
+            {/*
+              The password was accepted — this is the wrong door, not a bad
+              credential. Sending them back to step one to type it all again
+              would be punishing them for the screen's old habit of accepting
+              either door, so the right one is one click away.
+            */}
+            {wrongAudience ? (
+              <button
+                className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-rose-800 underline underline-offset-2 transition hover:text-rose-950 disabled:opacity-60 dark:text-rose-200 dark:hover:text-white"
+                disabled={busy}
+                onClick={() => {
+                  const target = wrongAudience;
+                  setAudience(target);
+                  setError(undefined);
+                  setWrongAudience(undefined);
+                  void signIn(target);
+                }}
+                type="button"
+              >
+                Sign in on the{" "}
+                {AUDIENCES.find((option) => option.id === wrongAudience)?.title.toLowerCase() ??
+                  wrongAudience}{" "}
+                side instead
+                <ArrowRight aria-hidden size={13} />
+              </button>
+            ) : null}
+          </div>
         ) : null}
 
         <button
-          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-blue-700 via-blue-600 to-violet-600 px-4 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(37,99,235,0.24)] transition hover:shadow-[0_16px_36px_rgba(37,99,235,0.30)] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200"
+          className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-blue-700 via-blue-600 to-violet-600 px-4 text-sm font-semibold text-white shadow-[0_14px_32px_rgba(37,99,235,0.24)] transition hover:shadow-[0_16px_36px_rgba(37,99,235,0.30)] disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-200"
           disabled={busy}
           type="submit"
         >

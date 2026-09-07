@@ -32,15 +32,27 @@ export function GET(request: NextRequest): Promise<NextResponse> {
 export function PATCH(request: NextRequest): Promise<NextResponse> {
   return handleApiRoute(async () => {
     const rc = await requireRequestContext();
+    const raw = request.nextUrl.searchParams.get("specialty");
+    const specialty =
+      raw === "PHYSIOTHERAPY" || raw === "NUTRITION"
+        ? (raw as AlliedSpecialty)
+        : undefined;
     const body = await request.json();
 
-    const profile = await updateAlliedProfile(rc, {
-      displayName: body.displayName,
-      title: body.title,
-      staffType: body.staffType,
-      primaryBranchId: body.primaryBranchId,
-      preferredLocale: body.preferredLocale,
-    });
+    const profile = await updateAlliedProfile(
+      rc,
+      {
+        displayName: body.displayName,
+        title: body.title,
+        staffType: body.staffType,
+        primaryBranchId: body.primaryBranchId,
+        preferredLocale: body.preferredLocale,
+        clinicalFocus: Array.isArray(body.clinicalFocus) ? body.clinicalFocus : undefined,
+        dailyStepGoal: typeof body.dailyStepGoal === "string" ? body.dailyStepGoal : undefined,
+        spirometryGoal: typeof body.spirometryGoal === "string" ? body.spirometryGoal : undefined,
+      },
+      specialty,
+    );
 
     return NextResponse.json({ profile });
   });

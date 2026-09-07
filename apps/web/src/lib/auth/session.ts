@@ -25,4 +25,5 @@ export interface WonFlowSessionPayload {
   expiresAt: string;
   patientId?: string | null;
   actingRelationship?: string | null;
+  availableWorkspaces?: WorkspaceCode[];
 }

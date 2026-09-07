@@ -1132,7 +1132,7 @@ function HospitalOperationsDashboardContent({
               <Link
                 className={[
                   "group rounded-2xl",
-                  "bg-gradient-to-br",
+                  "bg-linear-to-br",
                   "p-4 ring-1",
                   "transition",
                   "hover:-translate-y-0.5",
@@ -1374,7 +1374,7 @@ function HospitalOperationsDashboardContent({
                               "flex h-11 w-11",
                               "shrink-0 items-center",
                               "justify-center rounded-2xl",
-                              "bg-gradient-to-br",
+                              "bg-linear-to-br",
                               "from-amber-100",
                               "to-orange-100",
                               "text-sm font-black",
@@ -1455,7 +1455,7 @@ function HospitalOperationsDashboardContent({
                           "flex h-11 w-11",
                           "shrink-0 items-center",
                           "justify-center rounded-2xl",
-                          "bg-gradient-to-br",
+                          "bg-linear-to-br",
                           "from-blue-100",
                           "to-violet-100",
                           "text-sm font-black",
@@ -1662,7 +1662,7 @@ function HospitalOperationsDashboardContent({
                       <div
                         className={[
                           "h-full rounded-full",
-                          "bg-gradient-to-r",
+                          "bg-linear-to-r",
                           "from-blue-500",
                           "to-violet-500",
                         ].join(" ")}
@@ -1801,7 +1801,7 @@ function HospitalOperationsDashboardContent({
         </div>
       </div>
 
-      <div className="rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 via-white to-indigo-50 px-4 py-3 text-xs leading-5 text-slate-600">
+      <div className="rounded-2xl border border-blue-100 bg-linear-to-r from-blue-50 via-white to-indigo-50 px-4 py-3 text-xs leading-5 text-slate-600">
         <strong className="text-blue-800">
           Live workspace:
         </strong>
@@ -1956,7 +1956,7 @@ export function HospitalOperationsDashboard() {
                 "inline-flex min-h-10",
                 "items-center justify-center",
                 "rounded-xl",
-                "bg-gradient-to-r",
+                "bg-linear-to-r",
                 "from-blue-600",
                 "to-indigo-600",
                 "px-4 py-2",

@@ -6,6 +6,7 @@ import { safeApiError } from "@/lib/api/route-helpers";
 import { readSession } from "@/lib/auth/session-server";
 import { findStaffAvatarByMembership } from "@/server/allied/allied-profile-service";
 import { findPatientAvatarByIdentity } from "@/server/patient/patient-avatar-service";
+import { hasPlatformAvatar } from "@/server/platform/platform-profile-service";
 
 /**
  * The signed-in user's profile photo for the application shell.
@@ -19,6 +20,14 @@ export async function GET(): Promise<NextResponse> {
   try {
     const session = await readSession();
     if (!session?.identityId) return NextResponse.json({ avatarUrl: null });
+
+    if (session.role === "platform") {
+      const hasPhoto = await hasPlatformAvatar(session.identityId);
+      return NextResponse.json({
+        avatarUrl: hasPhoto ? "/api/v1/platform/profile/avatar" : null,
+      }, { headers: { "cache-control": "private, no-store" } });
+    }
+
     if (session.membershipId) {
       const doctor = await database.doctorProfile.findFirst({
         where: { staffProfile: { membershipId: session.membershipId } },
@@ -38,7 +47,7 @@ export async function GET(): Promise<NextResponse> {
 
       if (hasStaffPhoto) {
         return NextResponse.json(
-          { avatarUrl: "/api/v1/allied/profile/avatar/file" },
+          { avatarUrl: "/api/v1/admin/profile/avatar" },
           { headers: { "cache-control": "private, no-store" } },
         );
       }

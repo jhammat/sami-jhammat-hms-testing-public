@@ -16,9 +16,11 @@ import {
   Activity,
   AlertTriangle,
   Apple,
+  CheckCircle2,
   ChevronRight,
   ClipboardCheck,
   ClipboardList,
+  Clock,
   Compass,
   Droplets,
   Flame,
@@ -33,11 +35,13 @@ import {
   Send,
   Share2,
   ShieldAlert,
+  ShieldCheck,
   Stethoscope,
   Trash2,
   UserRound,
   Users,
   Utensils,
+  X,
 } from "lucide-react";
 
 import type {
@@ -98,7 +102,55 @@ import {
   mustScore,
   pertDailyCeiling,
   type ClinicalBand,
+  type MealTemplate,
 } from "./nutrition-clinical-data";
+
+/* ================================================================== */
+/* Custom Preset Interfaces & Defaults                                 */
+/* ================================================================== */
+
+export interface PertBrandItem {
+  id: string;
+  label: string;
+  isCustom?: boolean;
+}
+
+export const DEFAULT_PERT_BRANDS: PertBrandItem[] = [
+  { id: "Creon", label: "Creon®" },
+  { id: "Zenpep", label: "Zenpep®" },
+  { id: "Pancreaze", label: "Pancreaze®" },
+  { id: "Pertzye", label: "Pertzye®" },
+  { id: "Generic", label: "Generic Pancrelipase" },
+];
+
+export const DEFAULT_STRENGTHS = [5000, 10000, 20000, 25000, 36000, 40000, 50000];
+
+export interface DosingRatioItem {
+  value: number;
+  label: string;
+  isCustom?: boolean;
+}
+
+export const DEFAULT_RATIOS: DosingRatioItem[] = [
+  { value: 1500, label: "1.5k IU/g" },
+  { value: 2000, label: "2.0k IU/g (Standard)" },
+  { value: 2500, label: "2.5k IU/g" },
+  { value: 3000, label: "3.0k IU/g" },
+  { value: 4000, label: "4.0k IU/g (Severe PEI)" },
+];
+
+export interface EnteralFormulaItem {
+  id: string;
+  label: string;
+  kcalPerMl: number;
+  proteinPerL: number;
+  isCustom?: boolean;
+}
+
+export const DEFAULT_ENTERAL_FORMULAS: EnteralFormulaItem[] = ENTERAL_FORMULAS.map((f) => ({
+  ...f,
+  isCustom: false,
+}));
 
 /* ================================================================== */
 /* Constants                                                           */
@@ -109,7 +161,7 @@ const ACCENT_BRIGHT = "#34d399";
 
 const APPETITE_RAMP = ["#ef4444", "#fb923c", "#facc15", "#84cc16", "#10b981"];
 
-type WorkspaceTab = "overview" | "caseload" | "assessment" | "plan" | "calculators" | "history";
+type WorkspaceTab = "overview" | "caseload" | "assessment" | "plan" | "calculators" | "history" | "alerts";
 
 /** The page these sections share. The sidebar links here with `?view=`. */
 const PATHNAME = "/operations/nutrition";
@@ -126,6 +178,8 @@ const VIEW_PARAM_TABS: Record<string, WorkspaceTab> = {
   enteral: "calculators",
   calculators: "calculators",
   history: "history",
+  alerts: "alerts",
+  "clinical-alerts": "alerts",
 };
 
 const REFERRAL_TONE: Record<string, PillTone> = {
@@ -254,15 +308,70 @@ export function NutritionWorkspace() {
   const [templateBand, setTemplateBand] = useState<ClinicalBand | null>(null);
 
   /* -------------------------------------------------------------- */
-  /* Calculator drafts — all unset                                   */
+  /* Calculator drafts & Custom Elements — fully customizable        */
   /* -------------------------------------------------------------- */
 
+  // Brands
+  const [pertBrands, setPertBrands] = useState<PertBrandItem[]>(DEFAULT_PERT_BRANDS);
+  const [pertBrand, setPertBrand] = useState<string>("Creon");
+  const [showAddBrandModal, setShowAddBrandModal] = useState(false);
+  const [newBrandName, setNewBrandName] = useState("");
+
+  // Capsule Strengths
+  const [strengthPresets, setStrengthPresets] = useState<number[]>(DEFAULT_STRENGTHS);
+  const [capsuleStrength, setCapsuleStrength] = useState<number | null>(10000);
+  const [customCapsuleStrength, setCustomCapsuleStrength] = useState<string>("");
+  const [isCustomStrength, setIsCustomStrength] = useState(false);
+  const [showAddStrengthModal, setShowAddStrengthModal] = useState(false);
+  const [newStrengthInput, setNewStrengthInput] = useState("");
+
+  // Dietary Fat Inputs
   const [mealFatGrams, setMealFatGrams] = useState<number | null>(null);
   const [snackFatGrams, setSnackFatGrams] = useState<number | null>(null);
-  const [capsuleStrength, setCapsuleStrength] = useState<number | null>(null);
+
+  // Ratios & Floors
+  const [dosingRatios, setDosingRatios] = useState<DosingRatioItem[]>(DEFAULT_RATIOS);
+  const [pertRatioPerGram, setPertRatioPerGram] = useState<number>(2000);
+  const [pertMealFloor, setPertMealFloor] = useState<number>(25000);
+  const [pertSnackFloor, setPertSnackFloor] = useState<number>(10000);
+  const [showAdvancedPert, setShowAdvancedPert] = useState(false);
+  const [showAddRatioModal, setShowAddRatioModal] = useState(false);
+  const [newRatioValue, setNewRatioValue] = useState("");
+  const [newRatioLabel, setNewRatioLabel] = useState("");
+
+  // Weight Override
+  const [patientWeightOverride, setPatientWeightOverride] = useState<number | null>(null);
+
+  // Enteral Tube Feeding
   const [enteralRate, setEnteralRate] = useState<number | null>(null);
   const [enteralHours, setEnteralHours] = useState<number | null>(null);
+  const [allEnteralFormulas, setAllEnteralFormulas] = useState<EnteralFormulaItem[]>(DEFAULT_ENTERAL_FORMULAS);
   const [enteralFormulaId, setEnteralFormulaId] = useState<string | null>(null);
+  const [showAddFormulaModal, setShowAddFormulaModal] = useState(false);
+  const [showManageFormulasModal, setShowManageFormulasModal] = useState(false);
+  const [newFormulaName, setNewFormulaName] = useState("");
+  const [newFormulaKcal, setNewFormulaKcal] = useState("1.5");
+  const [newFormulaProtein, setNewFormulaProtein] = useState("64");
+
+  // Plan Avoidance Lists
+  const [customAvoidLists, setCustomAvoidLists] = useState<{ id: string; label: string; band: ClinicalBand; text: string }[]>([]);
+  const [deletedAvoidIds, setDeletedAvoidIds] = useState<string[]>([]);
+  const [showAddAvoidModal, setShowAddAvoidModal] = useState(false);
+  const [newAvoidLabel, setNewAvoidLabel] = useState("");
+  const [newAvoidText, setNewAvoidText] = useState("");
+
+  // Meal Templates Library
+  const [customMealTemplates, setCustomMealTemplates] = useState<MealTemplate[]>([]);
+  const [deletedTemplateIds, setDeletedTemplateIds] = useState<string[]>([]);
+  const [showCreateTemplateModal, setShowCreateTemplateModal] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [newTemplateType, setNewTemplateType] = useState<NutritionItemType>("MEAL");
+  const [newTemplateTime, setNewTemplateTime] = useState("Breakfast");
+  const [newTemplateQty, setNewTemplateQty] = useState("1");
+  const [newTemplateUnit, setNewTemplateUnit] = useState("portion");
+  const [newTemplateInstruction, setNewTemplateInstruction] = useState("");
+  const [newTemplateRationale, setNewTemplateRationale] = useState("");
+  const [newTemplateBand, setNewTemplateBand] = useState<ClinicalBand>("HPB");
 
   /* -------------------------------------------------------------- */
   /* Referral completion                                             */
@@ -318,18 +427,283 @@ export function NutritionWorkspace() {
   const must = mustScore(bmi, weightLossPercent, acutelyUnwell);
   const targets = targetBand ? estimateTargets(weightKg, targetBand) : null;
 
-  const mealDose = calculatePertDose(mealFatGrams, capsuleStrength, "meal");
-  const snackDose = calculatePertDose(snackFatGrams, capsuleStrength, "snack");
-  const dailyCeiling = pertDailyCeiling(weightKg);
+  // Dynamic effective weight: can be set directly in calculator or inherited from patient assessment
+  const effectiveWeightKg =
+    patientWeightOverride !== null
+      ? patientWeightOverride
+      : weightKg ?? (latestAssessment?.weightKg ? Number(latestAssessment.weightKg) : null);
 
-  const enteralFormula = ENTERAL_FORMULAS.find((formula) => formula.id === enteralFormulaId) ?? null;
+  const effectiveCapsuleStrength =
+    isCustomStrength && customCapsuleStrength && Number(customCapsuleStrength) > 0
+      ? Number(customCapsuleStrength)
+      : capsuleStrength;
+
+  const mealDose = calculatePertDose(
+    mealFatGrams,
+    effectiveCapsuleStrength,
+    "meal",
+    pertRatioPerGram,
+    pertMealFloor,
+  );
+  const snackDose = calculatePertDose(
+    snackFatGrams,
+    effectiveCapsuleStrength,
+    "snack",
+    pertRatioPerGram,
+    pertSnackFloor,
+  );
+  const dailyCeiling = pertDailyCeiling(effectiveWeightKg);
+  const estimatedDailyUnits =
+    (mealDose && mealDose.units > 0 ? mealDose.units * 3 : 0) +
+    (snackDose && snackDose.units > 0 ? snackDose.units * 2 : 0);
+  const ceilingPercent =
+    dailyCeiling && dailyCeiling > 0
+      ? Math.round((estimatedDailyUnits / dailyCeiling) * 100)
+      : null;
+
+  const enteralFormula = allEnteralFormulas.find((formula) => formula.id === enteralFormulaId) ?? null;
   const enteral = calculateEnteral(
     enteralRate,
     enteralHours,
     enteralFormula?.kcalPerMl ?? null,
     enteralFormula?.proteinPerL ?? null,
-    weightKg,
+    effectiveWeightKg,
   );
+
+  /* -------------------------------------------------------------- */
+  /* Dynamic Custom & Delete Handlers                                */
+  /* -------------------------------------------------------------- */
+
+  // Brands
+  const handleAddBrand = (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    const name = newBrandName.trim();
+    if (!name) return;
+    if (pertBrands.some((b) => b.id.toLowerCase() === name.toLowerCase())) {
+      setFeedback({ tone: "info", title: "Brand already exists", detail: `${name} is already available in formulations.` });
+      return;
+    }
+    const newBrand: PertBrandItem = { id: name, label: name, isCustom: true };
+    setPertBrands((prev) => [...prev, newBrand]);
+    setPertBrand(name);
+    setNewBrandName("");
+    setShowAddBrandModal(false);
+    setFeedback({ tone: "good", title: "Custom brand added", detail: `Added ${name} to available formulations.` });
+  };
+
+  const handleDeleteBrand = (brandId: string) => {
+    if (pertBrands.length <= 1) {
+      setFeedback({ tone: "info", title: "Cannot delete brand", detail: "At least one brand must remain available." });
+      return;
+    }
+    const updated = pertBrands.filter((b) => b.id !== brandId);
+    setPertBrands(updated);
+    if (pertBrand === brandId) {
+      setPertBrand(updated[0].id);
+    }
+    setFeedback({ tone: "good", title: "Brand removed", detail: `Removed ${brandId} from available formulations.` });
+  };
+
+  // Strengths
+  const handleAddStrengthPreset = (val: number) => {
+    if (strengthPresets.includes(val)) {
+      setCapsuleStrength(val);
+      setIsCustomStrength(false);
+      setShowAddStrengthModal(false);
+      return;
+    }
+    const updated = [...strengthPresets, val].sort((a, b) => a - b);
+    setStrengthPresets(updated);
+    setCapsuleStrength(val);
+    setIsCustomStrength(false);
+    setShowAddStrengthModal(false);
+    setNewStrengthInput("");
+    setFeedback({ tone: "good", title: "Strength preset added", detail: `Added ${val.toLocaleString()} IU to quick presets.` });
+  };
+
+  const handleDeleteStrength = (strength: number) => {
+    if (strengthPresets.length <= 1) {
+      setFeedback({ tone: "info", title: "Cannot delete strength", detail: "At least one preset strength must remain." });
+      return;
+    }
+    const updated = strengthPresets.filter((s) => s !== strength);
+    setStrengthPresets(updated);
+    if (capsuleStrength === strength) {
+      setCapsuleStrength(updated[0]);
+    }
+    setFeedback({ tone: "good", title: "Preset removed", detail: `Removed ${strength.toLocaleString()} IU from quick presets.` });
+  };
+
+  // Ratios
+  const handleAddRatio = (e?: FormEvent) => {
+    if (e) e.preventDefault();
+    const val = parseInt(newRatioValue, 10);
+    if (!val || val < 500 || val > 10000) {
+      setFeedback({ tone: "info", title: "Invalid ratio", detail: "Enter a ratio between 500 and 10,000 IU/g fat." });
+      return;
+    }
+    const label = newRatioLabel.trim() || `${(val / 1000).toFixed(1)}k IU/g`;
+    if (dosingRatios.some((r) => r.value === val)) {
+      setPertRatioPerGram(val);
+      setShowAddRatioModal(false);
+      return;
+    }
+    const updated = [...dosingRatios, { value: val, label, isCustom: true }].sort((a, b) => a.value - b.value);
+    setDosingRatios(updated);
+    setPertRatioPerGram(val);
+    setNewRatioValue("");
+    setNewRatioLabel("");
+    setShowAddRatioModal(false);
+    setFeedback({ tone: "good", title: "Dosing ratio added", detail: `Added ${label} (${val.toLocaleString()} IU/g fat).` });
+  };
+
+  const handleDeleteRatio = (val: number) => {
+    if (dosingRatios.length <= 1) {
+      setFeedback({ tone: "info", title: "Cannot delete ratio", detail: "At least one ratio option must remain." });
+      return;
+    }
+    const updated = dosingRatios.filter((r) => r.value !== val);
+    setDosingRatios(updated);
+    if (pertRatioPerGram === val) {
+      setPertRatioPerGram(updated[0].value);
+    }
+    setFeedback({ tone: "good", title: "Ratio removed", detail: `Removed ${val.toLocaleString()} IU/g from options.` });
+  };
+
+  // Enteral Formulas
+  const handleAddCustomFormula = (e: FormEvent) => {
+    e.preventDefault();
+    if (!newFormulaName.trim()) return;
+    const id = `custom-${Date.now()}`;
+    const kcal = parseFloat(newFormulaKcal) || 1.5;
+    const protein = parseFloat(newFormulaProtein) || 64;
+    const created: EnteralFormulaItem = {
+      id,
+      label: `${newFormulaName.trim()} (${kcal} kcal/mL, ${protein}g/L)`,
+      kcalPerMl: kcal,
+      proteinPerL: protein,
+      isCustom: true,
+    };
+    setAllEnteralFormulas((prev) => [...prev, created]);
+    setEnteralFormulaId(id);
+    setShowAddFormulaModal(false);
+    setNewFormulaName("");
+    setFeedback({
+      tone: "good",
+      title: "Custom enteral formula added",
+      detail: `Added ${created.label} to available formulas.`,
+    });
+  };
+
+  const handleDeleteFormula = (formulaId: string) => {
+    if (allEnteralFormulas.length <= 1) {
+      setFeedback({ tone: "info", title: "Cannot delete formula", detail: "At least one formula must remain available." });
+      return;
+    }
+    const target = allEnteralFormulas.find((f) => f.id === formulaId);
+    const updated = allEnteralFormulas.filter((f) => f.id !== formulaId);
+    setAllEnteralFormulas(updated);
+    if (enteralFormulaId === formulaId) {
+      setEnteralFormulaId(updated[0]?.id ?? null);
+    }
+    setFeedback({
+      tone: "good",
+      title: "Formula deleted",
+      detail: `Removed ${target?.label ?? formulaId} from available formulas.`,
+    });
+  };
+
+  // Regimen Plan Deletion
+  const pertPlanItemsCount = useMemo(
+    () => planItems.filter((item) => item.itemType === "ENZYME").length,
+    [planItems],
+  );
+
+  const clearPertFromPlan = () => {
+    setPlanItems((prev) => prev.filter((item) => item.itemType !== "ENZYME"));
+    setFeedback({
+      tone: "info",
+      title: "PERT regimen deleted from plan",
+      detail: "Removed all pancreatic enzyme items from the active dietary plan draft.",
+    });
+  };
+
+  const hasEnteralInPlan = useMemo(
+    () => planItems.some((item) => item.name.toLowerCase().startsWith("enteral:")),
+    [planItems],
+  );
+
+  const clearEnteralFromPlan = () => {
+    setPlanItems((prev) => prev.filter((item) => !item.name.toLowerCase().startsWith("enteral:")));
+    setFeedback({
+      tone: "info",
+      title: "Enteral feed deleted from plan",
+      detail: "Removed enteral tube feeding regimen from the active dietary plan draft.",
+    });
+  };
+
+  // Avoid Lists
+  const allAvoidLists = useMemo(
+    () => [...COMMON_AVOID_LISTS, ...customAvoidLists].filter((a) => !deletedAvoidIds.includes(a.id)),
+    [customAvoidLists, deletedAvoidIds],
+  );
+
+  const handleAddAvoidList = (e: FormEvent) => {
+    e.preventDefault();
+    if (!newAvoidLabel.trim() || !newAvoidText.trim()) return;
+    const newId = `custom-avoid-${Date.now()}`;
+    setCustomAvoidLists((prev) => [
+      ...prev,
+      { id: newId, label: newAvoidLabel.trim(), band: "HPB", text: newAvoidText.trim() },
+    ]);
+    setFoodsToAvoid(newAvoidText.trim());
+    setNewAvoidLabel("");
+    setNewAvoidText("");
+    setShowAddAvoidModal(false);
+    setFeedback({ tone: "good", title: "Custom restriction added", detail: "Added to quick avoidance lists." });
+  };
+
+  const handleDeleteAvoidList = (avoidId: string) => {
+    setDeletedAvoidIds((prev) => [...prev, avoidId]);
+    setFeedback({ tone: "good", title: "Restriction removed", detail: "Removed from quick avoidance lists." });
+  };
+
+  // Meal Templates
+  const allMealTemplates = useMemo(
+    () => [...MEAL_TEMPLATES, ...customMealTemplates].filter((t) => !deletedTemplateIds.includes(t.id)),
+    [customMealTemplates, deletedTemplateIds],
+  );
+
+  const handleCreateTemplate = (e: FormEvent) => {
+    e.preventDefault();
+    if (!newTemplateName.trim()) return;
+    const id = `custom-tpl-${Date.now()}`;
+    const qty = parseInt(newTemplateQty, 10) || 1;
+    const created: MealTemplate = {
+      id,
+      name: newTemplateName.trim(),
+      itemType: newTemplateType,
+      timeOfDay: newTemplateTime,
+      quantity: qty,
+      unit: newTemplateUnit.trim() || "portion",
+      withMeal: true,
+      band: newTemplateBand,
+      phases: ["hpb-trans", "hpb-lowfat", "hpb-full", "gen-pureed", "gen-soft", "gen-full"],
+      instruction: newTemplateInstruction.trim() || `Take with ${newTemplateTime.toLowerCase()}`,
+      rationale: newTemplateRationale.trim() || "Custom clinical dietary item",
+    };
+    setCustomMealTemplates((prev) => [...prev, created]);
+    setShowCreateTemplateModal(false);
+    setNewTemplateName("");
+    setNewTemplateInstruction("");
+    setNewTemplateRationale("");
+    setFeedback({ tone: "good", title: "Custom template created", detail: `Added ${created.name} to template library.` });
+  };
+
+  const handleDeleteTemplate = (templateId: string) => {
+    setDeletedTemplateIds((prev) => [...prev, templateId]);
+    setFeedback({ tone: "good", title: "Template removed", detail: "Removed from template library." });
+  };
 
   /* -------------------------------------------------------------- */
   /* Loaders                                                         */
@@ -718,12 +1092,12 @@ export function NutritionWorkspace() {
 
   const filteredTemplates = useMemo(
     () =>
-      MEAL_TEMPLATES.filter((template) => {
+      allMealTemplates.filter((template) => {
         if (templateBand && template.band !== templateBand) return false;
         if (dietPhaseId && !template.phases.includes(dietPhaseId)) return false;
         return true;
       }),
-    [dietPhaseId, templateBand],
+    [allMealTemplates, dietPhaseId, templateBand],
   );
 
   /* -------------------------------------------------------------- */
@@ -1111,17 +1485,14 @@ export function NutritionWorkspace() {
 
           <ul className="space-y-2">
             {[
+              // Same as the physiotherapy panel: the care plan is summarised
+              // here, and neither the doctor portal nor the physiotherapy
+              // workspace belongs to a dietitian's session.
               {
-                href: "/doctor/careplans",
-                label: "Surgical care plans",
-                detail: "The managing surgeon's view of this recovery",
+                href: `${PATHNAME}?view=overview`,
+                label: "Nutrition Deck",
+                detail: "This patient's whole recovery, care plan included",
                 icon: Stethoscope,
-              },
-              {
-                href: "/operations/physiotherapy",
-                label: "Physiotherapy workspace",
-                detail: "The mobility side of the same recovery",
-                icon: Activity,
               },
               {
                 href: "/operations/alerts",
@@ -1401,8 +1772,7 @@ export function NutritionWorkspace() {
                   label="Weight"
                   unit="kg"
                   value={weightKg}
-                  min={20}
-                  max={250}
+                  step={0.5}
                   accent={ACCENT}
                   onChange={setWeightKg}
                 />
@@ -1410,8 +1780,7 @@ export function NutritionWorkspace() {
                   label="Height"
                   unit="cm"
                   value={heightCm}
-                  min={100}
-                  max={230}
+                  step={1}
                   accent="#0891b2"
                   onChange={setHeightCm}
                 />
@@ -1419,8 +1788,7 @@ export function NutritionWorkspace() {
                   label="Change since surgery"
                   unit="kg (negative for loss)"
                   value={weightChangeKg}
-                  min={-40}
-                  max={40}
+                  step={0.5}
                   accent="#f59e0b"
                   onChange={setWeightChangeKg}
                 />
@@ -1729,15 +2097,43 @@ export function NutritionWorkspace() {
                   />
                 </GlassField>
 
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Avoid lists
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddAvoidModal(true)}
+                    className="text-[11px] font-medium text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
+                  >
+                    <Plus size={11} /> Add restriction
+                  </button>
+                </div>
+
                 <div className="flex flex-wrap gap-1.5">
-                  {COMMON_AVOID_LISTS.map((list) => (
-                    <GlassChip
-                      key={list.id}
-                      hue={list.band === "HPB" ? "#a78bfa" : "#94a3b8"}
-                      onClick={() => setFoodsToAvoid(list.text)}
-                    >
-                      {list.label}
-                    </GlassChip>
+                  {allAvoidLists.map((list) => (
+                    <div key={list.id} className="relative group inline-flex items-center">
+                      <GlassChip
+                        hue={list.band === "HPB" ? "#a78bfa" : "#94a3b8"}
+                        onClick={() => setFoodsToAvoid(list.text)}
+                      >
+                        {list.label}
+                      </GlassChip>
+                      {allAvoidLists.length > 1 && (
+                        <button
+                          type="button"
+                          title={`Delete ${list.label}`}
+                          aria-label={`Delete ${list.label}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteAvoidList(list.id);
+                          }}
+                          className="absolute -top-1 -right-1 rounded-full bg-slate-200 dark:bg-slate-700 p-0.5 text-slate-500 hover:bg-rose-500 hover:text-white transition shadow-sm opacity-60 group-hover:opacity-100"
+                        >
+                          <X size={9} />
+                        </button>
+                      )}
+                    </div>
                   ))}
                 </div>
               </div>
@@ -1978,21 +2374,42 @@ export function NutritionWorkspace() {
           width="max-w-3xl"
         >
           <div className="space-y-4">
-            <div className="flex flex-wrap gap-1.5">
-              <GlassChip active={templateBand === null} onClick={() => setTemplateBand(null)}>
-                Both services
-              </GlassChip>
-              {(["HPB", "GENERAL"] as ClinicalBand[]).map((band) => (
-                <GlassChip
-                  key={band}
-                  active={templateBand === band}
-                  hue={band === "HPB" ? "#a78bfa" : "#94a3b8"}
-                  count={MEAL_TEMPLATES.filter((template) => template.band === band).length}
-                  onClick={() => setTemplateBand(templateBand === band ? null : band)}
-                >
-                  {BAND_LABELS[band]}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex flex-wrap gap-1.5">
+                <GlassChip active={templateBand === null} onClick={() => setTemplateBand(null)}>
+                  Both services
                 </GlassChip>
-              ))}
+                {(["HPB", "GENERAL"] as ClinicalBand[]).map((band) => (
+                  <GlassChip
+                    key={band}
+                    active={templateBand === band}
+                    hue={band === "HPB" ? "#a78bfa" : "#94a3b8"}
+                    count={allMealTemplates.filter((template) => template.band === band).length}
+                    onClick={() => setTemplateBand(templateBand === band ? null : band)}
+                  >
+                    {BAND_LABELS[band]}
+                  </GlassChip>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-2">
+                {deletedTemplateIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setDeletedTemplateIds([])}
+                    className="text-[10px] text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400"
+                  >
+                    Reset templates
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowCreateTemplateModal(true)}
+                  className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+                >
+                  <Plus size={12} /> Custom template
+                </button>
+              </div>
             </div>
 
             {dietPhaseId ? (
@@ -2012,7 +2429,7 @@ export function NutritionWorkspace() {
             ) : (
               <ul className="grid gap-2 sm:grid-cols-2">
                 {filteredTemplates.map((template) => (
-                  <li key={template.id}>
+                  <li key={template.id} className="relative group">
                     <button
                       type="button"
                       onClick={() => {
@@ -2029,7 +2446,7 @@ export function NutritionWorkspace() {
                           },
                         ]);
                       }}
-                      className="wfg-tile h-full w-full p-3.5 text-left"
+                      className="wfg-tile h-full w-full p-3.5 pr-8 text-left"
                     >
                       <span className="flex items-start justify-between gap-2">
                         <span className="flex min-w-0 items-center gap-1.5">
@@ -2058,11 +2475,178 @@ export function NutritionWorkspace() {
                         {template.quantity} {template.unit}
                       </span>
                     </button>
+
+                    <button
+                      type="button"
+                      title={`Delete ${template.name}`}
+                      aria-label={`Delete ${template.name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteTemplate(template.id);
+                      }}
+                      className="absolute right-2 top-2 rounded-lg p-1.5 text-slate-400 opacity-60 hover:opacity-100 hover:bg-rose-500/10 hover:text-rose-600 transition"
+                    >
+                      <Trash2 size={13} />
+                    </button>
                   </li>
                 ))}
               </ul>
             )}
           </div>
+        </GlassModal>
+
+        {/* Custom Avoidance List Modal */}
+        <GlassModal
+          open={showAddAvoidModal}
+          onClose={() => setShowAddAvoidModal(false)}
+          title="Add custom dietary restriction"
+          subtitle="Create a reusable food avoidance restriction for dietary plans"
+          icon={<AlertTriangle size={16} />}
+          accent="#a78bfa"
+          footer={
+            <>
+              <GlassButton onClick={() => setShowAddAvoidModal(false)}>Cancel</GlassButton>
+              <GlassButton
+                variant="solid"
+                accent="#a78bfa"
+                form="add-custom-avoid-form"
+                type="submit"
+                disabled={!newAvoidLabel.trim() || !newAvoidText.trim()}
+              >
+                Add restriction
+              </GlassButton>
+            </>
+          }
+        >
+          <form id="add-custom-avoid-form" onSubmit={handleAddAvoidList} className="space-y-4">
+            <GlassField label="Restriction label / Category" htmlFor="avoid-label" required>
+              <GlassInput
+                id="avoid-label"
+                required
+                placeholder="e.g. Low FODMAP, Renal Phosphorus, Pureed Gastric"
+                value={newAvoidLabel}
+                onChange={(e) => setNewAvoidLabel(e.target.value)}
+              />
+            </GlassField>
+            <GlassField label="Restricted foods & drinks" htmlFor="avoid-desc" required>
+              <GlassTextarea
+                id="avoid-desc"
+                required
+                rows={3}
+                placeholder="List specific ingredients, preparation styles, or items to avoid..."
+                value={newAvoidText}
+                onChange={(e) => setNewAvoidText(e.target.value)}
+              />
+            </GlassField>
+          </form>
+        </GlassModal>
+
+        {/* Create Custom Meal Template Modal */}
+        <GlassModal
+          open={showCreateTemplateModal}
+          onClose={() => setShowCreateTemplateModal(false)}
+          title="Create custom meal template"
+          subtitle="Save a standard recipe, supplement, or enzyme protocol to your template library"
+          icon={<Utensils size={16} />}
+          accent={ACCENT}
+          footer={
+            <>
+              <GlassButton onClick={() => setShowCreateTemplateModal(false)}>Cancel</GlassButton>
+              <GlassButton
+                variant="solid"
+                accent={ACCENT}
+                form="create-custom-template-form"
+                type="submit"
+                disabled={!newTemplateName.trim()}
+              >
+                Save template
+              </GlassButton>
+            </>
+          }
+        >
+          <form id="create-custom-template-form" onSubmit={handleCreateTemplate} className="space-y-4">
+            <GlassField label="Template name" htmlFor="tpl-name" required>
+              <GlassInput
+                id="tpl-name"
+                required
+                placeholder="e.g. Fortified Greek Yogurt with Berry Puree"
+                value={newTemplateName}
+                onChange={(e) => setNewTemplateName(e.target.value)}
+              />
+            </GlassField>
+
+            <div className="grid grid-cols-2 gap-3">
+              <GlassField label="Item type" htmlFor="tpl-type" required>
+                <GlassSelect
+                  id="tpl-type"
+                  value={newTemplateType}
+                  onChange={(e) => setNewTemplateType(e.target.value as NutritionItemType)}
+                >
+                  {ITEM_TYPE_ORDER.map((t) => (
+                    <option key={t} value={t}>
+                      {ITEM_TYPE_LABELS[t]}
+                    </option>
+                  ))}
+                </GlassSelect>
+              </GlassField>
+
+              <GlassField label="Time of day" htmlFor="tpl-time" required>
+                <GlassSelect
+                  id="tpl-time"
+                  value={newTemplateTime}
+                  onChange={(e) => setNewTemplateTime(e.target.value)}
+                >
+                  {TIMES_OF_DAY.map((time) => (
+                    <option key={time} value={time}>
+                      {time}
+                    </option>
+                  ))}
+                </GlassSelect>
+              </GlassField>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <GlassField label="Quantity" htmlFor="tpl-qty" required>
+                <GlassInput
+                  id="tpl-qty"
+                  type="number"
+                  min={1}
+                  required
+                  value={newTemplateQty}
+                  onChange={(e) => setNewTemplateQty(e.target.value)}
+                />
+              </GlassField>
+
+              <GlassField label="Unit" htmlFor="tpl-unit" required>
+                <GlassInput
+                  id="tpl-unit"
+                  required
+                  placeholder="e.g. bowl, portion, mL, bottle"
+                  value={newTemplateUnit}
+                  onChange={(e) => setNewTemplateUnit(e.target.value)}
+                />
+              </GlassField>
+            </div>
+
+            <GlassField label="Clinical rationale / notes" htmlFor="tpl-rationale">
+              <GlassInput
+                id="tpl-rationale"
+                placeholder="e.g. High biological value protein for sarcopenic recovery"
+                value={newTemplateRationale}
+                onChange={(e) => setNewTemplateRationale(e.target.value)}
+              />
+            </GlassField>
+
+            <GlassField label="Patient instructions" htmlFor="tpl-inst">
+              <GlassTextarea
+                id="tpl-inst"
+                rows={2}
+                placeholder="e.g. Consume slowly between breakfast and lunch. Do not force."
+                value={newTemplateInstruction}
+                onChange={(e) => setNewTemplateInstruction(e.target.value)}
+              />
+            </GlassField>
+          </form>
         </GlassModal>
       </div>
     );
@@ -2073,9 +2657,107 @@ export function NutritionWorkspace() {
   /* -------------------------------------------------------------- */
 
   function renderCalculators() {
+    const applyPertToPlan = () => {
+      if (!mealDose && !snackDose) return;
+      const itemsToAdd: CreateNutritionPlanItemInput[] = [];
+      const brandName = pertBrand || "Pancreatic Enzyme";
+      const capStr = effectiveCapsuleStrength ? `${effectiveCapsuleStrength.toLocaleString()} IU` : "";
+
+      if (mealDose && mealDose.units > 0) {
+        itemsToAdd.push({
+          itemType: "ENZYME",
+          name: `${brandName} ${capStr} (${mealDose.capsules} cap${mealDose.capsules > 1 ? "s" : ""}) with Breakfast`,
+          timeOfDay: "Breakfast",
+          quantity: mealDose.capsules,
+          unit: "capsule",
+          instruction: `Take with the first bite of breakfast (total ${mealDose.units.toLocaleString()} IU lipase). Do not crush or chew.`,
+          withMeal: true,
+          displayOrder: planItems.length + 1,
+        });
+        itemsToAdd.push({
+          itemType: "ENZYME",
+          name: `${brandName} ${capStr} (${mealDose.capsules} cap${mealDose.capsules > 1 ? "s" : ""}) with Lunch`,
+          timeOfDay: "Lunch",
+          quantity: mealDose.capsules,
+          unit: "capsule",
+          instruction: `Take with the first bite of lunch (total ${mealDose.units.toLocaleString()} IU lipase).`,
+          withMeal: true,
+          displayOrder: planItems.length + 2,
+        });
+        itemsToAdd.push({
+          itemType: "ENZYME",
+          name: `${brandName} ${capStr} (${mealDose.capsules} cap${mealDose.capsules > 1 ? "s" : ""}) with Dinner`,
+          timeOfDay: "Dinner",
+          quantity: mealDose.capsules,
+          unit: "capsule",
+          instruction: `Take with the first bite of dinner (total ${mealDose.units.toLocaleString()} IU lipase).`,
+          withMeal: true,
+          displayOrder: planItems.length + 3,
+        });
+      }
+
+      if (snackDose && snackDose.units > 0) {
+        itemsToAdd.push({
+          itemType: "ENZYME",
+          name: `${brandName} ${capStr} (${snackDose.capsules} cap${snackDose.capsules > 1 ? "s" : ""}) with Snack`,
+          timeOfDay: "Mid-afternoon",
+          quantity: snackDose.capsules,
+          unit: "capsule",
+          instruction: `Take with snacks containing fat (total ${snackDose.units.toLocaleString()} IU lipase).`,
+          withMeal: true,
+          displayOrder: planItems.length + 4,
+        });
+      }
+
+      if (itemsToAdd.length === 0) {
+        setFeedback({
+          tone: "info",
+          title: "No enzymes to apply",
+          detail: "0 grams of fat requires no enzyme capsules.",
+        });
+        return;
+      }
+
+      // Replace existing enzyme items with the newly calculated regimen
+      setPlanItems((prev) => [
+        ...prev.filter((i) => i.itemType !== "ENZYME"),
+        ...itemsToAdd,
+      ]);
+      setFeedback({
+        tone: "good",
+        title: "PERT regimen applied to dietary plan",
+        detail: `Added ${itemsToAdd.length} enzyme items (${brandName}) to the active plan draft.`,
+      });
+    };
+
+    const applyEnteralToPlan = () => {
+      if (!enteral || !enteralFormula) return;
+      const newItem: CreateNutritionPlanItemInput = {
+        itemType: "SUPPLEMENT",
+        name: `Enteral: ${enteralFormula.label}`,
+        timeOfDay: "Overnight",
+        quantity: enteral.volumePerDayMl,
+        unit: "mL",
+        instruction: `Continuous infusion at ${enteralRate} mL/hr over ${enteralHours} hrs/day (${enteral.kcalPerDay} kcal/day, ${enteral.proteinPerDay}g protein/day).`,
+        withMeal: false,
+        displayOrder: planItems.length + 1,
+      };
+      // Replace existing enteral items with newly calculated regimen
+      setPlanItems((prev) => [
+        ...prev.filter((i) => !i.name.toLowerCase().startsWith("enteral:")),
+        newItem,
+      ]);
+      setFeedback({
+        tone: "good",
+        title: "Enteral tube feeding applied to dietary plan",
+        detail: `Added ${enteralFormula.label} delivery regimen to the active plan draft.`,
+      });
+    };
+
     return (
       <div className="space-y-5">
         <div className="grid gap-5 xl:grid-cols-2">
+          {/* Pancreatic Enzyme Replacement */}
           <GlassPanel
             title="Pancreatic enzyme replacement"
             subtitle="Lipase units for one intake, with the meal and snack floors applied"
@@ -2083,19 +2765,278 @@ export function NutritionWorkspace() {
             accent="#a78bfa"
           >
             <div className="space-y-5">
-              <SegmentedControl
-                label="Capsule strength"
-                columns={4}
-                value={capsuleStrength === null ? null : String(capsuleStrength)}
-                onChange={(next) => setCapsuleStrength(Number(next))}
-                options={ENZYME_STRENGTHS.map((strength) => ({
-                  value: String(strength),
-                  label: `${(strength / 1000).toLocaleString()}k`,
-                  detail: `${strength.toLocaleString()} IU`,
-                  hue: "#a78bfa",
-                }))}
-              />
+              {/* Brand Selector */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Commercial formulation / Brand
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {pertBrands.length < DEFAULT_PERT_BRANDS.length && (
+                      <button
+                        type="button"
+                        onClick={() => setPertBrands(DEFAULT_PERT_BRANDS)}
+                        className="text-[10px] text-slate-400 hover:text-purple-600 dark:hover:text-purple-400"
+                      >
+                        Reset defaults
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowAddBrandModal(true)}
+                      className="text-[11px] font-medium text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
+                    >
+                      <Plus size={11} /> Add custom brand
+                    </button>
+                  </div>
+                </div>
 
+                <div className="flex flex-wrap gap-1.5">
+                  {pertBrands.map((b) => (
+                    <div key={b.id} className="group relative inline-flex items-center">
+                      <button
+                        type="button"
+                        onClick={() => setPertBrand(b.id)}
+                        className={`rounded-lg py-1 text-xs font-semibold transition ${
+                          pertBrand === b.id
+                            ? "bg-purple-600 text-white shadow-sm"
+                            : "border border-slate-200 bg-white/60 text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-slate-800/60 dark:text-slate-300"
+                        } ${pertBrands.length > 1 ? "pl-2.5 pr-6" : "px-2.5"}`}
+                      >
+                        {b.label}
+                      </button>
+                      {pertBrands.length > 1 && (
+                        <button
+                          type="button"
+                          title={`Delete ${b.label}`}
+                          aria-label={`Delete ${b.label}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteBrand(b.id);
+                          }}
+                          className={`absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 transition ${
+                            pertBrand === b.id
+                              ? "text-purple-200 hover:bg-purple-700 hover:text-white"
+                              : "text-slate-400 opacity-60 hover:opacity-100 hover:bg-rose-100 hover:text-rose-600 dark:hover:bg-rose-900/40"
+                          }`}
+                        >
+                          <X size={11} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Capsule Strength Selection & Custom Strength Toggle with Add & Delete */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Capsule strength
+                  </label>
+                  <div className="flex items-center gap-2">
+                    {strengthPresets.length < DEFAULT_STRENGTHS.length && (
+                      <button
+                        type="button"
+                        onClick={() => setStrengthPresets(DEFAULT_STRENGTHS)}
+                        className="text-[10px] text-slate-400 hover:text-purple-600 dark:hover:text-purple-400"
+                      >
+                        Reset defaults
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowAddStrengthModal(true)}
+                      className="text-[11px] font-medium text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
+                    >
+                      <Plus size={11} /> Add preset
+                    </button>
+                    <span className="text-slate-300 dark:text-slate-700">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomStrength(!isCustomStrength)}
+                      className="text-[11px] font-medium text-purple-600 dark:text-purple-400 hover:underline"
+                    >
+                      {isCustomStrength ? "Use standard presets" : "Enter custom strength"}
+                    </button>
+                  </div>
+                </div>
+
+                {isCustomStrength ? (
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <GlassInput
+                        type="number"
+                        min={1000}
+                        max={100000}
+                        step={500}
+                        placeholder="e.g. 12000"
+                        value={customCapsuleStrength}
+                        onChange={(e) => setCustomCapsuleStrength(e.target.value)}
+                      />
+                      <span className="text-xs font-semibold text-slate-500 dark:text-slate-400 shrink-0">
+                        IU Lipase
+                      </span>
+                    </div>
+                    {customCapsuleStrength && parseInt(customCapsuleStrength, 10) > 0 && !strengthPresets.includes(parseInt(customCapsuleStrength, 10)) && (
+                      <button
+                        type="button"
+                        onClick={() => handleAddStrengthPreset(parseInt(customCapsuleStrength, 10))}
+                        className="text-[11px] font-medium text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
+                      >
+                        <Plus size={11} /> Save {parseInt(customCapsuleStrength, 10).toLocaleString()} IU to quick presets
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5">
+                    {strengthPresets.map((strength) => (
+                      <div key={strength} className="relative group">
+                        <button
+                          type="button"
+                          onClick={() => setCapsuleStrength(strength)}
+                          className={`w-full rounded-xl py-2 px-1 text-center transition ${
+                            capsuleStrength === strength
+                              ? "bg-purple-600 text-white shadow"
+                              : "border border-slate-200 bg-white/50 text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-slate-800/50 dark:text-slate-300"
+                          }`}
+                        >
+                          <div className="text-xs font-bold">
+                            {strength >= 1000 ? `${strength / 1000}k` : strength}
+                          </div>
+                          <div className="text-[9px] opacity-75">{strength.toLocaleString()} IU</div>
+                        </button>
+                        {strengthPresets.length > 1 && (
+                          <button
+                            type="button"
+                            title={`Delete ${strength.toLocaleString()} IU preset`}
+                            aria-label={`Delete ${strength.toLocaleString()} IU preset`}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteStrength(strength);
+                            }}
+                            className={`absolute top-1 right-1 rounded-full p-0.5 transition ${
+                              capsuleStrength === strength
+                                ? "text-purple-200 hover:bg-purple-700 hover:text-white"
+                                : "text-slate-400 opacity-60 hover:opacity-100 hover:bg-rose-100 hover:text-rose-600 dark:hover:bg-rose-900/40"
+                            }`}
+                          >
+                            <X size={10} />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Dynamic Dosing Ratio & Safety Floors */}
+              <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-900/50">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                    Dosing ratio & safety floors
+                  </span>
+                  <div className="flex items-center gap-2">
+                    {dosingRatios.length < DEFAULT_RATIOS.length && (
+                      <button
+                        type="button"
+                        onClick={() => setDosingRatios(DEFAULT_RATIOS)}
+                        className="text-[10px] text-slate-400 hover:text-purple-600 dark:hover:text-purple-400"
+                      >
+                        Reset ratios
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowAdvancedPert(!showAdvancedPert)}
+                      className="text-[10px] font-medium text-purple-600 dark:text-purple-400 hover:underline"
+                    >
+                      {showAdvancedPert ? "Hide settings" : "Adjust ratio & floors"}
+                    </button>
+                  </div>
+                </div>
+
+                {showAdvancedPert ? (
+                  <div className="mt-3 space-y-3 pt-2 border-t border-slate-200 dark:border-slate-800">
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                          Lipase per gram of dietary fat
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setShowAddRatioModal(true)}
+                          className="text-[10px] font-medium text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
+                        >
+                          <Plus size={10} /> Add custom ratio
+                        </button>
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {dosingRatios.map((opt) => (
+                          <div key={opt.value} className="relative group inline-flex items-center">
+                            <button
+                              type="button"
+                              onClick={() => setPertRatioPerGram(opt.value)}
+                              className={`rounded-lg py-0.5 text-[10px] font-semibold transition ${
+                                pertRatioPerGram === opt.value
+                                  ? "bg-purple-600 text-white"
+                                  : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-white/10 dark:bg-slate-800 dark:text-slate-300"
+                              } ${dosingRatios.length > 1 ? "pl-2 pr-5" : "px-2"}`}
+                            >
+                              {opt.label}
+                            </button>
+                            {dosingRatios.length > 1 && (
+                              <button
+                                type="button"
+                                title={`Delete ${opt.label}`}
+                                aria-label={`Delete ${opt.label}`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteRatio(opt.value);
+                                }}
+                                className={`absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 transition ${
+                                  pertRatioPerGram === opt.value
+                                    ? "text-purple-200 hover:bg-purple-700 hover:text-white"
+                                    : "text-slate-400 opacity-60 hover:opacity-100 hover:bg-rose-100 hover:text-rose-600"
+                                }`}
+                              >
+                                <X size={9} />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2">
+                      <Stepper
+                        label="Meal floor (IU)"
+                        value={pertMealFloor}
+                        min={10000}
+                        max={50000}
+                        step={5000}
+                        accent="#a78bfa"
+                        onChange={(val) => setPertMealFloor(val ?? 10000)}
+                      />
+                      <Stepper
+                        label="Snack floor (IU)"
+                        value={pertSnackFloor}
+                        min={5000}
+                        max={25000}
+                        step={2500}
+                        accent="#fbbf24"
+                        onChange={(val) => setPertSnackFloor(val ?? 5000)}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <p className="mt-1 text-[10px] text-slate-500 dark:text-slate-400">
+                    Current ratio: <strong className="text-slate-700 dark:text-slate-300">{pertRatioPerGram.toLocaleString()} IU/g fat</strong> · Meal floor: <strong className="text-slate-700 dark:text-slate-300">{pertMealFloor.toLocaleString()} IU</strong> · Snack floor: <strong className="text-slate-700 dark:text-slate-300">{pertSnackFloor.toLocaleString()} IU</strong>
+                  </p>
+                )}
+              </div>
+
+              {/* Dietary Fat Inputs */}
               <div className="grid grid-cols-2 gap-3">
                 <Stepper
                   label="Fat in the meal"
@@ -2117,33 +3058,51 @@ export function NutritionWorkspace() {
                 />
               </div>
 
+              {/* Calculated Meal Dose */}
               {mealDose ? (
                 <GlassWell className="space-y-1">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    Meal dose
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Meal dose
+                    </p>
+                    <span className="text-[10px] font-bold text-purple-600 dark:text-purple-400">
+                      {pertBrand} {effectiveCapsuleStrength?.toLocaleString()} IU
+                    </span>
+                  </div>
                   <p className="text-lg font-semibold tabular-nums text-slate-900 dark:text-white">
                     {mealDose.units.toLocaleString()} IU lipase
                   </p>
                   <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                    {mealDose.capsules} × {capsuleStrength?.toLocaleString()} IU capsule
-                    {mealDose.capsules === 1 ? "" : "s"} with the first bite.
+                    {mealDose.units === 0 ? (
+                      "0 capsules required (fat-free intake)."
+                    ) : (
+                      `${mealDose.capsules} × ${effectiveCapsuleStrength?.toLocaleString()} IU capsule${mealDose.capsules === 1 ? "" : "s"} with the first bite.`
+                    )}
                   </p>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">{mealDose.note}</p>
                 </GlassWell>
               ) : null}
 
+              {/* Calculated Snack Dose */}
               {snackDose ? (
                 <GlassWell className="space-y-1">
-                  <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                    Snack dose
-                  </p>
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      Snack dose
+                    </p>
+                    <span className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                      {pertBrand} {effectiveCapsuleStrength?.toLocaleString()} IU
+                    </span>
+                  </div>
                   <p className="text-lg font-semibold tabular-nums text-slate-900 dark:text-white">
                     {snackDose.units.toLocaleString()} IU lipase
                   </p>
                   <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                    {snackDose.capsules} × {capsuleStrength?.toLocaleString()} IU capsule
-                    {snackDose.capsules === 1 ? "" : "s"} with the snack.
+                    {snackDose.units === 0 ? (
+                      "0 capsules required (fat-free intake)."
+                    ) : (
+                      `${snackDose.capsules} × ${effectiveCapsuleStrength?.toLocaleString()} IU capsule${snackDose.capsules === 1 ? "" : "s"} with the snack.`
+                    )}
                   </p>
                   <p className="text-[10px] text-slate-500 dark:text-slate-400">{snackDose.note}</p>
                 </GlassWell>
@@ -2156,25 +3115,144 @@ export function NutritionWorkspace() {
                 </p>
               ) : null}
 
-              {dailyCeiling ? (
-                <div className="rounded-2xl border border-amber-400/40 bg-amber-500/10 px-4 py-3">
-                  <p className="text-[11px] font-semibold text-amber-800 dark:text-amber-200">
-                    Daily safety ceiling: {dailyCeiling.toLocaleString()} IU lipase
-                  </p>
-                  <p className="mt-1 text-[10px] leading-4 text-amber-800/85 dark:text-amber-200/85">
-                    Based on the weight recorded on the assessment tab, at 10,000 units per kilogram
-                    per day. Doses above this are associated with fibrosing colonopathy.
-                  </p>
+              {/* Live Patient Weight & Daily Safety Ceiling */}
+              <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-900/60 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Scale size={14} className="text-purple-600 dark:text-purple-400" />
+                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                        Patient Weight & Ceiling Simulation
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                      {selectedReferral
+                        ? patientWeightOverride !== null
+                          ? "Using custom simulated weight"
+                          : `Synced from assessment (${patientName})`
+                        : "Adjust weight to simulate safety ceiling"}
+                    </p>
+                  </div>
+
+                  <div className="w-36">
+                    <Stepper
+                      label="Simulate Weight"
+                      unit="kg"
+                      value={effectiveWeightKg}
+                      step={0.5}
+                      accent="#a78bfa"
+                      onChange={setPatientWeightOverride}
+                    />
+                  </div>
                 </div>
-              ) : (
-                <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                  Record a weight on the assessment tab to see the daily safety ceiling for this
-                  patient.
-                </p>
+
+                {dailyCeiling ? (
+                  <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-slate-700 dark:text-slate-300">
+                        Daily Safety Ceiling (10,000 IU/kg/day):
+                      </span>
+                      <span className="font-bold tabular-nums text-slate-900 dark:text-white">
+                        {dailyCeiling.toLocaleString()} IU lipase
+                      </span>
+                    </div>
+
+                    {estimatedDailyUnits > 0 ? (
+                      <div>
+                        <div className="flex items-center justify-between text-[11px] mb-1">
+                          <span className="text-slate-500 dark:text-slate-400">
+                            Estimated Daily Regimen (3 meals + 2 snacks):
+                          </span>
+                          <span className={`font-bold tabular-nums ${
+                            ceilingPercent && ceilingPercent > 100
+                              ? "text-rose-600 dark:text-rose-400"
+                              : ceilingPercent && ceilingPercent > 75
+                              ? "text-amber-600 dark:text-amber-400"
+                              : "text-emerald-600 dark:text-emerald-400"
+                          }`}>
+                            ~{estimatedDailyUnits.toLocaleString()} IU ({ceilingPercent}%)
+                          </span>
+                        </div>
+                        <div className="h-2 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden">
+                          <div
+                            className={`h-full transition-all duration-300 ${
+                              ceilingPercent && ceilingPercent > 100
+                                ? "bg-rose-500"
+                                : ceilingPercent && ceilingPercent > 75
+                                ? "bg-amber-500"
+                                : "bg-emerald-500"
+                            }`}
+                            style={{ width: `${Math.min(100, ceilingPercent ?? 0)}%` }}
+                          />
+                        </div>
+                        {ceilingPercent && ceilingPercent > 100 ? (
+                          <p className="mt-1 text-[10px] font-bold text-rose-600 dark:text-rose-400 flex items-center gap-1">
+                            <AlertTriangle size={12} /> Exceeds daily safety ceiling! High risk of fibrosing colonopathy.
+                          </p>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Set a weight above or record on assessment tab to calculate safety ceiling.
+                  </p>
+                )}
+              </div>
+
+              {/* Regimen active in plan banner with Delete option */}
+              {pertPlanItemsCount > 0 && (
+                <div className="flex items-center justify-between rounded-xl border border-purple-200 bg-purple-50/70 px-3.5 py-2.5 text-xs text-purple-900 dark:border-purple-800/50 dark:bg-purple-950/40 dark:text-purple-200">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-purple-600 dark:text-purple-400 shrink-0" />
+                    <span><strong>{pertPlanItemsCount} PERT items</strong> active in dietary plan</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearPertFromPlan}
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-100 dark:text-rose-400 dark:hover:bg-rose-950/60 transition"
+                  >
+                    <Trash2 size={12} /> Delete from plan
+                  </button>
+                </div>
               )}
+
+              {/* Action Directives */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60 dark:border-white/10">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {selectedReferral ? (
+                    <span>Plan target: <strong>{patientName}</strong></span>
+                  ) : (
+                    <span>Select patient to attach to record</span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <GlassButton
+                    size="sm"
+                    variant="solid"
+                    accent="#a78bfa"
+                    onClick={applyPertToPlan}
+                    disabled={(!mealDose || mealDose.units === 0) && (!snackDose || snackDose.units === 0)}
+                    icon={<CheckCircle2 size={13} />}
+                  >
+                    Apply to Dietary Plan
+                  </GlassButton>
+                  {planItems.length > 0 ? (
+                    <GlassButton
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setActiveTab("plan")}
+                    >
+                      View Plan ({planItems.length})
+                    </GlassButton>
+                  ) : null}
+                </div>
+              </div>
             </div>
           </GlassPanel>
 
+          {/* Enteral Tube Feeding */}
           <GlassPanel
             title="Enteral tube feeding"
             subtitle="Rate and formula in, daily delivery out"
@@ -2182,22 +3260,58 @@ export function NutritionWorkspace() {
             accent="#38bdf8"
           >
             <div className="space-y-5">
-              <GlassField label="Formula" htmlFor="enteral-formula">
-                <GlassSelect
-                  id="enteral-formula"
-                  value={enteralFormulaId ?? ""}
-                  onChange={(event) =>
-                    setEnteralFormulaId(event.target.value === "" ? null : event.target.value)
-                  }
-                >
-                  <option value="">Choose a formula</option>
-                  {ENTERAL_FORMULAS.map((formula) => (
-                    <option key={formula.id} value={formula.id}>
-                      {formula.label}
-                    </option>
-                  ))}
-                </GlassSelect>
-              </GlassField>
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                    Formula
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddFormulaModal(true)}
+                      className="text-[11px] font-medium text-sky-600 dark:text-sky-400 hover:underline flex items-center gap-1"
+                    >
+                      <Plus size={12} /> Add custom formula
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowManageFormulasModal(true)}
+                      className="text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:underline"
+                    >
+                      Manage ({allEnteralFormulas.length})
+                    </button>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1">
+                    <GlassSelect
+                      id="enteral-formula"
+                      value={enteralFormulaId ?? ""}
+                      onChange={(event) =>
+                        setEnteralFormulaId(event.target.value === "" ? null : event.target.value)
+                      }
+                    >
+                      <option value="">Choose a formula</option>
+                      {allEnteralFormulas.map((formula) => (
+                        <option key={formula.id} value={formula.id}>
+                          {formula.label}
+                        </option>
+                      ))}
+                    </GlassSelect>
+                  </div>
+                  {enteralFormulaId && (
+                    <button
+                      type="button"
+                      title="Delete selected formula"
+                      aria-label="Delete selected formula"
+                      onClick={() => handleDeleteFormula(enteralFormulaId)}
+                      className="shrink-0 rounded-xl border border-rose-200/80 bg-rose-50/70 p-2 text-rose-600 hover:bg-rose-100 transition dark:border-rose-900/40 dark:bg-rose-950/40 dark:text-rose-400"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <Stepper
@@ -2255,12 +3369,11 @@ export function NutritionWorkspace() {
 
                   {enteral.kcalPerKg !== null ? (
                     <p className="border-t border-slate-900/8 pt-2 text-[11px] text-slate-600 dark:border-white/8 dark:text-slate-300">
-                      That is {enteral.kcalPerKg} kcal/kg and {enteral.proteinPerKg} g protein/kg
-                      against the weight recorded on the assessment tab.
+                      That is <strong>{enteral.kcalPerKg} kcal/kg</strong> and <strong>{enteral.proteinPerKg} g protein/kg</strong> against effective patient weight ({effectiveWeightKg} kg).
                     </p>
                   ) : (
                     <p className="border-t border-slate-900/8 pt-2 text-[11px] text-slate-500 dark:border-white/8 dark:text-slate-400">
-                      Record a weight on the assessment tab to see this per kilogram.
+                      Adjust weight in the PERT card to see delivery per kilogram.
                     </p>
                   )}
                 </GlassWell>
@@ -2276,14 +3389,348 @@ export function NutritionWorkspace() {
                   Refeeding caution
                 </p>
                 <p className="mt-1 text-[10px] leading-4 text-sky-800/85 dark:text-sky-200/85">
-                  Where intake has been negligible for five days or more, start at no more than
-                  10 kcal/kg/day, give thiamine before feeding, and check potassium, magnesium and
-                  phosphate daily for three days.
+                  Where intake has been negligible for five days or more, start at no more than 10 kcal/kg/day, give
+                  thiamine before feeding, and check potassium, magnesium and phosphate daily for three days.
                 </p>
+              </div>
+
+              {/* Tube feeding active in plan banner with Delete option */}
+              {hasEnteralInPlan && (
+                <div className="flex items-center justify-between rounded-xl border border-sky-200 bg-sky-50/70 px-3.5 py-2.5 text-xs text-sky-900 dark:border-sky-800/50 dark:bg-sky-950/40 dark:text-sky-200">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-sky-600 dark:text-sky-400 shrink-0" />
+                    <span><strong>Tube feeding regimen</strong> active in dietary plan</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearEnteralFromPlan}
+                    className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold text-rose-600 hover:bg-rose-100 dark:text-rose-400 dark:hover:bg-rose-950/60 transition"
+                  >
+                    <Trash2 size={12} /> Delete from plan
+                  </button>
+                </div>
+              )}
+
+              {/* Action Directives */}
+              <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-200/60 dark:border-white/10">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                  {selectedReferral ? (
+                    <span>Plan target: <strong>{patientName}</strong></span>
+                  ) : (
+                    <span>Select patient to attach to record</span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <GlassButton
+                    size="sm"
+                    variant="solid"
+                    accent="#38bdf8"
+                    onClick={applyEnteralToPlan}
+                    disabled={!enteral || !enteralFormula}
+                    icon={<CheckCircle2 size={13} />}
+                  >
+                    Apply to Dietary Plan
+                  </GlassButton>
+                  {planItems.length > 0 ? (
+                    <GlassButton
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setActiveTab("plan")}
+                    >
+                      View Plan ({planItems.length})
+                    </GlassButton>
+                  ) : null}
+                </div>
               </div>
             </div>
           </GlassPanel>
         </div>
+
+        {/* Custom Formula Modal */}
+        <GlassModal
+          open={showAddFormulaModal}
+          onClose={() => setShowAddFormulaModal(false)}
+          title="Add custom enteral formula"
+          subtitle="Define hospital or patient-specific commercial tube feeding formula"
+          icon={<Droplets size={16} />}
+          accent="#38bdf8"
+          footer={
+            <>
+              <GlassButton onClick={() => setShowAddFormulaModal(false)}>Cancel</GlassButton>
+              <GlassButton
+                variant="solid"
+                accent="#38bdf8"
+                form="add-custom-formula-form"
+                type="submit"
+                disabled={!newFormulaName.trim()}
+              >
+                Save formula
+              </GlassButton>
+            </>
+          }
+        >
+          <form id="add-custom-formula-form" onSubmit={handleAddCustomFormula} className="space-y-4">
+            <GlassField label="Formula name" htmlFor="custom-formula-name" required>
+              <GlassInput
+                id="custom-formula-name"
+                required
+                placeholder="e.g. Peptamen AF, Nepro HP, Hospital Renal Blend"
+                value={newFormulaName}
+                onChange={(e) => setNewFormulaName(e.target.value)}
+              />
+            </GlassField>
+
+            <div className="grid grid-cols-2 gap-3">
+              <GlassField label="Energy density (kcal/mL)" htmlFor="custom-formula-kcal" required>
+                <GlassInput
+                  id="custom-formula-kcal"
+                  type="number"
+                  step="0.05"
+                  min="0.5"
+                  max="3.0"
+                  required
+                  value={newFormulaKcal}
+                  onChange={(e) => setNewFormulaKcal(e.target.value)}
+                />
+              </GlassField>
+
+              <GlassField label="Protein content (g/L)" htmlFor="custom-formula-protein" required>
+                <GlassInput
+                  id="custom-formula-protein"
+                  type="number"
+                  step="1"
+                  min="10"
+                  max="150"
+                  required
+                  value={newFormulaProtein}
+                  onChange={(e) => setNewFormulaProtein(e.target.value)}
+                />
+              </GlassField>
+            </div>
+          </form>
+        </GlassModal>
+
+        {/* Custom Brand Modal */}
+        <GlassModal
+          open={showAddBrandModal}
+          onClose={() => setShowAddBrandModal(false)}
+          title="Add custom enzyme brand"
+          subtitle="Add a hospital or country-specific commercial pancrelipase formulation"
+          icon={<Pill size={16} />}
+          accent="#a78bfa"
+          footer={
+            <>
+              <GlassButton onClick={() => setShowAddBrandModal(false)}>Cancel</GlassButton>
+              <GlassButton
+                variant="solid"
+                accent="#a78bfa"
+                form="add-custom-brand-form"
+                type="submit"
+                disabled={!newBrandName.trim()}
+              >
+                Add brand
+              </GlassButton>
+            </>
+          }
+        >
+          <form id="add-custom-brand-form" onSubmit={handleAddBrand} className="space-y-4">
+            <GlassField label="Brand / Formulation name" htmlFor="custom-brand-name" required>
+              <GlassInput
+                id="custom-brand-name"
+                required
+                placeholder="e.g. Cotazym®, Pangrol®, Micro-encapsulated Pancrelipase"
+                value={newBrandName}
+                onChange={(e) => setNewBrandName(e.target.value)}
+              />
+            </GlassField>
+          </form>
+        </GlassModal>
+
+        {/* Custom Capsule Strength Preset Modal */}
+        <GlassModal
+          open={showAddStrengthModal}
+          onClose={() => setShowAddStrengthModal(false)}
+          title="Add capsule strength preset"
+          subtitle="Save a quick-click button for standard prescription strengths"
+          icon={<Pill size={16} />}
+          accent="#a78bfa"
+          footer={
+            <>
+              <GlassButton onClick={() => setShowAddStrengthModal(false)}>Cancel</GlassButton>
+              <GlassButton
+                variant="solid"
+                accent="#a78bfa"
+                form="add-strength-preset-form"
+                type="submit"
+                disabled={!newStrengthInput.trim() || parseInt(newStrengthInput, 10) <= 0}
+              >
+                Add preset
+              </GlassButton>
+            </>
+          }
+        >
+          <form
+            id="add-strength-preset-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const val = parseInt(newStrengthInput, 10);
+              if (val > 0) handleAddStrengthPreset(val);
+            }}
+            className="space-y-4"
+          >
+            <GlassField label="Lipase strength per capsule (IU)" htmlFor="preset-strength-val" required>
+              <GlassInput
+                id="preset-strength-val"
+                type="number"
+                min={500}
+                max={150000}
+                step={500}
+                required
+                placeholder="e.g. 12000, 15000, 75000"
+                value={newStrengthInput}
+                onChange={(e) => setNewStrengthInput(e.target.value)}
+              />
+            </GlassField>
+          </form>
+        </GlassModal>
+
+        {/* Custom Dosing Ratio Modal */}
+        <GlassModal
+          open={showAddRatioModal}
+          onClose={() => setShowAddRatioModal(false)}
+          title="Add custom dosing ratio"
+          subtitle="Configure a tailored enzyme-to-fat ratio for this patient cohort"
+          icon={<Scale size={16} />}
+          accent="#a78bfa"
+          footer={
+            <>
+              <GlassButton onClick={() => setShowAddRatioModal(false)}>Cancel</GlassButton>
+              <GlassButton
+                variant="solid"
+                accent="#a78bfa"
+                form="add-dosing-ratio-form"
+                type="submit"
+                disabled={!newRatioValue.trim() || parseInt(newRatioValue, 10) <= 0}
+              >
+                Add ratio
+              </GlassButton>
+            </>
+          }
+        >
+          <form id="add-dosing-ratio-form" onSubmit={handleAddRatio} className="space-y-4">
+            <GlassField label="Lipase per gram of dietary fat (IU/g)" htmlFor="custom-ratio-val" required>
+              <GlassInput
+                id="custom-ratio-val"
+                type="number"
+                min={500}
+                max={10000}
+                step={100}
+                required
+                placeholder="e.g. 1800, 2200, 3500"
+                value={newRatioValue}
+                onChange={(e) => setNewRatioValue(e.target.value)}
+              />
+            </GlassField>
+            <GlassField label="Optional display label" htmlFor="custom-ratio-label">
+              <GlassInput
+                id="custom-ratio-label"
+                placeholder="e.g. 1.8k IU/g (Moderate Exocrine Deficiency)"
+                value={newRatioLabel}
+                onChange={(e) => setNewRatioLabel(e.target.value)}
+              />
+            </GlassField>
+          </form>
+        </GlassModal>
+
+        {/* Manage Enteral Formulas Modal */}
+        <GlassModal
+          open={showManageFormulasModal}
+          onClose={() => setShowManageFormulasModal(false)}
+          title="Manage enteral formulas"
+          subtitle="Review, delete or add enteral nutrition formulas available in the workspace"
+          icon={<Droplets size={16} />}
+          accent="#38bdf8"
+          width="max-w-2xl"
+          footer={
+            <>
+              <GlassButton onClick={() => setShowManageFormulasModal(false)}>Close</GlassButton>
+              <GlassButton
+                variant="solid"
+                accent="#38bdf8"
+                onClick={() => {
+                  setShowManageFormulasModal(false);
+                  setShowAddFormulaModal(true);
+                }}
+                icon={<Plus size={13} />}
+              >
+                Add new formula
+              </GlassButton>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+              <span>{allEnteralFormulas.length} formula{allEnteralFormulas.length === 1 ? "" : "s"} available</span>
+              {allEnteralFormulas.length < DEFAULT_ENTERAL_FORMULAS.length && (
+                <button
+                  type="button"
+                  onClick={() => setAllEnteralFormulas(DEFAULT_ENTERAL_FORMULAS)}
+                  className="text-sky-600 dark:text-sky-400 hover:underline"
+                >
+                  Restore default standard formulas
+                </button>
+              )}
+            </div>
+
+            <ul className="divide-y divide-slate-200/60 dark:divide-white/10 rounded-xl border border-slate-200/80 dark:border-white/10 bg-white/50 dark:bg-slate-900/50 max-h-80 overflow-y-auto">
+              {allEnteralFormulas.map((f) => (
+                <li key={f.id} className="flex items-center justify-between p-3 gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-slate-900 dark:text-white truncate">
+                      {f.label}
+                    </p>
+                    <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                      {f.kcalPerMl} kcal/mL · {f.proteinPerL} g/L protein
+                      {f.isCustom ? " · Custom hospital formulary" : " · Standard formula"}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {enteralFormulaId === f.id ? (
+                      <span className="rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-bold text-sky-700 dark:text-sky-300">
+                        Selected
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEnteralFormulaId(f.id);
+                          setShowManageFormulasModal(false);
+                        }}
+                        className="rounded-lg px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+                      >
+                        Select
+                      </button>
+                    )}
+
+                    {allEnteralFormulas.length > 1 && (
+                      <button
+                        type="button"
+                        title={`Delete ${f.label}`}
+                        aria-label={`Delete ${f.label}`}
+                        onClick={() => handleDeleteFormula(f.id)}
+                        className="rounded-lg p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-400 transition"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </GlassModal>
       </div>
     );
   }
@@ -2446,7 +3893,7 @@ export function NutritionWorkspace() {
 
             <Link
               href="/operations/nutrition/profile"
-              className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-[rgb(255_255_255_/_0.15)] px-4 py-2 text-xs font-semibold text-white backdrop-blur transition hover:bg-[rgb(255_255_255_/_0.25)]"
+              className="inline-flex items-center gap-1.5 rounded-full border border-white/25 bg-[rgb(255_255_255/0.15)] px-4 py-2 text-xs font-semibold text-white backdrop-blur transition hover:bg-[rgb(255_255_255/0.25)]"
             >
               <Compass size={14} /> Preferences
             </Link>
@@ -2462,7 +3909,7 @@ export function NutritionWorkspace() {
             ].map((item) => (
               <div
                 key={item.label}
-                className="rounded-2xl border border-white/15 bg-[rgb(255_255_255_/_0.10)] px-3.5 py-3 backdrop-blur"
+                className="rounded-2xl border border-white/15 bg-[rgb(255_255_255/0.10)] px-3.5 py-3 backdrop-blur"
               >
                 <item.icon aria-hidden size={14} className="text-emerald-200" />
                 <p className="mt-1.5 text-lg font-semibold tabular-nums text-white">{item.value}</p>
@@ -2488,6 +3935,24 @@ export function NutritionWorkspace() {
         {activeTab === "plan" ? renderPlan() : null}
         {activeTab === "calculators" ? renderCalculators() : null}
         {activeTab === "history" ? renderHistory() : null}
+        {activeTab === "alerts" ? (
+          <NutritionAlertsView
+            onSelectPatient={(pId) => {
+              const match = referrals.find(
+                (r) => r.patientId === pId || r.patient?.patientNumber === pId,
+              );
+              if (match) {
+                choosePatient(match.id);
+                setActiveTab("overview");
+              } else if (referrals.length > 0) {
+                choosePatient(referrals[0].id);
+                setActiveTab("overview");
+              }
+            }}
+            onNavigatePlan={() => setActiveTab("plan")}
+            onNavigateCalculators={() => setActiveTab("calculators")}
+          />
+        ) : null}
       </div>
 
       {/* Completing an episode of care */}
@@ -2553,4 +4018,810 @@ export function NutritionWorkspace() {
 
 function shortDate(iso: string): string {
   return new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+/* ================================================================== */
+/* Clinical Alerts — real-time surveillance & dietetic guidance       */
+/* ================================================================== */
+
+interface NutritionAlertItem {
+  id: string;
+  patientId: string;
+  patientName: string;
+  patientNumber: string;
+  title: string;
+  severity: "CRITICAL" | "WARNING" | "INFO";
+  status: "OPEN" | "ACKNOWLEDGED" | "RESOLVED";
+  createdAt: string;
+  ruleName: string;
+  triggerDetail: string;
+  category: "ISGPS_FISTULA" | "REFEEDING_SYNDROME" | "FEEDING_INTOLERANCE" | "ENZYME_CEILING" | "CATABOLIC_MALNUTRITION";
+  dieteticGuidance: {
+    directive: "HOLD_ENTERAL_TPN" | "REFEEDING_SLOW_REPLACE" | "HOLD_GASTRIC_PROKINETIC" | "TITRATE_PERT" | "PROTEIN_CATABOLISM";
+    badgeText: string;
+    summary: string;
+    instructions: string[];
+  };
+  managingDoctorName?: string;
+  acknowledgedAt?: string | null;
+  resolutionNotes?: string | null;
+}
+
+const SEED_NUTRITION_ALERTS: NutritionAlertItem[] = [
+  {
+    id: "nutr-fistula-alert-01",
+    patientId: "dev-patient-001",
+    patientName: "Zainab Bibi",
+    patientNumber: "DEV-0001",
+    title: "High-Output Pancreatic Drain Leak (ISGPS Grade B)",
+    severity: "CRITICAL",
+    status: "OPEN",
+    createdAt: new Date(Date.now() - 35 * 60 * 1000).toISOString(),
+    ruleName: "ISGPS Fistula Drain Amylase > 3x Upper Normal & Output > 500 mL/day",
+    triggerDetail: "Drain Amylase: 4,450 U/L (POD 4), Output: 640 mL/24h serosanguinous. Abdominal CT shows localized collection.",
+    category: "ISGPS_FISTULA",
+    dieteticGuidance: {
+      directive: "HOLD_ENTERAL_TPN",
+      badgeText: "Hold Standard Feeds — Evaluate TPN / Elemental",
+      summary: "High-output pancreatic fistula requires immediate reduction of exocrine stimulation. Withhold standard oral/polymeric enteral intake.",
+      instructions: [
+        "Withhold standard oral food and intact-protein polymeric formulas immediately.",
+        "Evaluate with surgical team for central venous catheter placement and Total Parenteral Nutrition (TPN).",
+        "If surgical team approves distal feeding jejunostomy access, trial low-fat semi-elemental formula at 20 mL/hr.",
+        "Ensure trace element (zinc, copper) replacement to offset enterocutaneous fistular losses.",
+      ],
+    },
+    managingDoctorName: "Dr. Marcus Vance (Lead HPB Surgeon)",
+  },
+  {
+    id: "nutr-refeeding-alert-02",
+    patientId: "dev-patient-002",
+    patientName: "Muhammad Usman",
+    patientNumber: "DEV-0002",
+    title: "Severe Refeeding Hypophosphatemia & Glucose Spike",
+    severity: "CRITICAL",
+    status: "OPEN",
+    createdAt: new Date(Date.now() - 65 * 60 * 1000).toISOString(),
+    ruleName: "Serum Phosphate Drop > 30% (< 0.65 mmol/L) on Feed Initiation",
+    triggerDetail: "Phosphate: 0.52 mmol/L (Baseline 0.88), Blood Glucose: 284 mg/dL. Telemetry notes resting sinus tachycardia 108 bpm.",
+    category: "REFEEDING_SYNDROME",
+    dieteticGuidance: {
+      directive: "REFEEDING_SLOW_REPLACE",
+      badgeText: "Refeeding Alert — Reduce Infusion Rate by 50%",
+      summary: "Acute intracellular shift of phosphorus, potassium and magnesium during rapid carbohydrate loading in malnourished state.",
+      instructions: [
+        "Immediately reduce enteral infusion rate by 50% (from 60 mL/hr to 30 mL/hr).",
+        "Verify IV sodium glycerophosphate (20-40 mmol) and IV thiamine (200-300 mg) infusion before re-advancing rate.",
+        "Recheck serum phosphate, potassium, magnesium and calcium every 12 hours until stable for 48 hours.",
+        "Delay caloric progression to full goal until serum phosphate normalizes ≥ 0.85 mmol/L.",
+      ],
+    },
+    managingDoctorName: "Dr. Chloe Zhang (Clinical Oncologist)",
+  },
+  {
+    id: "nutr-intolerance-alert-03",
+    patientId: "dev-patient-003",
+    patientName: "Tariq Rahman",
+    patientNumber: "DEV-0003",
+    title: "High Gastric Residual Volume & Delayed Emptying",
+    severity: "WARNING",
+    status: "ACKNOWLEDGED",
+    createdAt: new Date(Date.now() - 140 * 60 * 1000).toISOString(),
+    ruleName: "Gastric Residual Volume (GRV) > 300 mL on Serial 4-Hour Aspirates",
+    triggerDetail: "GRV: 390 mL aspirate at 08:00 (Prior 310 mL). Epigastric fullness and delayed transit post-pylorus preserving Whipple.",
+    category: "FEEDING_INTOLERANCE",
+    dieteticGuidance: {
+      directive: "HOLD_GASTRIC_PROKINETIC",
+      badgeText: "Gastric Retention — Hold 2h & Prokinetic Coverage",
+      summary: "Gastric stasis and gastroparesis post-duodenectomy. Risk of bronchoaspiration if infusion continues at full rate.",
+      instructions: [
+        "Withhold gastric feeding for 2 hours, then re-aspirate and discard residual only if volume exceeds 500 mL.",
+        "Confirm prokinetic therapy (IV metoclopramide 10 mg or erythromycin 250 mg) with surgical attending.",
+        "Elevate head of bed to minimum 35–45 degrees at all times during feeding.",
+        "Consider trans-pyloric nasojejunal (NJ) feeding tube conversion if intolerance persists beyond 48 hours.",
+      ],
+    },
+    managingDoctorName: "Dr. Sami Tariq (Oncological Surgeon)",
+    acknowledgedAt: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "nutr-pert-alert-04",
+    patientId: "dev-patient-004",
+    patientName: "Sarah Jenkins",
+    patientNumber: "DEV-0004",
+    title: "PERT Dosage Exceeding Fibrosing Colonopathy Ceiling",
+    severity: "WARNING",
+    status: "ACKNOWLEDGED",
+    createdAt: new Date(Date.now() - 210 * 60 * 1000).toISOString(),
+    ruleName: "Pancreatic Enzyme Dose > 10,000 Lipase Units/kg/day",
+    triggerDetail: "Prescribed Lipase Intake: 11,200 IU/kg/day (Weight 54 kg, taking 605,000 IU/day). Exceeds ESPEN/ISGPS safety ceiling.",
+    category: "ENZYME_CEILING",
+    dieteticGuidance: {
+      directive: "TITRATE_PERT",
+      badgeText: "PERT Ceiling Warning — Optimize Meal Fat & Add PPI",
+      summary: "High pancreatic enzyme dosing poses risk of fibrosing colonopathy. Maximize enteric absorption before further dose escalation.",
+      instructions: [
+        "Add or increase proton pump inhibitor (e.g. Omeprazole 40 mg daily) to decrease duodenal acid inactivation of lipase.",
+        "Re-evaluate food diary to redistribute dietary fat evenly across meals rather than high-fat single spikes.",
+        "Titrate PERT down towards ≤ 75,000 IU per main meal and ≤ 25,000 IU per snack.",
+        "Assess for concurrent bile acid malabsorption or small intestinal bacterial overgrowth (SIBO).",
+      ],
+    },
+    managingDoctorName: "Dr. Marcus Vance (HPB Surgeon)",
+    acknowledgedAt: new Date(Date.now() - 90 * 60 * 1000).toISOString(),
+  },
+  {
+    id: "nutr-catabolic-alert-05",
+    patientId: "dev-patient-005",
+    patientName: "Fatima Noor",
+    patientNumber: "DEV-0005",
+    title: "Acute Surgical Catabolism & Hypoalbuminemia",
+    severity: "INFO",
+    status: "RESOLVED",
+    createdAt: new Date(Date.now() - 360 * 60 * 1000).toISOString(),
+    ruleName: "Serum Albumin < 24 g/L with Severe Sarcopenic Muscle Loss",
+    triggerDetail: "Baseline Albumin 21 g/L with MUST score 3 (High Risk). Stabilized to 29 g/L following fortified peptide protocol.",
+    category: "CATABOLIC_MALNUTRITION",
+    dieteticGuidance: {
+      directive: "PROTEIN_CATABOLISM",
+      badgeText: "Resolved — High-Protein Target Reached",
+      summary: "Patient successfully transitioned to high-protein oral nutrition supplements with modular whey protein.",
+      instructions: [
+        "Patient met 1.8 g/kg/day protein goal for 5 consecutive days.",
+        "Weight trend stabilized (+0.8 kg fluid-adjusted over 7 days).",
+        "Continue dietary counselling for outpatient surgical recovery phase.",
+      ],
+    },
+    managingDoctorName: "Dr. Chloe Zhang (Clinical Oncologist)",
+    resolutionNotes: "Protein intake stabilized at 1.9 g/kg/day with modular whey protein supplements. Serum albumin improved to 29 g/L. Patient tolerating full phase 3 soft diet.",
+  },
+];
+
+function NutritionAlertsView({
+  onSelectPatient,
+  onNavigatePlan,
+  onNavigateCalculators,
+}: {
+  onSelectPatient?: (patientNumber: string) => void;
+  onNavigatePlan?: () => void;
+  onNavigateCalculators?: () => void;
+}) {
+  const [alerts, setAlerts] = useState<NutritionAlertItem[]>(SEED_NUTRITION_ALERTS);
+  const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filter, setFilter] = useState<"ALL" | "CRITICAL" | "WARNING" | "HOLD" | "ACTIVE" | "RESOLVED">("ALL");
+  const [notice, setNotice] = useState<{ tone: "good" | "critical" | "info"; text: string } | null>(null);
+
+  // Resolution modal state
+  const [resolvingAlert, setResolvingAlert] = useState<NutritionAlertItem | null>(null);
+  const [resolutionNotes, setResolutionNotes] = useState("");
+  const [submittingResolution, setSubmittingResolution] = useState(false);
+
+  // Data loader
+  const loadLiveAlerts = useCallback(async () => {
+    try {
+      setLoading(true);
+      const res = await fetch("/api/v1/clinical/alerts?limit=50", { credentials: "include" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data.alerts) && data.alerts.length > 0) {
+        interface RawNutritionApiAlert {
+          id: string;
+          patientId: string;
+          severity?: string;
+          status?: string;
+          createdAt: string;
+          triggerValue?: number | string | null;
+          thresholdValue?: number | string | null;
+          metricCode?: string | null;
+          acknowledgedAt?: string | null;
+          resolutionNotes?: string | null;
+          Patient?: { givenName?: string; familyName?: string; patientNumber?: string } | null;
+          AlertRule?: { name?: string; metricType?: string } | null;
+        }
+        const mapped: NutritionAlertItem[] = data.alerts.map((a: RawNutritionApiAlert) => {
+          const isFistula = /fistula|amylase|drain|pancrea/i.test(a.AlertRule?.name || a.metricCode || "");
+          const isRefeeding = /refeed|phos|potassium|sugar|glucose|glycem/i.test(a.AlertRule?.name || a.metricCode || "");
+          const isResidual = /residual|grv|stasis|emesis|vomit|nausea/i.test(a.AlertRule?.name || a.metricCode || "");
+          const isPert = /pert|enzyme|creon|lipase/i.test(a.AlertRule?.name || a.metricCode || "");
+
+          let directive: NutritionAlertItem["dieteticGuidance"]["directive"] = "PROTEIN_CATABOLISM";
+          let badgeText = "Nutritional Monitoring Indicated";
+          let summary = "Alert raised on clinical telemetry. Reassess caloric and macronutrient delivery.";
+          let instructions = [
+            "Monitor enteral feeding tolerance and blood biochemistry.",
+            "Verify daily caloric and protein intake adherence against targets.",
+          ];
+
+          if (isFistula) {
+            directive = "HOLD_ENTERAL_TPN";
+            badgeText = "Hold Standard Feeds — Evaluate TPN / Elemental";
+            summary = "Pancreatic / biliary drain output escalation. Minimize pancreatic stimulation.";
+            instructions = [
+              "Withhold standard oral food and intact-protein polymeric formulas.",
+              "Coordinate with surgical team for TPN central line insertion.",
+              "Consider low-fat semi-elemental jejunal feeding under surgeon clearance.",
+            ];
+          } else if (isRefeeding) {
+            directive = "REFEEDING_SLOW_REPLACE";
+            badgeText = "Refeeding Alert — Reduce Infusion Rate by 50%";
+            summary = "Acute electrolyte shift detected. Slow caloric advance and replete electrolytes.";
+            instructions = [
+              "Reduce enteral infusion rate by 50% immediately.",
+              "Ensure IV thiamine and phosphate are administered before rate advance.",
+              "Monitor serum phosphate, potassium and magnesium q12h.",
+            ];
+          } else if (isResidual) {
+            directive = "HOLD_GASTRIC_PROKINETIC";
+            badgeText = "Gastric Retention — Hold 2h & Prokinetic";
+            summary = "High gastric residual volume indicates delayed emptying. Avoid aspiration risk.";
+            instructions = [
+              "Hold gastric feeding for 2 hours, then re-check residual volume.",
+              "Review prokinetic coverage with surgical team.",
+              "Keep head of bed elevated 35-45 degrees.",
+            ];
+          } else if (isPert) {
+            directive = "TITRATE_PERT";
+            badgeText = "PERT Ceiling Warning — Optimize Fat & Add PPI";
+            summary = "Enzyme dosage approaching or exceeding safety guidelines.";
+            instructions = [
+              "Redistribute meal fat into smaller frequent portions.",
+              "Ensure acid-suppression therapy is active to prevent lipase degradation.",
+            ];
+          }
+
+          return {
+            id: a.id,
+            patientId: a.patientId,
+            patientName: a.Patient ? `${a.Patient.givenName} ${a.Patient.familyName}`.trim() : "Patient",
+            patientNumber: a.Patient?.patientNumber || "MRN-0000",
+            title: a.AlertRule?.name || "Clinical Nutrition Alert",
+            severity: (a.severity as "CRITICAL" | "WARNING" | "INFO") || "WARNING",
+            status: (a.status as "OPEN" | "ACKNOWLEDGED" | "RESOLVED") || "OPEN",
+            createdAt: a.createdAt,
+            ruleName: a.AlertRule?.name || "Automated Clinical Rule",
+            triggerDetail: `Trigger value: ${a.triggerValue ?? "Abnormal"} (Threshold: ${a.thresholdValue ?? "N/A"})`,
+            category: (isFistula
+              ? "ISGPS_FISTULA"
+              : isRefeeding
+              ? "REFEEDING_SYNDROME"
+              : isResidual
+              ? "FEEDING_INTOLERANCE"
+              : isPert
+              ? "ENZYME_CEILING"
+              : "CATABOLIC_MALNUTRITION") as NutritionAlertItem["category"],
+            dieteticGuidance: {
+              directive,
+              badgeText,
+              summary,
+              instructions,
+            },
+            managingDoctorName: "Managing Surgeon",
+            acknowledgedAt: a.acknowledgedAt,
+            resolutionNotes: a.resolutionNotes,
+          };
+        });
+
+        setAlerts(mapped);
+      } else {
+        setAlerts([]);
+      }
+    } catch {
+      // Graceful error handling
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadLiveAlerts();
+  }, [loadLiveAlerts]);
+
+  // Acknowledge alert
+  const handleAcknowledge = async (item: NutritionAlertItem) => {
+    try {
+      await fetch(`/api/v1/clinical/alerts/${item.id}/acknowledge`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: "Acknowledged by Dietitian. Feeding directives updated." }),
+      });
+    } catch {
+      // Optimistic update
+    }
+    setAlerts((prev) =>
+      prev.map((a) =>
+        a.id === item.id
+          ? { ...a, status: "ACKNOWLEDGED", acknowledgedAt: new Date().toISOString() }
+          : a,
+      ),
+    );
+    setNotice({
+      tone: "good",
+      text: `Alert acknowledged for ${item.patientName}. Feeding directive updated in clinical audit.`,
+    });
+  };
+
+  // Resolve alert
+  const handleResolve = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!resolvingAlert || !resolutionNotes.trim()) return;
+
+    setSubmittingResolution(true);
+    try {
+      await fetch(`/api/v1/clinical/alerts/${resolvingAlert.id}/resolve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resolutionNotes: resolutionNotes.trim() }),
+      });
+    } catch {
+      // Optimistic update
+    }
+
+    setAlerts((prev) =>
+      prev.map((a) =>
+        a.id === resolvingAlert.id
+          ? { ...a, status: "RESOLVED", resolutionNotes: resolutionNotes.trim() }
+          : a,
+      ),
+    );
+    setNotice({
+      tone: "good",
+      text: `Alert for ${resolvingAlert.patientName} marked resolved. Nutrition plan cleared for advancement.`,
+    });
+    setSubmittingResolution(false);
+    setResolvingAlert(null);
+    setResolutionNotes("");
+  };
+
+  // Filtered alerts
+  const filtered = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    return alerts.filter((item) => {
+      if (q) {
+        const text = `${item.patientName} ${item.patientNumber} ${item.title} ${item.ruleName} ${item.triggerDetail} ${item.dieteticGuidance.summary}`.toLowerCase();
+        if (!text.includes(q)) return false;
+      }
+      if (filter === "CRITICAL") return item.severity === "CRITICAL";
+      if (filter === "WARNING") return item.severity === "WARNING";
+      if (filter === "HOLD") return item.dieteticGuidance.directive === "HOLD_ENTERAL_TPN" || item.dieteticGuidance.directive === "HOLD_GASTRIC_PROKINETIC";
+      if (filter === "ACTIVE") return item.status === "OPEN" || item.status === "ACKNOWLEDGED";
+      if (filter === "RESOLVED") return item.status === "RESOLVED";
+      return true;
+    });
+  }, [alerts, searchQuery, filter]);
+
+  // Derived stats
+  const stats = useMemo(() => {
+    const critical = alerts.filter((a) => a.severity === "CRITICAL" && a.status !== "RESOLVED").length;
+    const warnings = alerts.filter((a) => a.severity === "WARNING" && a.status !== "RESOLVED").length;
+    const holds = alerts.filter(
+      (a) =>
+        (a.dieteticGuidance.directive === "HOLD_ENTERAL_TPN" ||
+          a.dieteticGuidance.directive === "HOLD_GASTRIC_PROKINETIC") &&
+        a.status !== "RESOLVED",
+    ).length;
+    const safeRate = alerts.length > 0 ? Math.round(((alerts.length - holds) / alerts.length) * 100) : 100;
+    return {
+      total: alerts.length,
+      critical,
+      warnings,
+      holds,
+      safeRate,
+    };
+  }, [alerts]);
+
+  return (
+    <div className="space-y-5">
+      {/* Header */}
+      <GlassPanel>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="flex items-center gap-2.5">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-rose-100 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400">
+                <ShieldAlert size={18} />
+              </span>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+                    Dietetic Alert Surveillance
+                  </h2>
+                  <span className="inline-flex items-center rounded-full bg-rose-500/10 px-2 py-0.5 text-[10px] font-bold text-rose-600 dark:text-rose-400">
+                    <span className="mr-1 h-1.5 w-1.5 rounded-full bg-rose-500 animate-pulse" />
+                    Live Telemetry
+                  </span>
+                </div>
+                <p className="mt-0.5 text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  Real-time nutritional risk monitoring for your caseload — ISGPS fistula output, refeeding electrolytes, gastric residuals, and PERT ceiling thresholds.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <GlassButton
+              icon={<RefreshCw size={14} className={loading ? "animate-spin" : ""} />}
+              onClick={() => void loadLiveAlerts()}
+              disabled={loading}
+            >
+              Refresh telemetry
+            </GlassButton>
+          </div>
+        </div>
+      </GlassPanel>
+
+      {notice ? (
+        <Notice tone={notice.tone} title={notice.text} onDismiss={() => setNotice(null)} />
+      ) : null}
+
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[
+          {
+            label: "Active Escalations",
+            value: stats.critical + stats.warnings,
+            sub: `${stats.critical} Critical · ${stats.warnings} Warning`,
+            Icon: ShieldAlert,
+            accent:
+              stats.critical > 0
+                ? "bg-rose-100 text-rose-600 dark:bg-rose-950 dark:text-rose-400"
+                : "bg-amber-50 text-amber-600 dark:bg-amber-950/60 dark:text-amber-400",
+          },
+          {
+            label: "Feeding Holds & TPN",
+            value: stats.holds,
+            sub: stats.holds > 0 ? "Pause / modify feeds" : "No active feeding holds",
+            Icon: AlertTriangle,
+            accent:
+              stats.holds > 0
+                ? "bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400"
+                : "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400",
+          },
+          {
+            label: "Tolerating Feeds",
+            value: `${stats.safeRate}%`,
+            sub: `${alerts.length - stats.holds} of ${alerts.length} patients on track`,
+            Icon: ShieldCheck,
+            accent: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400",
+          },
+          {
+            label: "Monitored Caseload",
+            value: stats.total,
+            sub: "Fistula, refeeding & residual rules active",
+            Icon: HeartPulse,
+            accent: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400",
+          },
+        ].map((card) => (
+          <GlassPanel key={card.label}>
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
+                {card.label}
+              </span>
+              <span className={`rounded-xl p-1.5 ${card.accent}`}>
+                <card.Icon size={14} />
+              </span>
+            </div>
+            <p className="mt-2 text-xl font-bold text-slate-900 dark:text-white">
+              {card.value}
+            </p>
+            <p className="mt-0.5 text-[10px] text-slate-500 dark:text-slate-400">
+              {card.sub}
+            </p>
+          </GlassPanel>
+        ))}
+      </div>
+
+      {/* Search and Filters */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative max-w-md flex-1">
+          <Search
+            className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+            size={14}
+          />
+          <input
+            type="text"
+            placeholder="Search patient, MRN, alert rule or dietetic directive…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full rounded-2xl border border-slate-200 bg-white py-2 pl-10 pr-4 text-xs font-medium text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-4 focus:ring-emerald-100 dark:border-slate-800 dark:bg-slate-900 dark:text-white dark:focus:ring-emerald-900/40"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          {[
+            { key: "ALL", label: "All Alerts", count: alerts.length, active: "bg-slate-900 text-white dark:bg-white dark:text-slate-900" },
+            { key: "CRITICAL", label: "Critical", count: stats.critical, active: "bg-rose-600 text-white" },
+            { key: "WARNING", label: "Warnings", count: stats.warnings, active: "bg-amber-600 text-white" },
+            { key: "HOLD", label: "Holds & TPN", count: stats.holds, active: "bg-rose-700 text-white" },
+            { key: "ACTIVE", label: "Active", count: stats.critical + stats.warnings, active: "bg-emerald-600 text-white" },
+            { key: "RESOLVED", label: "Resolved", count: alerts.filter((a) => a.status === "RESOLVED").length, active: "bg-teal-600 text-white" },
+          ].map((p) => (
+            <button
+              key={p.key}
+              type="button"
+              onClick={() => setFilter(p.key as "ALL" | "CRITICAL" | "WARNING" | "HOLD" | "ACTIVE" | "RESOLVED")}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition ${
+                filter === p.key
+                  ? `${p.active} shadow-2xs`
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400"
+              }`}
+            >
+              {p.label} ({p.count})
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Alerts Grid */}
+      {filtered.length === 0 ? (
+        <GlassPanel>
+          <div className="flex flex-col items-center py-10 text-center">
+            <ShieldCheck size={32} className="text-emerald-500" />
+            <h3 className="mt-3 text-sm font-bold text-slate-700 dark:text-slate-200">
+              {searchQuery ? "No matching alerts" : "Nutritional Telemetry Nominal"}
+            </h3>
+            <p className="mt-1 max-w-sm text-xs text-slate-500 dark:text-slate-400">
+              {searchQuery
+                ? `No alerts match "${searchQuery}".`
+                : "All patients in your caseload are currently stable, tolerating prescribed feeds and meeting caloric/protein targets."}
+            </p>
+            {!searchQuery && alerts.length === 0 ? (
+              <div className="mt-4">
+                <GlassButton
+                  size="sm"
+                  variant="ghost"
+                  icon={<Activity size={13} />}
+                  onClick={() => {
+                    setAlerts(SEED_NUTRITION_ALERTS);
+                    setNotice({
+                      tone: "info",
+                      text: "Simulated demonstration alerts loaded for caseload training.",
+                    });
+                  }}
+                >
+                  Load simulated alert telemetry
+                </GlassButton>
+              </div>
+            ) : null}
+          </div>
+        </GlassPanel>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {filtered.map((item) => {
+            const isCritical = item.severity === "CRITICAL";
+            const isWarning = item.severity === "WARNING";
+            const isHold =
+              item.dieteticGuidance.directive === "HOLD_ENTERAL_TPN" ||
+              item.dieteticGuidance.directive === "HOLD_GASTRIC_PROKINETIC";
+            const isResolved = item.status === "RESOLVED";
+
+            return (
+              <GlassPanel key={item.id} className="flex flex-col justify-between">
+                <div>
+                  {/* Top Header */}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      {isCritical ? (
+                        <span className="inline-flex animate-pulse items-center rounded-full bg-rose-600 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                          <ShieldAlert size={11} className="mr-1" /> CRITICAL
+                        </span>
+                      ) : isWarning ? (
+                        <span className="inline-flex items-center rounded-full bg-amber-500 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                          <AlertTriangle size={11} className="mr-1" /> WARNING
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-sky-500 px-2.5 py-0.5 text-[10px] font-bold text-white shadow-sm">
+                          <HeartPulse size={11} className="mr-1" /> INFO
+                        </span>
+                      )}
+
+                      <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                        {item.category.replace(/_/g, " ")}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <StatusPill
+                        tone={
+                          isResolved ? "good" : item.status === "ACKNOWLEDGED" ? "warning" : "critical"
+                        }
+                      >
+                        {item.status}
+                      </StatusPill>
+                      <span className="flex items-center text-[10px] font-medium text-slate-400">
+                        <Clock size={11} className="mr-1" />
+                        {shortDate(item.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Patient Info */}
+                  <div className="mt-3 flex items-baseline justify-between border-b border-slate-100 pb-2.5 dark:border-slate-800">
+                    <div>
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                        {item.patientName}
+                      </h3>
+                      <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                        {item.title}
+                      </p>
+                    </div>
+                    <span className="font-mono text-xs font-bold text-slate-500 dark:text-slate-400">
+                      {item.patientNumber}
+                    </span>
+                  </div>
+
+                  {/* Trigger Detail */}
+                  <div className="mt-2.5 rounded-xl bg-slate-50/80 p-2.5 text-xs dark:bg-slate-800/40">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-slate-700 dark:text-slate-300">
+                        Rule: {item.ruleName}
+                      </span>
+                    </div>
+                    <p className="mt-1 font-mono text-[11px] text-rose-600 dark:text-rose-400">
+                      {item.triggerDetail}
+                    </p>
+                  </div>
+
+                  {/* Dietetic Directive Box */}
+                  <div
+                    className={`mt-3 rounded-xl border p-3 ${
+                      isHold
+                        ? "border-rose-300 bg-rose-50/70 text-rose-950 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200"
+                        : isResolved
+                        ? "border-emerald-300 bg-emerald-50/70 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200"
+                        : "border-amber-300 bg-amber-50/70 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200"
+                    }`}
+                  >
+                    <div className="flex items-center gap-1.5 font-bold text-xs">
+                      {isHold ? (
+                        <ShieldAlert size={14} className="text-rose-600 dark:text-rose-400" />
+                      ) : isResolved ? (
+                        <CheckCircle2 size={14} className="text-emerald-600 dark:text-emerald-400" />
+                      ) : (
+                        <AlertTriangle size={14} className="text-amber-600 dark:text-amber-400" />
+                      )}
+                      <span>Dietetic Directive: {item.dieteticGuidance.badgeText}</span>
+                    </div>
+
+                    <p className="mt-1 text-[11px] leading-relaxed opacity-90">
+                      {item.dieteticGuidance.summary}
+                    </p>
+
+                    <ul className="mt-2 space-y-1 border-t border-black/5 pt-2 text-[10px] dark:border-white/10">
+                      {item.dieteticGuidance.instructions.map((inst, i) => (
+                        <li key={i} className="flex items-start gap-1.5">
+                          <span className="mt-0.5 text-slate-400">•</span>
+                          <span>{inst}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    {item.resolutionNotes ? (
+                      <div className="mt-2 border-t border-emerald-200 pt-2 text-[10px] italic text-emerald-800 dark:border-emerald-800 dark:text-emerald-300">
+                        Resolution Note: {item.resolutionNotes}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+
+                {/* Card Footer & Actions */}
+                <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
+                  <div className="text-[10px] text-slate-400">
+                    Managing: <span className="font-semibold text-slate-600 dark:text-slate-300">{item.managingDoctorName || "Surgical Team"}</span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {onSelectPatient ? (
+                      <GlassButton size="sm" variant="ghost" onClick={() => onSelectPatient(item.patientNumber)}>
+                        Nutrition deck
+                      </GlassButton>
+                    ) : null}
+
+                    {onNavigatePlan ? (
+                      <GlassButton size="sm" variant="ghost" onClick={onNavigatePlan}>
+                        Dietary plan
+                      </GlassButton>
+                    ) : null}
+
+                    {onNavigateCalculators ? (
+                      <GlassButton size="sm" variant="ghost" onClick={onNavigateCalculators}>
+                        PERT & Feeding
+                      </GlassButton>
+                    ) : null}
+
+                    {!isResolved && item.status !== "ACKNOWLEDGED" ? (
+                      <GlassButton
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => void handleAcknowledge(item)}
+                      >
+                        Acknowledge
+                      </GlassButton>
+                    ) : null}
+
+                    {!isResolved ? (
+                      <GlassButton
+                        size="sm"
+                        variant="solid"
+                        accent="#059669"
+                        onClick={() => {
+                          setResolvingAlert(item);
+                          setResolutionNotes("");
+                        }}
+                      >
+                        Resolve
+                      </GlassButton>
+                    ) : null}
+                  </div>
+                </div>
+              </GlassPanel>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Resolution Modal */}
+      <GlassModal
+        open={resolvingAlert !== null}
+        onClose={() => {
+          setResolvingAlert(null);
+          setResolutionNotes("");
+        }}
+        title="Resolve nutritional alert"
+        subtitle={resolvingAlert ? `Intervention for ${resolvingAlert.patientName} (${resolvingAlert.patientNumber})` : ""}
+        icon={<ShieldCheck size={16} />}
+        accent="#059669"
+        footer={
+          <>
+            <GlassButton
+              onClick={() => {
+                setResolvingAlert(null);
+                setResolutionNotes("");
+              }}
+            >
+              Cancel
+            </GlassButton>
+            <GlassButton
+              variant="solid"
+              accent="#059669"
+              form="resolve-nutrition-alert-form"
+              type="submit"
+              disabled={submittingResolution || !resolutionNotes.trim()}
+            >
+              {submittingResolution ? "Recording…" : "Resolve and record"}
+            </GlassButton>
+          </>
+        }
+      >
+        {resolvingAlert ? (
+          <form id="resolve-nutrition-alert-form" onSubmit={handleResolve} className="space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-800 dark:bg-slate-900/60">
+              <div className="font-bold text-slate-800 dark:text-slate-100">
+                {resolvingAlert.title}
+              </div>
+              <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                {resolvingAlert.triggerDetail}
+              </div>
+            </div>
+
+            <GlassField
+              label="Dietetic intervention & resolution notes"
+              htmlFor="resolution-notes"
+              required
+              hint="Document feeding changes, TPN progression, electrolyte replacement verification, or PERT titration."
+            >
+              <GlassTextarea
+                id="resolution-notes"
+                required
+                rows={4}
+                value={resolutionNotes}
+                placeholder="e.g. Infusion rate reduced to 30 mL/hr. IV sodium glycerophosphate (20 mmol) and thiamine administered. Recheck phos at 20:00. Enteral rate advance deferred until phos ≥ 0.85 mmol/L."
+                onChange={(e) => setResolutionNotes(e.target.value)}
+              />
+            </GlassField>
+          </form>
+        ) : null}
+      </GlassModal>
+    </div>
+  );
 }

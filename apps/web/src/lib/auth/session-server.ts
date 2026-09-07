@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { cache } from "react";
 import { database } from "@wonflow/database";
 import { cookies, headers } from "next/headers";
 import { WONFLOW_PASSWORD_CHANGE_COOKIE, WONFLOW_SESSION_COOKIE, WONFLOW_SESSION_DURATION_SECONDS } from "./session";
@@ -72,7 +73,20 @@ export async function clearSessionCookie(reason = "user-logout"): Promise<void> 
   store.delete(WONFLOW_PASSWORD_CHANGE_COOKIE);
 }
 
-export async function readSession(): Promise<WonFlowSessionPayload | null> {
+/**
+ * The signed-in session, read once per request.
+ *
+ * Every portal layout now guards itself, so a single page render asks for the
+ * session at least twice — the root layout for the shell, and the portal's own
+ * guard. This reads the row, checks the tenant is still active and stamps
+ * `lastSeenAt`, none of which is worth doing twice for one request.
+ *
+ * Outside a request scope `cache` simply calls through, so route handlers and
+ * anything else behave exactly as before.
+ */
+export const readSession = cache(loadSession);
+
+async function loadSession(): Promise<WonFlowSessionPayload | null> {
   try {
     const store = await cookies();
     const rawToken = store.get(WONFLOW_SESSION_COOKIE)?.value;
@@ -154,6 +168,7 @@ export async function readSession(): Promise<WonFlowSessionPayload | null> {
       mfaVerified: session.mfaVerifiedAt !== null, expiresAt: session.expiresAt.toISOString(),
       patientId: session.patientId ?? null,
       actingRelationship: session.actingRelationship ?? null,
+      availableWorkspaces: session.membership?.workspaceCodes ?? (session.workspace ? [session.workspace] : []),
     };
   } catch (error) {
     /*

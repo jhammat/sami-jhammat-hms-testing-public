@@ -15,13 +15,13 @@ export default async function PatientSectionPage({ params }: { params: Promise<{
   const { section } = await params;
   if (!sections.includes(section as (typeof sections)[number])) notFound();
   if (section === "profile") return <PatientProfileEditor />;
-  if (section === "recovery") return <div className="mx-auto max-w-4xl px-4 py-8"><CarePlanTaskView /></div>;
-  if (section === "caregivers") return <div className="mx-auto max-w-4xl px-4 py-8"><ManageCaregiversView /></div>;
-  if (section === "vitals") return <div className="mx-auto max-w-4xl px-4 py-8"><PatientVitalsLogger /></div>;
-  if (section === "drains") return <div className="mx-auto max-w-4xl px-4 py-8"><PatientDrainLogger /></div>;
-  if (section === "medications") return <div className="mx-auto max-w-4xl px-4 py-8"><PatientMedicationScheduleView /></div>;
-  if (section === "symptoms") return <div className="mx-auto max-w-4xl px-4 py-8"><PatientSymptomLogger /></div>;
-  if (section === "labs") return <div className="mx-auto max-w-4xl px-4 py-8"><PatientLabResultsView /></div>;
-  if (section === "education") return <div className="mx-auto max-w-4xl px-4 py-8"><PatientEducationLibraryView /></div>;
+  if (section === "recovery") return <CarePlanTaskView />;
+  if (section === "caregivers") return <ManageCaregiversView />;
+  if (section === "vitals") return <PatientVitalsLogger />;
+  if (section === "drains") return <PatientDrainLogger />;
+  if (section === "medications") return <PatientMedicationScheduleView />;
+  if (section === "symptoms") return <PatientSymptomLogger />;
+  if (section === "labs") return <PatientLabResultsView />;
+  if (section === "education") return <PatientEducationLibraryView />;
   return <PatientAccessDashboard section={section as "care" | "reports" | "billing"} />;
 }

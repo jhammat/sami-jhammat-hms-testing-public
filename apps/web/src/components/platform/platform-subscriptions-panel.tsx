@@ -27,6 +27,12 @@ import {
   platformInputClassName,
 } from "./platform-administration-ui";
 
+function toDateInputValue(value: string | null | undefined): string {
+  if (!value) return "";
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : "";
+}
+
 export function PlatformSubscriptionsPanel() {
   const {
     ready,
@@ -123,7 +129,9 @@ export function PlatformSubscriptionsPanel() {
 
     const seatCount = Math.max(0, Number(seatCountInput) || 0);
     const monthlyAmountMinor = Math.max(0, Math.round((Number(monthlyAmountInput) || 0) * 100));
-    const normalizedForm = { ...form, seatCount, monthlyAmountMinor };
+    const trialEndsAt = toDateInputValue(form.trialEndsAt);
+    const renewsAt = toDateInputValue(form.renewsAt);
+    const normalizedForm = { ...form, seatCount, monthlyAmountMinor, trialEndsAt, renewsAt };
 
     try {
       const response = await fetch(`/api/v1/platform/organizations/${encodeURIComponent(tenant.backendTenantId ?? tenant.id)}/subscription`, {
@@ -137,14 +145,15 @@ export function PlatformSubscriptionsPanel() {
           monthlyAmountMinor,
           seatCount,
           currencyCode: normalizedForm.currencyCode,
-          trialEndsAt: normalizedForm.trialEndsAt,
-          renewsAt: normalizedForm.renewsAt,
+          trialEndsAt: normalizedForm.trialEndsAt || null,
+          renewsAt: normalizedForm.renewsAt || null,
         }),
       });
       const body = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? "The subscription could not be saved.");
       // The PUT above is the write; re-project instead of mirroring it.
       await reload();
+      setSyncedSubscription(normalizedForm);
       setForm(normalizedForm);
       setSeatCountInput(String(seatCount));
       setMonthlyAmountInput(String(monthlyAmountMinor / 100));
@@ -398,13 +407,14 @@ export function PlatformSubscriptionsPanel() {
               )
             }
             type="date"
-            value={form.trialEndsAt}
+            value={toDateInputValue(form.trialEndsAt)}
           />
         </Field>
 
         <Field label="Renewal date">
           <input
             className={platformInputClassName}
+            data-subscription-control
             onChange={(event) =>
               setForm((current) =>
                 current === undefined
@@ -417,7 +427,7 @@ export function PlatformSubscriptionsPanel() {
               )
             }
             type="date"
-            value={form.renewsAt}
+            value={toDateInputValue(form.renewsAt)}
           />
         </Field>
       </div>

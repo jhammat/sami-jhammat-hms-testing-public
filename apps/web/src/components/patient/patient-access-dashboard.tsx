@@ -60,11 +60,24 @@ interface PatientHome {
     id: string;
     status: string;
     instructions: string | null;
+    prescribedAt?: string | null;
+    createdAt: string;
+    doctor?: {
+      staffProfile?: {
+        membership?: {
+          displayName?: string | null;
+        } | null;
+      } | null;
+    } | null;
     items: Array<{
       id: string;
-      dosage: string | null;
+      dose?: string | null;
+      dosage?: string | null;
+      route?: string | null;
       frequency: string | null;
-      duration: string | null;
+      duration?: string | null;
+      quantity?: number | string | null;
+      instructions?: string | null;
       medication: { genericName: string; brandName: string | null; strength: string | null };
     }>;
   }>;
@@ -150,7 +163,7 @@ function SectionCard({
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
         <div className="flex items-center gap-3">
           {Icon ? (
-            <div className="grid size-10 place-items-center rounded-2xl bg-gradient-to-br from-blue-50 to-indigo-100 text-blue-600 shadow-2xs dark:from-blue-950/50 dark:to-indigo-900/50 dark:text-blue-400">
+            <div className="grid size-10 place-items-center rounded-2xl bg-linear-to-br from-blue-50 to-indigo-100 text-blue-600 shadow-2xs dark:from-blue-950/50 dark:to-indigo-900/50 dark:text-blue-400">
               <Icon aria-hidden className="size-5" />
             </div>
           ) : null}
@@ -168,7 +181,7 @@ function SectionCard({
 
 function EmptyState({ icon: Icon, title, hint, action }: { icon: LucideIcon; title: string; hint?: string; action?: React.ReactNode }) {
   return (
-    <div className="flex flex-col items-center rounded-2xl border border-dashed border-slate-200 bg-gradient-to-b from-slate-50/50 to-slate-100/50 px-6 py-10 text-center dark:border-slate-800 dark:from-slate-900/30 dark:to-slate-900/60">
+    <div className="flex flex-col items-center rounded-2xl border border-dashed border-slate-200 bg-linear-to-b from-slate-50/50 to-slate-100/50 px-6 py-10 text-center dark:border-slate-800 dark:from-slate-900/30 dark:to-slate-900/60">
       <span className="grid size-12 place-items-center rounded-2xl bg-white text-blue-600 shadow-xs ring-1 ring-slate-200/60 dark:bg-slate-800 dark:text-blue-400 dark:ring-slate-700">
         <Icon aria-hidden className="size-6" />
       </span>
@@ -333,7 +346,7 @@ function PatientAvatarUpload({ givenName, version, onChanged }: { givenName: str
   return (
     <div className="relative">
       <label
-        className="group relative flex size-14 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md ring-2 ring-white/30 transition hover:scale-105"
+        className="group relative flex size-14 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-linear-to-br from-blue-500 to-indigo-600 text-white shadow-md ring-2 ring-white/30 transition hover:scale-105"
         title={uploading ? "Uploading…" : "Change profile photo"}
       >
         {hasPhoto ? (
@@ -367,7 +380,7 @@ function DashboardSkeleton() {
   return (
     <div className="space-y-6" aria-busy="true" aria-live="polite">
       <span className="sr-only">Loading your secure care record</span>
-      <div className="h-40 animate-pulse rounded-3xl bg-gradient-to-r from-slate-200 to-slate-100 dark:from-slate-800 dark:to-slate-900" />
+      <div className="h-40 animate-pulse rounded-3xl bg-linear-to-r from-slate-200 to-slate-100 dark:from-slate-800 dark:to-slate-900" />
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {[0, 1, 2, 3, 4].map((key) => (
           <div key={key} className="h-28 animate-pulse rounded-2xl bg-slate-100 dark:bg-slate-800/60" />
@@ -429,14 +442,14 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
 
   if (error || !home) {
     return (
-      <div className="mx-auto mt-10 max-w-2xl rounded-3xl border border-red-200 bg-gradient-to-b from-red-50 to-white p-8 text-center shadow-lg dark:border-red-900/50 dark:from-red-950/30 dark:to-slate-900">
+      <div className="mx-auto mt-10 max-w-2xl rounded-3xl border border-red-200 bg-linear-to-b from-red-50 to-white p-8 text-center shadow-lg dark:border-red-900/50 dark:from-red-950/30 dark:to-slate-900">
         <span className="mx-auto grid size-14 place-items-center rounded-2xl bg-red-100 text-red-600 shadow-xs dark:bg-red-900/50 dark:text-red-400">
           <ShieldAlert aria-hidden className="size-7" />
         </span>
         <h1 className="mt-4 text-xl font-black text-slate-900 dark:text-white">Patient Record Unavailable</h1>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">{error}</p>
         <button
-          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-3 font-black text-white shadow-md transition hover:from-blue-700 hover:to-indigo-700"
+          className="mt-6 inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-6 py-3 font-black text-white shadow-md transition hover:from-blue-700 hover:to-indigo-700"
           onClick={() => void load()}
           type="button"
         >
@@ -558,7 +571,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
 
       {/* ── Hero Welcome Banner ────────────────────────────────────────── */}
 
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-blue-700 via-indigo-700 to-violet-800 p-6 text-white shadow-xl sm:p-8">
+      <div className="relative overflow-hidden rounded-3xl bg-linear-to-r from-blue-700 via-indigo-700 to-violet-800 p-6 text-white shadow-xl sm:p-8">
         <div className="absolute -top-24 -right-24 size-96 rounded-full bg-white/10 blur-3xl" />
         <div className="absolute -bottom-24 -left-24 size-96 rounded-full bg-cyan-500/15 blur-3xl" />
 
@@ -656,9 +669,9 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
       {section === "home" ? (
         <>
           {/* Recovery Plan Quick Card */}
-          <div className="flex flex-col justify-between gap-4 rounded-3xl border border-emerald-200/80 bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-cyan-500/10 p-5 shadow-xs transition hover:shadow-md sm:flex-row sm:items-center dark:border-emerald-900/50 dark:from-emerald-950/30 dark:to-cyan-950/20">
+          <div className="flex flex-col justify-between gap-4 rounded-3xl border border-emerald-200/80 bg-linear-to-r from-emerald-500/10 via-teal-500/10 to-cyan-500/10 p-5 shadow-xs transition hover:shadow-md sm:flex-row sm:items-center dark:border-emerald-900/50 dark:from-emerald-950/30 dark:to-cyan-950/20">
             <div className="flex items-center gap-3.5">
-              <div className="grid size-12 place-items-center rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-700 text-white shadow-md">
+              <div className="grid size-12 place-items-center rounded-2xl bg-linear-to-br from-emerald-600 to-teal-700 text-white shadow-md">
                 <HeartPulse className="size-6" />
               </div>
               <div>
@@ -763,7 +776,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
           </div>
 
           {/* Core Content Grid */}
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="grid gap-6 lg:grid-cols-2 xl:grid-cols-3">
             {/* Next Appointment Card */}
             <SectionCard
               action={
@@ -777,9 +790,9 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
             >
               {nextAppointment ? (
                 <div className="space-y-3.5">
-                  <article className="relative overflow-hidden rounded-2xl border border-blue-200/80 bg-gradient-to-r from-blue-50/80 to-indigo-50/50 p-4.5 shadow-xs dark:border-blue-900/50 dark:from-blue-950/30 dark:to-indigo-950/20">
+                  <article className="relative overflow-hidden rounded-2xl border border-blue-200/80 bg-linear-to-r from-blue-50/80 to-indigo-50/50 p-4.5 shadow-xs dark:border-blue-900/50 dark:from-blue-950/30 dark:to-indigo-950/20">
                     <div className="flex items-center gap-4">
-                      <div className="grid shrink-0 place-items-center rounded-2xl bg-gradient-to-b from-blue-600 to-indigo-600 px-3.5 py-2.5 text-center text-white shadow-md">
+                      <div className="grid shrink-0 place-items-center rounded-2xl bg-linear-to-b from-blue-600 to-indigo-600 px-3.5 py-2.5 text-center text-white shadow-md">
                         <span className="text-[10px] font-black uppercase tracking-wider text-blue-100">
                           {new Intl.DateTimeFormat("en-PK", { month: "short" }).format(new Date(nextAppointment.startsAt))}
                         </span>
@@ -813,7 +826,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
                     <div className="mt-3 flex items-center justify-end gap-2 border-t border-blue-200/50 pt-2.5 dark:border-blue-900/40">
                       {nextAppointment.consultationMode === "ONLINE" ? (
                         <Link
-                          className="inline-flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 px-3.5 py-1.5 text-xs font-black text-white shadow-sm hover:from-purple-700 hover:to-indigo-700"
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-linear-to-r from-purple-600 to-indigo-600 px-3.5 py-1.5 text-xs font-black text-white shadow-sm hover:from-purple-700 hover:to-indigo-700"
                           href={`/patient/appointments/${nextAppointment.id}/video`}
                         >
                           <Video className="size-3.5" />
@@ -838,14 +851,16 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
                       </div>
                       <div className="flex items-center gap-2">
                         <StatusPill status={item.status} />
-                        <Link
-                          className="inline-flex items-center gap-1 rounded-lg bg-purple-100 px-2.5 py-1 text-[11px] font-bold text-purple-800 hover:bg-purple-200 dark:bg-purple-950 dark:text-purple-300"
-                          href={`/patient/appointments/${item.id}/video`}
-                          title="Open Video Consultation Room"
-                        >
-                          <Video className="size-3" />
-                          <span>Join Video</span>
-                        </Link>
+                        {item.consultationMode === "ONLINE" ? (
+                          <Link
+                            className="inline-flex items-center gap-1 rounded-lg bg-purple-100 px-2.5 py-1 text-[11px] font-bold text-purple-800 hover:bg-purple-200 dark:bg-purple-950 dark:text-purple-300"
+                            href={`/patient/appointments/${item.id}/video`}
+                            title="Open Video Consultation Room"
+                          >
+                            <Video className="size-3" />
+                            <span>Join Video</span>
+                          </Link>
+                        ) : null}
                       </div>
                     </article>
                   ))}
@@ -853,7 +868,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
               ) : (
                 <EmptyState
                   action={
-                    <Link className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700" href="/patient/appointments/book">
+                    <Link className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700" href="/patient/appointments/book">
                       <CalendarPlus className="size-4" />
                       Book an Appointment
                     </Link>
@@ -861,6 +876,100 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
                   hint="No upcoming hospital appointments scheduled."
                   icon={CalendarDays}
                   title="No Upcoming Visits"
+                />
+              )}
+            </SectionCard>
+
+            {/* Active Prescriptions Card */}
+            <SectionCard
+              action={
+                <Link className="inline-flex items-center gap-1 text-xs font-black text-emerald-700 hover:underline dark:text-emerald-400" href="/patient/care">
+                  View all <ChevronRight className="size-3.5" />
+                </Link>
+              }
+              description="Doctor prescribed medications and dosage guide"
+              icon={Pill}
+              title="Active Prescriptions"
+            >
+              {home.prescriptions.length ? (
+                <div className="space-y-3.5">
+                  {home.prescriptions.slice(0, 3).map((prescription) => {
+                    const doctorName = prescription.doctor?.staffProfile?.membership?.displayName;
+                    const rxDate = prescription.prescribedAt ? formatDate(prescription.prescribedAt) : formatDate(prescription.createdAt);
+                    return (
+                      <article className="rounded-2xl border border-emerald-200/80 bg-linear-to-r from-emerald-50/70 to-teal-50/40 p-4 shadow-2xs dark:border-emerald-900/50 dark:from-emerald-950/20 dark:to-slate-900" key={prescription.id}>
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-200/60 pb-2.5 dark:border-emerald-900/40">
+                          <div className="flex items-center gap-2">
+                            <span className="grid size-7 place-items-center rounded-lg bg-emerald-100 text-emerald-700 dark:bg-emerald-900/60 dark:text-emerald-300">
+                              <Pill className="size-3.5" />
+                            </span>
+                            <span className="text-xs font-black text-slate-800 dark:text-slate-200">
+                              {doctorName ? `Prescribed by ${doctorName}` : "Prescription Order"}
+                            </span>
+                          </div>
+                          <StatusPill status={prescription.status} />
+                        </div>
+
+                        <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                          Prescribed: {rxDate}
+                        </div>
+
+                        <ul className="mt-2.5 space-y-2">
+                          {prescription.items.map((item) => {
+                            const doseVal = item.dose || item.dosage;
+                            return (
+                              <li className="rounded-xl border border-white/80 bg-white/90 p-2.5 shadow-2xs dark:border-slate-800 dark:bg-slate-900/80" key={item.id}>
+                                <div className="flex items-baseline justify-between gap-2">
+                                  <span className="font-black text-slate-900 dark:text-white">
+                                    {item.medication.brandName ?? item.medication.genericName} {item.medication.strength ?? ""}
+                                  </span>
+                                  {item.quantity ? (
+                                    <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400">
+                                      Qty: {String(item.quantity)}
+                                    </span>
+                                  ) : null}
+                                </div>
+                                {item.medication.brandName && item.medication.genericName !== item.medication.brandName ? (
+                                  <div className="text-[11px] text-slate-500 dark:text-slate-400">{item.medication.genericName}</div>
+                                ) : null}
+                                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                  {[doseVal, item.frequency, item.duration, item.route].filter(Boolean).map((detail) => (
+                                    <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200" key={String(detail)}>
+                                      {detail}
+                                    </span>
+                                  ))}
+                                </div>
+                                {item.instructions ? (
+                                  <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-400 italic">
+                                    &ldquo;{item.instructions}&rdquo;
+                                  </p>
+                                ) : null}
+                              </li>
+                            );
+                          })}
+                        </ul>
+
+                        {prescription.instructions ? (
+                          <div className="mt-2.5 rounded-xl bg-white/80 p-2.5 text-xs text-slate-600 shadow-2xs dark:bg-slate-900/80 dark:text-slate-300">
+                            <strong className="text-emerald-700 dark:text-emerald-400">Doctor Advice: </strong>
+                            {prescription.instructions}
+                          </div>
+                        ) : null}
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <EmptyState
+                  action={
+                    <Link className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-emerald-600 to-teal-600 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:from-emerald-700 hover:to-teal-700" href="/patient/appointments/book">
+                      <CalendarPlus className="size-4" />
+                      Book Consultation
+                    </Link>
+                  }
+                  hint="Medications prescribed during doctor consultations will appear here."
+                  icon={Pill}
+                  title="No Active Prescriptions"
                 />
               )}
             </SectionCard>
@@ -939,44 +1048,68 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
           <SectionCard description="Medications prescribed by hospital practitioners" icon={Pill} title="Medicines & Daily Dosages">
             {home.prescriptions.length ? (
               <div className="space-y-4">
-                {home.prescriptions.map((prescription) => (
-                  <article className="rounded-3xl border border-purple-100 bg-gradient-to-b from-purple-50/50 to-white p-5 shadow-xs dark:border-purple-900/40 dark:from-purple-950/20 dark:to-slate-900" key={prescription.id}>
-                    <div className="flex items-center justify-between gap-2 border-b border-purple-100 pb-3 dark:border-purple-900/30">
-                      <span className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wider text-purple-700 dark:text-purple-300">
-                        <Pill className="size-4" />
-                        Prescription Order
-                      </span>
-                      <StatusPill status={prescription.status} />
-                    </div>
-
-                    <ul className="mt-3.5 space-y-3.5">
-                      {prescription.items.map((item) => (
-                        <li className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs dark:border-slate-800 dark:bg-slate-900" key={item.id}>
-                          <div className="font-black text-slate-900 dark:text-white">
-                            {item.medication.brandName ?? item.medication.genericName} {item.medication.strength}
+                {home.prescriptions.map((prescription) => {
+                  const doctorName = prescription.doctor?.staffProfile?.membership?.displayName;
+                  const rxDate = prescription.prescribedAt ? formatDate(prescription.prescribedAt) : formatDate(prescription.createdAt);
+                  return (
+                    <article className="rounded-3xl border border-purple-100 bg-linear-to-b from-purple-50/50 to-white p-5 shadow-xs dark:border-purple-900/40 dark:from-purple-950/20 dark:to-slate-900" key={prescription.id}>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-purple-100 pb-3 dark:border-purple-900/30">
+                        <div>
+                          <span className="inline-flex items-center gap-2 text-xs font-black uppercase tracking-wider text-purple-700 dark:text-purple-300">
+                            <Pill className="size-4" />
+                            Prescription Order
+                          </span>
+                          <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                            {doctorName ? `Prescribed by ${doctorName}` : "Hospital Clinical Team"} · {rxDate}
                           </div>
-                          {item.medication.brandName ? (
-                            <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{item.medication.genericName}</div>
-                          ) : null}
-                          <div className="mt-2.5 flex flex-wrap gap-2">
-                            {[item.dosage, item.frequency, item.duration].filter(Boolean).map((detail) => (
-                              <span className="rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1 text-xs font-bold text-purple-800 dark:border-purple-900 dark:bg-purple-950/60 dark:text-purple-200" key={detail}>
-                                {detail}
-                              </span>
-                            ))}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-
-                    {prescription.instructions ? (
-                      <div className="mt-3.5 rounded-2xl bg-white p-3.5 text-xs font-semibold leading-relaxed text-slate-700 shadow-2xs dark:bg-slate-900 dark:text-slate-300">
-                        <span className="font-black text-purple-700 dark:text-purple-400">Doctor Instructions: </span>
-                        {prescription.instructions}
+                        </div>
+                        <StatusPill status={prescription.status} />
                       </div>
-                    ) : null}
-                  </article>
-                ))}
+
+                      <ul className="mt-3.5 space-y-3.5">
+                        {prescription.items.map((item) => {
+                          const doseVal = item.dose || item.dosage;
+                          return (
+                            <li className="rounded-2xl border border-slate-200/80 bg-white p-4 shadow-2xs dark:border-slate-800 dark:bg-slate-900" key={item.id}>
+                              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                                <div className="font-black text-slate-900 dark:text-white">
+                                  {item.medication.brandName ?? item.medication.genericName} {item.medication.strength ?? ""}
+                                </div>
+                                {item.quantity ? (
+                                  <span className="text-xs font-bold text-purple-700 dark:text-purple-400">
+                                    Qty: {String(item.quantity)}
+                                  </span>
+                                ) : null}
+                              </div>
+                              {item.medication.brandName && item.medication.genericName !== item.medication.brandName ? (
+                                <div className="text-xs font-medium text-slate-500 dark:text-slate-400">{item.medication.genericName}</div>
+                              ) : null}
+                              <div className="mt-2.5 flex flex-wrap gap-2">
+                                {[doseVal, item.frequency, item.duration, item.route].filter(Boolean).map((detail) => (
+                                  <span className="rounded-lg border border-purple-200 bg-purple-50 px-2.5 py-1 text-xs font-bold text-purple-800 dark:border-purple-900 dark:bg-purple-950/60 dark:text-purple-200" key={String(detail)}>
+                                    {detail}
+                                  </span>
+                                ))}
+                              </div>
+                              {item.instructions ? (
+                                <p className="mt-2 text-xs italic text-slate-600 dark:text-slate-400">
+                                  &ldquo;{item.instructions}&rdquo;
+                                </p>
+                              ) : null}
+                            </li>
+                          );
+                        })}
+                      </ul>
+
+                      {prescription.instructions ? (
+                        <div className="mt-3.5 rounded-2xl bg-white p-3.5 text-xs font-semibold leading-relaxed text-slate-700 shadow-2xs dark:bg-slate-900 dark:text-slate-300">
+                          <span className="font-black text-purple-700 dark:text-purple-400">Doctor Instructions: </span>
+                          {prescription.instructions}
+                        </div>
+                      ) : null}
+                    </article>
+                  );
+                })}
               </div>
             ) : (
               <EmptyState hint="Prescriptions issued during consultations will appear here with instructions." icon={Pill} title="No Active Prescriptions" />
@@ -987,7 +1120,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
             {home.diagnosticOrders.length ? (
               <div className="space-y-3.5">
                 {home.diagnosticOrders.map((order) => (
-                  <article className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50/50 to-white p-4 shadow-2xs dark:border-blue-900/30 dark:from-blue-950/20 dark:to-slate-900" key={order.id}>
+                  <article className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-blue-100 bg-linear-to-r from-blue-50/50 to-white p-4 shadow-2xs dark:border-blue-900/30 dark:from-blue-950/20 dark:to-slate-900" key={order.id}>
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="grid size-10 shrink-0 place-items-center rounded-2xl bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300">
                         <Stethoscope className="size-5" />
@@ -1014,7 +1147,7 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
       {section === "reports" ? (
         <SectionCard
           action={
-            <Link className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700" href="/patient/documents">
+            <Link className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-4 py-2 text-xs font-black text-white shadow-sm transition hover:from-blue-700 hover:to-indigo-700" href="/patient/documents">
               <FileText className="size-3.5" />
               Manage All Documents
             </Link>

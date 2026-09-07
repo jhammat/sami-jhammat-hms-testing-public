@@ -15,6 +15,12 @@ import type {
 } from "react";
 
 import QRCode from "qrcode";
+import {
+  printTicketSlip,
+  type TicketPrintFormat,
+  type TicketSlipData,
+} from "@/lib/printing/token-ticket-slip";
+import { useWonFlowSession } from "@/app/_providers";
 
 import {
   bookReceptionAppointment,
@@ -975,6 +981,36 @@ function handleReceptionEnter(
 }
 
 export function ReceptionDeskWorkspace() {
+  const session = useWonFlowSession();
+  const [hospitalBranding, setHospitalBranding] = useState<{
+    displayName: string | null;
+    logoDataUrl: string | null;
+  }>({
+    displayName: null,
+    logoDataUrl: null,
+  });
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/v1/organization/branding", { cache: "no-store" });
+        if (res.ok) {
+          const body = (await res.json()) as { displayName?: string | null; logoDataUrl?: string | null };
+          if (active) {
+            setHospitalBranding({
+              displayName: body.displayName || null,
+              logoDataUrl: body.logoDataUrl || null,
+            });
+          }
+        }
+      } catch {}
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const directories = useWonFlowAsyncData<ReceptionDoctorDirectory>({
     key: "reception:directories",
     loader: (signal) => phaseOneApi<ReceptionDoctorDirectory>("/api/v1/reception/catalog", { signal }),
@@ -2488,7 +2524,9 @@ export function ReceptionDeskWorkspace() {
     resetBillingForPatient();
   }
 
-  async function printVisitTokenReceipt(): Promise<void> {
+  async function printVisitTokenReceipt(
+    preferredFormat: TicketPrintFormat = "thermal",
+  ): Promise<void> {
     if (selectedPatient === null) {
       setActionError(
         "Select a patient before printing the token.",
@@ -2505,177 +2543,83 @@ export function ReceptionDeskWorkspace() {
       setIssuedToken(tokenNumber);
     }
 
-    const qrPayload = [
-      "wonflow://appointment-token/",
-      encodeURIComponent(tokenNumber),
-      "?mr=",
-      encodeURIComponent(
-        selectedPatient.mrNumber,
-      ),
-    ].join("");
-
-    const qrDataUrl =
-      await QRCode.toDataURL(
-        qrPayload,
-        {
-          width: 220,
-          margin: 1,
-          errorCorrectionLevel: "M",
-        },
-      );
-
-    const printWindow = window.open(
-      "",
-      "_blank",
-      "width=860,height=900",
-    );
-
-    if (printWindow === null) {
-      setActionError(
-        "Allow browser popups to print the appointment token.",
-      );
-
-      return;
-    }
-
     const doctorName =
       selectedDoctor?.name ??
       routeDestination;
-    const serviceNames =
-      billingItems.length > 0
-        ? billingItems
-            .map((item) =>
-              escapeHtml(item.name),
-            )
-            .join(", ")
-        : "No additional services";
-    const logoUrl =
-      `${window.location.origin}/brand/wonflow-mark.png`;
 
-    printWindow.document.write(`
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>WonFlow Token &amp; Receipt — ${escapeHtml(tokenNumber)}</title>
-          <style>
-            * { box-sizing: border-box; }
-            body { margin: 0; padding: 28px; background: #f3f6fb; color: #172033; font-family: Arial, Helvetica, sans-serif; }
-            .token { width: 100%; max-width: 720px; margin: 0 auto; overflow: hidden; border: 1px solid #dbe3ef; border-radius: 24px; background: #fff; box-shadow: 0 20px 55px rgba(15,23,42,.12); }
-            .header { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 24px 28px; color: #fff; background: linear-gradient(135deg,#172554 0%,#312e81 52%,#6d28d9 100%); }
-            .brand { display: flex; align-items: center; gap: 13px; }
-            .brand img { width: 54px; height: 54px; object-fit: contain; border-radius: 16px; background: #fff; }
-            .brand-name { font-size: 26px; font-weight: 800; letter-spacing: -1px; }
-            .brand-note { margin-top: 4px; color: #c7d2fe; font-size: 11px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase; }
-            .token-label { text-align: right; }
-            .token-label small { display: block; color: #c7d2fe; font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; }
-            .token-label strong { display: block; margin-top: 5px; font-size: 19px; }
-            .content { display: grid; grid-template-columns: minmax(0,1fr) 190px; gap: 24px; padding: 26px 28px; }
-            .patient-name { font-size: 24px; font-weight: 800; letter-spacing: -.6px; }
-            .mr { margin-top: 5px; color: #4f46e5; font-size: 12px; font-weight: 800; }
-            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 22px; }
-            .item { border: 1px solid #e2e8f0; border-radius: 13px; padding: 12px 14px; background: #f8fafc; }
-            .item small, .payment small { display: block; color: #64748b; font-size: 9px; font-weight: 700; letter-spacing: .7px; text-transform: uppercase; }
-            .item strong, .payment strong { display: block; margin-top: 6px; font-size: 13px; }
-            .services { grid-column: 1 / -1; }
-            .qr { display: flex; flex-direction: column; align-items: center; justify-content: center; border: 1px solid #dbe4ff; border-radius: 18px; padding: 14px; background: #f7f7ff; }
-            .qr img { width: 152px; height: 152px; }
-            .qr strong { margin-top: 10px; color: #312e81; font-size: 11px; }
-            .payment { display: grid; grid-template-columns: repeat(3,1fr); gap: 1px; border-top: 1px solid #e2e8f0; background: #e2e8f0; }
-            .payment div { padding: 16px; background: #fff; }
-            .footer { padding: 16px 28px; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 10px; line-height: 1.6; }
-            @media print { body { padding: 0; background: #fff; } .token { box-shadow: none; } }
-          </style>
-        </head>
-        <body>
-          <article class="token">
-            <header class="header">
-              <div class="brand">
-                <img alt="WonFlow" src="${logoUrl}" />
-                 <div><div class="brand-name">WonFlow</div><div class="brand-note">Visit Token &amp; Payment Receipt</div></div>
-              </div>
-              <div class="token-label"><small>Token Number</small><strong>${escapeHtml(tokenNumber)}</strong></div>
-            </header>
-            <section class="content">
-              <div>
-                <div class="patient-name">${escapeHtml(selectedPatient.fullName)}</div>
-                <div class="mr">${escapeHtml(selectedPatient.mrNumber)}</div>
-                <div class="grid">
-                  <div class="item"><small>Purpose of Visit</small><strong>${escapeHtml(visitPurpose)}</strong></div>
-                  <div class="item"><small>Specialty</small><strong>${escapeHtml(selectedSpecialty || "Not selected")}</strong></div>
-                  <div class="item"><small>Doctor</small><strong>${escapeHtml(doctorName)}</strong></div>
-                  <div class="item"><small>Room</small><strong>${escapeHtml(issuedRoomLabel || "Not assigned")}</strong></div>
-                  <div class="item"><small>Queue Position</small><strong>${escapeHtml(String(queuePosition || 1))}</strong></div>
-                  <div class="item"><small>Estimated Waiting</small><strong>${escapeHtml(`${estimatedWaitMinutes} minutes`)}</strong></div>
-                  <div class="item"><small>Date &amp; Time</small><strong>${escapeHtml(appointmentDate)} · ${escapeHtml(appointmentTime)}</strong></div>
-                  <div class="item"><small>Mobile</small><strong>${escapeHtml(selectedPatient.mobile)}</strong></div>
-                  <div class="item"><small>${escapeHtml(selectedPatient.identityType)}</small><strong>${escapeHtml(selectedPatient.identityNumber)}</strong></div>
-                  <div class="item"><small>Route</small><strong>${escapeHtml(routeDestination)}</strong></div>
-                  <div class="item services"><small>Reason for Consultation</small><strong>${escapeHtml(consultationReason)}</strong></div>
-                  <div class="item services"><small>Services / Tests</small><strong>${serviceNames}</strong></div>
-                  <div class="item services" style="background: #eef2ff; border: 1px dashed #6366f1;">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 6px;">
-                      <small style="color: #4f46e5; font-weight: 800;">🌐 Patient Portal &amp; Video Consultation Access</small>
-                      <span style="font-size: 8px; font-weight: 800; background: #4f46e5; color: #fff; padding: 2px 6px; border-radius: 4px; text-transform: uppercase;">${bookedPortalAccess?.isNewlyCreated ? "New Account" : "Active Portal"}</span>
-                    </div>
-                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px;">
-                      <div><small>Login Portal</small><strong>${escapeHtml(window.location.origin + "/patient")}</strong></div>
-                      <div><small>Login Email / User ID</small><strong>${escapeHtml(bookedPortalAccess?.email || selectedPatient.email || `${selectedPatient.mrNumber.toLowerCase()}@patient.wonflow.com`)}</strong></div>
-                      <div><small>Portal Password</small><strong style="font-family: monospace; color: #1e1b4b;">${escapeHtml(bookedPortalAccess?.temporaryPassword || "Existing Account Password")}</strong></div>
-                      <div><small>Consultation Mode</small><strong>${consultationMode === "ONLINE" ? "🎥 Online Video Call" : "🏥 In-Person OPD"}</strong></div>
-                    </div>
-                    ${consultationMode === "ONLINE" || bookedPortalAccess?.videoCallUrl ? `<div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed #c7d2fe; font-size: 10px; color: #4338ca;"><strong>🎥 Direct Video Room Link:</strong> ${escapeHtml(window.location.origin + (bookedPortalAccess?.videoCallUrl || `/patient/appointments`))}</div>` : ""}
-                  </div>
-                </div>
-              </div>
-              <aside class="qr"><img alt="Appointment QR code" src="${qrDataUrl}" /><strong>Scan to verify token</strong></aside>
-            </section>
-            <section class="payment">
-              <div><small>Subtotal</small><strong>${escapeHtml(formatMoney(subtotal))}</strong></div>
-              <div><small>Discount</small><strong>${escapeHtml(formatMoney(calculatedDiscount))}</strong></div>
-              <div><small>Total Payable</small><strong>${escapeHtml(formatMoney(totalPayable))}</strong></div>
-              <div><small>Payment Method</small><strong>${escapeHtml(paymentMethod || "Not recorded")}</strong></div>
-              <div><small>Amount Received</small><strong>${escapeHtml(formatMoney(received))}</strong></div>
-              <div><small>Change Returned</small><strong>${escapeHtml(formatMoney(change))}</strong></div>
-              <div><small>Remaining Balance</small><strong>${escapeHtml(formatMoney(balance))}</strong></div>
-              <div><small>Payment Status</small><strong>${
-                paymentMethod === "Unpaid"
-                  ? "Unpaid"
-                  : balance > 0
-                    ? "Partially Paid"
-                    : "Paid"
-              }</strong></div>
-              <div><small>Receipt Date</small><strong>${escapeHtml(
-                new Date().toLocaleString(
-                  "en-PK",
-                  {
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  },
-                ),
-              )}</strong></div>
-            </section>
-            ${
-              billingNotes.trim() !== ""
-                ? `
-                  <section style="margin:18px 28px 0;padding:14px;border:1px solid #e2e8f0;border-radius:13px;background:#f8fafc;">
-                    <div style="color:#64748b;font-size:9px;font-weight:700;letter-spacing:.7px;text-transform:uppercase;">Billing Note</div>
-                    <div style="margin-top:7px;font-size:12px;font-weight:600;line-height:1.5;">${escapeHtml(billingNotes)}</div>
-                  </section>
-                `
-                : ""
-            }
-            <footer class="footer">This token confirms the recorded appointment or visit routing. It is not a clinical prescription or medical report. Please bring this token or its QR code when visiting the hospital.</footer>
-          </article>
-        </body>
-      </html>
-    `);
+    const resolvedHospitalName =
+      hospitalBranding.displayName ||
+      session?.orgLabel ||
+      "Hospital Care";
 
-    printWindow.document.close();
-    printWindow.onload = () => {
-      printWindow.focus();
-      printWindow.print();
+    const resolvedBranchName =
+      session?.branchLabel ||
+      "OPD & Clinical Services";
+
+    const slipData: TicketSlipData = {
+      hospitalName: resolvedHospitalName,
+      branchName: resolvedBranchName,
+      hospitalLogoUrl: hospitalBranding.logoDataUrl,
+      tokenNumber,
+      queuePosition: queuePosition || 1,
+      estimatedWaitMinutes,
+      priorityLabel: visitPurpose === "Emergency" ? "Emergency" : "Standard",
+      appointmentDate,
+      appointmentTime,
+      patient: {
+        fullName: selectedPatient.fullName,
+        mrNumber: selectedPatient.mrNumber,
+        mobile: selectedPatient.mobile,
+        gender: selectedPatient.gender,
+        ageDisplay: selectedPatient.age ? `${selectedPatient.age} Y` : undefined,
+        identityType: selectedPatient.identityType,
+        identityNumber: selectedPatient.identityNumber,
+        email: selectedPatient.email,
+      },
+      doctor: {
+        name: doctorName,
+        specialty: selectedSpecialty || "General OPD",
+        roomLabel: issuedRoomLabel || "OPD Desk",
+      },
+      visitPurpose,
+      consultationReason,
+      consultationMode,
+      routeDestination,
+      services: billingItems.map((item) => ({
+        name: item.name,
+        price: item.price,
+      })),
+      payment: {
+        subtotal,
+        discount: calculatedDiscount,
+        totalPayable,
+        amountReceived: received,
+        changeReturned: change,
+        balance,
+        paymentMethod: paymentMethod || "Cash",
+        status: paymentMethod === "Unpaid" ? "Unpaid" : balance > 0 ? "Partially Paid" : "Paid",
+        receiptDate: new Date().toLocaleString("en-PK", {
+          dateStyle: "medium",
+          timeStyle: "short",
+        }),
+        notes: billingNotes,
+      },
+      portalAccess: bookedPortalAccess ? {
+        portalUrl: "/patient",
+        loginIdentifier: bookedPortalAccess.email || selectedPatient.email || selectedPatient.mrNumber,
+        temporaryPassword: bookedPortalAccess.temporaryPassword,
+        isNewlyCreated: bookedPortalAccess.isNewlyCreated,
+        videoCallUrl: bookedPortalAccess.videoCallUrl,
+      } : null,
     };
+
+    try {
+      await printTicketSlip(slipData, preferredFormat);
+    } catch (err) {
+      setActionError(
+        err instanceof Error ? err.message : "Could not print the visit ticket.",
+      );
+    }
   }
 
   function resetDesk(): void {
@@ -3657,11 +3601,7 @@ export function ReceptionDeskWorkspace() {
                           Online video
                         </button>
                       </div>
-                      {consultationMode === "ONLINE" ? (
-                        <p className="mt-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[10px] font-bold leading-4 text-amber-800">
-                          Some online services require payment before they are confirmed. If the selected service does, the patient must transfer payment and upload proof, and the doctor confirms it before the visit.
-                        </p>
-                      ) : null}
+
                     </div>
                   ) : null}
 
@@ -4715,32 +4655,57 @@ export function ReceptionDeskWorkspace() {
                 ) : null}
 
                 <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/80 p-2">
-                <button
-                  className={[
-                    "flex h-9",
-                    "w-full items-center",
-                    "justify-center gap-2",
-                    "rounded-xl border",
-                    "text-[10px]",
-                    "font-black transition",
-                    purposeReady &&
-                    paymentConfirmed
-                      ? "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
-                      : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400",
-                  ].join(" ")}
-                  disabled={
-                    !purposeReady ||
-                    !paymentConfirmed
-                  }
-                  onClick={() => {
-                    void printVisitTokenReceipt();
-                  }}
-                  type="button"
-                >
-                  <Printer size={13} />
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className={[
+                      "flex h-9 items-center justify-center gap-1.5 rounded-xl border px-2",
+                      "text-[9px]",
+                      "font-black transition",
+                      purposeReady &&
+                      paymentConfirmed
+                        ? "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                        : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400",
+                    ].join(" ")}
+                    disabled={
+                      !purposeReady ||
+                      !paymentConfirmed
+                    }
+                    onClick={() => {
+                      void printVisitTokenReceipt("thermal");
+                    }}
+                    title="Print 80mm roll receipt"
+                    type="button"
+                  >
+                    <Printer size={12} />
 
-                  Print Visit Slip
-                </button>
+                    Thermal (80mm)
+                  </button>
+
+                  <button
+                    className={[
+                      "flex h-9 items-center justify-center gap-1.5 rounded-xl border px-2",
+                      "text-[9px]",
+                      "font-black transition",
+                      purposeReady &&
+                      paymentConfirmed
+                        ? "border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+                        : "cursor-not-allowed border-slate-200 bg-slate-50 text-slate-400",
+                    ].join(" ")}
+                    disabled={
+                      !purposeReady ||
+                      !paymentConfirmed
+                    }
+                    onClick={() => {
+                      void printVisitTokenReceipt("pdf");
+                    }}
+                    title="Print letterhead slip or save as PDF"
+                    type="button"
+                  >
+                    <FileText size={12} />
+
+                    Slip (PDF)
+                  </button>
+                </div>
 
                 <button
                   className={[
@@ -5471,9 +5436,9 @@ export function ReceptionDeskWorkspace() {
                 </button>
 
                 <button
-                  className="flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-[9px] font-black text-slate-700 hover:bg-slate-50"
+                  className="flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[9px] font-black text-slate-700 hover:bg-slate-50"
                   onClick={() => {
-                    void printVisitTokenReceipt();
+                    void printVisitTokenReceipt("thermal");
                   }}
                   type="button"
                 >
@@ -5481,7 +5446,21 @@ export function ReceptionDeskWorkspace() {
                     size={12}
                   />
 
-                  Print Visit Slip
+                  Thermal (80mm)
+                </button>
+
+                <button
+                  className="flex h-9 items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-[9px] font-black text-slate-700 hover:bg-slate-50"
+                  onClick={() => {
+                    void printVisitTokenReceipt("pdf");
+                  }}
+                  type="button"
+                >
+                  <FileText
+                    size={12}
+                  />
+
+                  Slip (PDF)
                 </button>
 
                 <button

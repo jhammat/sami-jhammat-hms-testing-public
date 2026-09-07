@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { database } from "@wonflow/database";
-import { requireTenantContext } from "@wonflow/contracts";
+import { requirePermission, requireTenantContext } from "@wonflow/contracts";
 import { requireRequestContext } from "@/lib/auth/permission-service";
 import { handleApiRoute } from "@/server/http/route-handler";
 
@@ -129,43 +129,6 @@ export function GET() {
     }
 
     // Fetch available batches to calculate live stock availability
-    const batches = await database.inventoryBatch.findMany({
-      where: {
-        tenantId: context.tenantId,
-        ...(branchId ? { branchId } : {}),
-        status: "AVAILABLE",
-        expiryDate: { gt: new Date() },
-      },
-      select: {
-        medicationId: true,
-        quantity: true,
-      },
-    });
-
-    // If no batches exist yet in branch, seed initial stock for core formulary items
-    if (batches.length === 0 && branchId) {
-      const futureExpiry = new Date();
-      futureExpiry.setFullYear(futureExpiry.getFullYear() + 2);
-
-      const inStockMedCodes = ["MED-PCM-500", "MED-AUG-625", "MED-OMP-20", "MED-IBU-400", "MED-AZI-500", "MED-MET-500", "MED-AML-5", "MED-CTZ-10", "MED-PAN-40"];
-      const inStockMeds = medications.filter((m) => inStockMedCodes.includes(m.code));
-
-      for (const med of inStockMeds) {
-        await database.inventoryBatch.create({
-          data: {
-            tenantId: context.tenantId,
-            branchId,
-            medicationId: med.id,
-            batchNumber: `BATCH-${Date.now().toString(36).toUpperCase()}`,
-            expiryDate: futureExpiry,
-            quantity: 150,
-            status: "AVAILABLE",
-          },
-        }).catch(() => {});
-      }
-    }
-
-    // Re-fetch batches after possible seeding
     const activeBatches = await database.inventoryBatch.findMany({
       where: {
         tenantId: context.tenantId,
@@ -203,6 +166,7 @@ export function POST(request: Request) {
   return handleApiRoute(async () => {
     const requestContext = await requireRequestContext();
     const context = requireTenantContext(requestContext);
+    requirePermission(context, "pharmacy.catalogue.manage");
     const body = (await request.json()) as {
       genericName: string;
       brandName?: string;
@@ -261,6 +225,7 @@ export function PATCH(request: Request) {
   return handleApiRoute(async () => {
     const requestContext = await requireRequestContext();
     const context = requireTenantContext(requestContext);
+    requirePermission(context, "pharmacy.inventory.manage");
     const body = (await request.json()) as {
       medicationId: string;
       isActive?: boolean;

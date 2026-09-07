@@ -6,7 +6,13 @@ import { hospitalAdministrationService } from "@/server/admin/hospital-administr
 
 export async function GET() {
   try {
-    return NextResponse.json({ doctors: await hospitalAdministrationService.listDoctors(await requireRequestContext()) });
+    const rc = await requireRequestContext();
+    const [doctors, branches, departments] = await Promise.all([
+      hospitalAdministrationService.listDoctors(rc),
+      hospitalAdministrationService.listBranches(rc),
+      hospitalAdministrationService.listDepartments(rc),
+    ]);
+    return NextResponse.json({ doctors, branches, departments });
   } catch (error) {
     return safeApiError(error);
   }

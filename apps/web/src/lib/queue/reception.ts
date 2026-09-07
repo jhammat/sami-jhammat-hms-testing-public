@@ -169,36 +169,6 @@ export async function loadQueueRoomOptions(): Promise<QueueRoomOption[]> {
 export const QUEUE_ROOM_OPTIONS:
   readonly QueueRoomOption[] = [
     {
-      id: "opd-room-01",
-      label: "OPD Room 01",
-      category: "consultation",
-    },
-    {
-      id: "opd-room-02",
-      label: "OPD Room 02",
-      category: "consultation",
-    },
-    {
-      id: "opd-room-03",
-      label: "OPD Room 03",
-      category: "consultation",
-    },
-    {
-      id: "opd-room-04",
-      label: "OPD Room 04",
-      category: "consultation",
-    },
-    {
-      id: "opd-room-05",
-      label: "OPD Room 05",
-      category: "consultation",
-    },
-    {
-      id: "opd-room-06",
-      label: "OPD Room 06",
-      category: "consultation",
-    },
-    {
       id: "triage-room-01",
       label: "Triage Room 01",
       category: "triage",
@@ -529,7 +499,7 @@ export function assignDemoQueueEntryRoom(
   }
 
   const room =
-    QUEUE_ROOM_OPTIONS.find(
+    readQueueRoomOptions().find(
       (option) =>
         option.id === roomId,
     );

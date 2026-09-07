@@ -1,28 +1,28 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   ArrowRight,
-  Building2,
-  Calendar,
+  Banknote,
   CalendarDays,
   CalendarPlus,
   Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  Clock,
+  CreditCard,
   FileHeart,
-  MapPin,
-  Phone,
+  FileText,
+  Plus,
   Printer,
+  Receipt,
   RefreshCw,
   Search,
-  Shield,
   Sparkles,
   Stethoscope,
+  Trash2,
   User,
   UserCheck,
   UserPlus,
@@ -35,6 +35,12 @@ import type { FormEvent, ReactNode } from "react";
 
 import { DoctorPageHeader } from "./doctor-page-header";
 import { useDoctorPortalContext } from "./doctor-portal-shell";
+import { useWonFlowSession } from "@/app/_providers";
+import {
+  printTicketSlip,
+  type TicketPrintFormat,
+  type TicketSlipData,
+} from "@/lib/printing/token-ticket-slip";
 
 import { apiGet } from "@/lib/api/client";
 import {
@@ -44,7 +50,6 @@ import {
 } from "@/lib/api/appointments";
 import type { AppointmentRecord, AppointmentSlot } from "@/lib/api/appointments";
 import {
-  checkPatientDuplicates,
   listPatients,
   useRegisterPatient,
 } from "@/lib/api/patients";
@@ -70,17 +75,52 @@ interface ReceptionCatalog {
     specialtyName: string;
     primaryBranchId: string;
     departmentName?: string | null;
+    consultationFee?: number;
+    urgentConsultationFee?: number;
   }>;
   services: Array<{
     id: string;
     name: string;
     category: string;
+    price?: number;
     doctorId?: string | null;
+    branchId?: string | null;
     durationMinutes?: number;
+    consultationModes?: ("IN_PERSON" | "ONLINE")[];
   }>;
 }
 
+interface DoctorServiceDefinition {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  durationMinutes: number;
+  priceMinorUnits: number | null;
+  currencyCode: string;
+  publiclyBookable: boolean;
+  consultationModes: ("IN_PERSON" | "ONLINE")[];
+  isActive: boolean;
+  branch: { id: string; name: string } | null;
+}
+
+export interface ExtraServiceItem {
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+}
+
 type BookingMode = "WALK_IN_QUEUE" | "SCHEDULED_SLOT" | "NO_BOOKING";
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
 
 function formatDobInput(value: string): string {
   const digits = value.replace(/\D/g, "").slice(0, 8);
@@ -123,6 +163,26 @@ const PK_CITIES = [
   "Quetta",
   "Multan",
   "Faisalabad",
+];
+
+const CHIEF_COMPLAINT_TAGS = [
+  "Routine Follow-up",
+  "Post-Op Review",
+  "Fever & Infection",
+  "Report Review",
+  "Acute Pain / Discomfort",
+  "General Consultation",
+];
+
+const CLINICAL_ADDON_PRESETS: Array<{ id: string; name: string; category: string; price: number }> = [
+  { id: "preset-dressing", name: "Wound Dressing / Cleaning", category: "PROCEDURE", price: 800 },
+  { id: "preset-suture", name: "Suture / Stitches Removal", category: "PROCEDURE", price: 1200 },
+  { id: "preset-ecg", name: "Point-of-care ECG (12-Lead)", category: "DIAGNOSTIC", price: 1500 },
+  { id: "preset-glucose", name: "Blood Glucose & Vital Signs", category: "DIAGNOSTIC", price: 300 },
+  { id: "preset-nebulization", name: "Nebulization Session", category: "PROCEDURE", price: 600 },
+  { id: "preset-injection", name: "IV / IM Injection Administration", category: "PROCEDURE", price: 500 },
+  { id: "preset-nutrition", name: "Diet & Nutrition Counseling", category: "COUNSELING", price: 1000 },
+  { id: "preset-catheter", name: "Catheter Flush / Care", category: "PROCEDURE", price: 1000 },
 ];
 
 const INPUT_CLASS_NAME = [
@@ -297,18 +357,70 @@ function PreviousHistoryUpload({ patientId }: { patientId: string }) {
   );
 }
 
+export interface RegisteredResultData {
+  patient: { id: string; patientNumber: string; displayName: string };
+  appointment?: AppointmentRecord;
+  tokenNumber?: number;
+  queueEntryId?: string;
+  consultationServiceName: string;
+  consultationFee: number;
+  extraServices: ExtraServiceItem[];
+  totalCharges: number;
+  priorityLabel: string;
+  branchName: string;
+  doctorName: string;
+  doctorSpecialty: string;
+  scheduleTimeDisplay: string;
+  bookingMode: BookingMode;
+}
+
 export function DoctorPatientRegistration() {
+  const session = useWonFlowSession();
+  const [hospitalBranding, setHospitalBranding] = useState<{
+    displayName: string | null;
+    logoDataUrl: string | null;
+  }>({
+    displayName: null,
+    logoDataUrl: null,
+  });
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const res = await fetch("/api/v1/organization/branding", { cache: "no-store" });
+        if (res.ok) {
+          const body = (await res.json()) as { displayName?: string | null; logoDataUrl?: string | null };
+          if (active) {
+            setHospitalBranding({
+              displayName: body.displayName || null,
+              logoDataUrl: body.logoDataUrl || null,
+            });
+          }
+        }
+      } catch {}
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const { doctor, doctorId: currentDoctorId, sitting, branches: doctorBranches, reload: reloadDoctorContext } =
     useDoctorPortalContext();
 
+  const searchParams = useSearchParams();
+  const urlPatientId = searchParams?.get("patientId") ?? null;
+
   const defaultBranchId = sitting?.branchId || doctorBranches[0]?.id || "";
 
-  // Search existing patient state
+  // Search existing patient state & click-outside ref
+  const searchContainerRef = useRef<HTMLDivElement>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<PatientRecord[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [existingPatient, setExistingPatient] = useState<PatientRecord | null>(null);
+  const [isLoadingUrlPatient, setIsLoadingUrlPatient] = useState(false);
 
   // Simplified Form State (Unified Full Name, Father Name, Contact, Demographics)
   const [branchId, setBranchId] = useState(defaultBranchId);
@@ -335,25 +447,36 @@ export function DoctorPatientRegistration() {
   const [bookingMode, setBookingMode] = useState<BookingMode>("WALK_IN_QUEUE");
   const [selectedDoctorId, setSelectedDoctorId] = useState(currentDoctorId || "");
   const [selectedServiceId, setSelectedServiceId] = useState("");
+  const [consultationFeeOverride, setConsultationFeeOverride] = useState<string>("");
   const [appointmentDate, setAppointmentDate] = useState(todayDateInputValue());
   const [selectedSlot, setSelectedSlot] = useState<AppointmentSlot>();
   const [consultationMode, setConsultationMode] = useState<"IN_PERSON" | "ONLINE">("IN_PERSON");
   const [visitReason, setVisitReason] = useState("");
   const [queuePriority, setQueuePriority] = useState<number>(0);
 
+  // Extra Services & Charges State
+  const [extraServices, setExtraServices] = useState<ExtraServiceItem[]>([]);
+  const [selectedCatalogExtraId, setSelectedCatalogExtraId] = useState("");
+  const [showCustomExtraInput, setShowCustomExtraInput] = useState(false);
+  const [customExtraName, setCustomExtraName] = useState("");
+  const [customExtraPrice, setCustomExtraPrice] = useState("");
+
   // Catalog & Slot loading
   const [catalog, setCatalog] = useState<ReceptionCatalog>();
+  const [doctorServices, setDoctorServices] = useState<DoctorServiceDefinition[]>([]);
   const [slots, setSlots] = useState<AppointmentSlot[]>([]);
   const [slotLoading, setSlotLoading] = useState(false);
   const [slotUnavailableReason, setSlotUnavailableReason] = useState<string>();
 
   // Confirmation result
-  const [registeredResult, setRegisteredResult] = useState<{
-    patient: { id: string; patientNumber: string; displayName: string };
-    appointment?: AppointmentRecord;
-    tokenNumber?: number;
-    queueEntryId?: string;
-  }>();
+  const [registeredResult, setRegisteredResult] = useState<RegisteredResultData>();
+
+  // Smoothly scroll to top upon confirmation so the full displayed token slip is in view
+  useEffect(() => {
+    if (registeredResult) {
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+  }, [registeredResult]);
 
   const { mutate: registerPatient, saveState: registerSaveState } = useRegisterPatient();
   const bookMutation = useBookAppointment();
@@ -361,15 +484,20 @@ export function DoctorPatientRegistration() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string>("");
 
-  /*
-   * The branch defaults to the doctor's own once it is known, and only while
-   * the registrar has not chosen one. Adjusting during render rather than in
-   * an effect is React's documented way to derive state from a prop that
-   * arrives late: it settles before the browser paints, so the select never
-   * flashes empty and then fills in.
-   */
-  const [branchDefaultApplied, setBranchDefaultApplied] = useState(false);
+  // Close search dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(event.target as Node)) {
+        setIsSearchOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
 
+  const [branchDefaultApplied, setBranchDefaultApplied] = useState(false);
   if (defaultBranchId && !branchId && !branchDefaultApplied) {
     setBranchDefaultApplied(true);
     setBranchId(defaultBranchId);
@@ -394,15 +522,26 @@ export function DoctorPatientRegistration() {
     };
   }, [currentDoctorId]);
 
+  // Also load doctor-specific configured services and pricing
+  useEffect(() => {
+    let active = true;
+    apiGet<{ services?: { services?: DoctorServiceDefinition[] } }>("/api/v1/doctor/services")
+      .then((res) => {
+        if (active && res?.services?.services) {
+          const svcs = res.services.services.filter((s) => s.isActive);
+          setDoctorServices(svcs);
+          if (svcs.length > 0 && !selectedServiceId) {
+            setSelectedServiceId(svcs[0].id);
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [selectedServiceId]);
+
   // Live Patient Search (Auto-fill existing records)
-  /*
-   * Debounced patient search.
-   *
-   * `set-state-in-effect` cannot distinguish "cascading render" from "clear
-   * the stale list and raise the spinner before the request goes out", which
-   * is all that happens here. Disabled for the block rather than line by
-   * line, so the reason is stated once.
-   */
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!searchQuery.trim() || searchQuery.trim().length < 2) {
@@ -413,7 +552,7 @@ export function DoctorPatientRegistration() {
     let active = true;
     setIsSearching(true);
     const timer = setTimeout(() => {
-      listPatients({ query: searchQuery.trim(), pageSize: 6 })
+      listPatients({ query: searchQuery.trim(), pageSize: 8 })
         .then((res) => {
           if (active) {
             setSearchResults(res.patients);
@@ -424,7 +563,7 @@ export function DoctorPatientRegistration() {
         .finally(() => {
           if (active) setIsSearching(false);
         });
-    }, 300);
+    }, 250);
 
     return () => {
       active = false;
@@ -432,7 +571,7 @@ export function DoctorPatientRegistration() {
     };
   }, [searchQuery]);
 
-  // Auto-fill when existing patient is selected
+  // Auto-fill ALL form fields when existing patient is selected - Direct selection
   const selectExistingPatient = (p: PatientRecord) => {
     setExistingPatient(p);
     const full = `${p.givenName || ""} ${p.middleName || ""} ${p.familyName || ""}`.trim();
@@ -458,6 +597,12 @@ export function DoctorPatientRegistration() {
     if (p.consentData?.bloodGroup) setBloodGroup(p.consentData.bloodGroup);
     if (p.consentData?.notes) setNotes(p.consentData.notes);
 
+    // If patient has address, blood group, emergency contact or notes, show the section
+    if (p.address?.text || p.consentData?.bloodGroup || p.guardianData?.emergencyContactName || p.consentData?.notes) {
+      setShowOptionalFields(true);
+    }
+
+    setBookingMode((current) => (current === "NO_BOOKING" ? "WALK_IN_QUEUE" : current));
     setSearchQuery("");
     setIsSearchOpen(false);
     setErrors({});
@@ -479,8 +624,34 @@ export function DoctorPatientRegistration() {
     setEmergencyContactName("");
     setEmergencyContactPhone("");
     setNotes("");
+    setShowOptionalFields(false);
+    setExtraServices([]);
     setErrors({});
   };
+
+  // Preload patient if patientId query param is supplied (e.g. from Patients Directory "Book Visit")
+  useEffect(() => {
+    if (!urlPatientId) return;
+    let active = true;
+    setIsLoadingUrlPatient(true);
+    apiGet<{ patient: PatientRecord }>(`/api/v1/patients/${encodeURIComponent(urlPatientId)}`)
+      .then((res) => {
+        if (active && res.patient) {
+          selectExistingPatient(res.patient);
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setSubmitError("Could not load requested patient record. Please search by name or MRN.");
+        }
+      })
+      .finally(() => {
+        if (active) setIsLoadingUrlPatient(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [urlPatientId]);
 
   // Load slots when in SCHEDULED_SLOT mode
   useEffect(() => {
@@ -530,18 +701,202 @@ export function DoctorPatientRegistration() {
       displayName: doctor?.displayName ?? "Doctor",
       specialtyName: doctor?.specialtyName ?? "Clinical Doctor",
       primaryBranchId: defaultBranchId,
+      consultationFee: 3000,
     };
   }, [catalog, selectedDoctorId, currentDoctorId, doctor, defaultBranchId]);
+
+  // Primary Consultation Service and Fee calculation
+  const effectiveConsultationService = useMemo(() => {
+    const docSvc = doctorServices.find((s) => s.id === selectedServiceId);
+    if (docSvc) {
+      return {
+        id: docSvc.id,
+        name: docSvc.name,
+        price: docSvc.priceMinorUnits !== null ? docSvc.priceMinorUnits / 100 : 3000,
+        durationMinutes: docSvc.durationMinutes,
+        category: "CONSULTATION",
+      };
+    }
+    const catSvc = catalog?.services.find((s) => s.id === selectedServiceId);
+    if (catSvc) {
+      return {
+        id: catSvc.id,
+        name: catSvc.name,
+        price: catSvc.price ?? (selectedDoctorRecord?.consultationFee || 3000),
+        durationMinutes: catSvc.durationMinutes || 20,
+        category: catSvc.category,
+      };
+    }
+    return {
+      id: selectedServiceId || "default-consult",
+      name: "General Clinical Consultation",
+      price: selectedDoctorRecord?.consultationFee || 3000,
+      durationMinutes: 20,
+      category: "CONSULTATION",
+    };
+  }, [doctorServices, catalog, selectedServiceId, selectedDoctorRecord]);
+
+  const consultationFee = useMemo(() => {
+    if (consultationFeeOverride.trim() !== "") {
+      const parsed = Number(consultationFeeOverride);
+      return !Number.isNaN(parsed) && parsed >= 0 ? parsed : effectiveConsultationService.price;
+    }
+    return effectiveConsultationService.price;
+  }, [consultationFeeOverride, effectiveConsultationService]);
+
+  const totalExtraServicesFee = useMemo(() => {
+    return extraServices.reduce((sum, item) => sum + item.price, 0);
+  }, [extraServices]);
+
+  const totalCharges = useMemo(() => {
+    return consultationFee + totalExtraServicesFee;
+  }, [consultationFee, totalExtraServicesFee]);
+
+  // Non-consultation hospital services available for extra add-on
+  const otherHospitalServices = useMemo(() => {
+    if (!catalog?.services) return [];
+    return catalog.services.filter(
+      (s) => s.category !== "CONSULTATION" && s.id !== selectedServiceId,
+    );
+  }, [catalog, selectedServiceId]);
+
+  // Toggle quick clinical preset extra service
+  const togglePresetService = (preset: { id: string; name: string; category: string; price: number }) => {
+    setExtraServices((prev) => {
+      const exists = prev.some((p) => p.name.toLowerCase() === preset.name.toLowerCase());
+      if (exists) {
+        return prev.filter((p) => p.name.toLowerCase() !== preset.name.toLowerCase());
+      }
+      return [...prev, preset];
+    });
+  };
+
+  const addCatalogServiceAsExtra = (serviceId: string) => {
+    if (!serviceId) return;
+    const svc = catalog?.services.find((s) => s.id === serviceId);
+    if (!svc) return;
+    setExtraServices((prev) => {
+      if (prev.some((p) => p.name.toLowerCase() === svc.name.toLowerCase())) return prev;
+      return [
+        ...prev,
+        {
+          id: svc.id,
+          name: svc.name,
+          category: svc.category,
+          price: svc.price ?? 1000,
+        },
+      ];
+    });
+    setSelectedCatalogExtraId("");
+  };
+
+  const addCustomExtraService = () => {
+    if (!customExtraName.trim()) return;
+    const priceNum = Number(customExtraPrice) || 0;
+    setExtraServices((prev) => [
+      ...prev,
+      {
+        id: `custom-${Date.now()}`,
+        name: customExtraName.trim(),
+        category: "EXTRA_SERVICE",
+        price: priceNum,
+      },
+    ]);
+    setCustomExtraName("");
+    setCustomExtraPrice("");
+    setShowCustomExtraInput(false);
+  };
+
+  const removeExtraService = (id: string) => {
+    setExtraServices((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  // High-fidelity token receipt print (Thermal 80mm & PDF Slip)
+  const printTokenSlip = async (
+    result: RegisteredResultData,
+    format: TicketPrintFormat = "thermal",
+  ) => {
+    const dateStr = new Date().toLocaleDateString("en-PK", {
+      weekday: "short",
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+    const timeStr = new Date().toLocaleTimeString("en-PK", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    const slipData: TicketSlipData = {
+      hospitalName: hospitalBranding.displayName || session?.orgLabel || "Hospital Care",
+      branchName: result.branchName || session?.branchLabel || "OPD & Clinical Services",
+      hospitalLogoUrl: hospitalBranding.logoDataUrl,
+      tokenNumber: String(result.tokenNumber ?? "01").padStart(2, "0"),
+      queuePosition: result.tokenNumber ?? 1,
+      priorityLabel: result.priorityLabel,
+      appointmentDate: dateStr,
+      appointmentTime: timeStr,
+      patient: {
+        fullName: result.patient.displayName,
+        mrNumber: result.patient.patientNumber,
+        mobile: mobileNumber || undefined,
+        identityType: "CNIC",
+        identityNumber: cnicNumber ? formatPatientCnic(cnicNumber) : undefined,
+      },
+      doctor: {
+        name: result.doctorName,
+        specialty: result.doctorSpecialty,
+        roomLabel: sitting?.roomLabel || "Doctor Chamber",
+      },
+      visitPurpose: result.bookingMode === "WALK_IN_QUEUE" ? "Walk-in OPD" : "Scheduled Consultation",
+      consultationReason: visitReason || undefined,
+      services: [
+        { name: result.consultationServiceName, price: result.consultationFee },
+        ...(result.extraServices || []).map((s) => ({ name: s.name, price: s.price })),
+      ],
+      payment: {
+        subtotal: result.totalCharges,
+        discount: 0,
+        totalPayable: result.totalCharges,
+        amountReceived: result.totalCharges,
+        changeReturned: 0,
+        balance: 0,
+        paymentMethod: "Cash / Counter Collection",
+        status: "Paid",
+      },
+      portalAccess: {
+        portalUrl: "/patient",
+        loginIdentifier: result.patient.patientNumber,
+      },
+    };
+
+    try {
+      await printTicketSlip(slipData, format);
+    } catch {
+      // Graceful fallback
+    }
+  };
 
   async function submit(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     setSubmitError("");
     const newErrors: Record<string, string> = {};
 
-    if (!fullName.trim()) newErrors.fullName = "Enter patient full name.";
-    if (!fatherName.trim()) newErrors.fatherName = "Enter father or guardian name.";
-    if (!mobileNumber.trim() || mobileNumber.replace(/\D/g, "").length < 10) {
-      newErrors.mobileNumber = "Enter a valid mobile number.";
+    // For new patients, require name, guardian, and mobile.
+    // For direct existing patients, no questions asked: accept their existing records.
+    if (!existingPatient) {
+      if (!fullName.trim()) newErrors.fullName = "Enter patient full name.";
+      if (!fatherName.trim()) newErrors.fatherName = "Enter father or guardian name.";
+      if (!mobileNumber.trim() || mobileNumber.replace(/\D/g, "").length < 10) {
+        newErrors.mobileNumber = "Enter a valid mobile number.";
+      }
+    } else if (!fullName.trim() && !existingPatient.givenName && !existingPatient.familyName) {
+      newErrors.fullName = "Patient name is required.";
+    }
+
+    if (bookingMode === "SCHEDULED_SLOT" && !selectedSlot) {
+      newErrors.slot = "Please select an available appointment time slot.";
+      setSubmitError("Please select an available appointment time slot.");
     }
 
     if (Object.keys(newErrors).length > 0) {
@@ -553,7 +908,8 @@ export function DoctorPatientRegistration() {
     try {
       let patientId = existingPatient?.id;
       let patientNumber = existingPatient?.patientNumber;
-      let patientDisplayName = fullName.trim();
+      let patientDisplayName =
+        fullName.trim() || `${existingPatient?.givenName || ""} ${existingPatient?.familyName || ""}`.trim() || "Patient";
 
       // 1. If not an existing patient, register in DB
       if (!patientId) {
@@ -599,6 +955,13 @@ export function DoctorPatientRegistration() {
       let bookedAppointment: AppointmentRecord | undefined;
       let tokenNumber: number | undefined;
       let queueEntryId: string | undefined;
+      const effectiveBranchId = branchId || defaultBranchId || undefined;
+
+      // Prepare comprehensive reason & charges breakdown for clinical & billing record
+      const extraItemsSummary = extraServices
+        .map((s) => `${s.name} (PKR ${s.price.toLocaleString()})`)
+        .join(", ");
+      const finalReason = visitReason.trim() || effectiveConsultationService.name;
 
       // 2. Perform Booking
       if (bookingMode === "WALK_IN_QUEUE") {
@@ -609,10 +972,11 @@ export function DoctorPatientRegistration() {
         const bookRes = await bookMutation.mutate({
           patientId,
           doctorId: selectedDoctorId || currentDoctorId,
+          branchId: effectiveBranchId,
           serviceId: selectedServiceId || undefined,
           startsAt: startIso,
           endsAt: endIso,
-          reason: visitReason || notes || "Walk-in Doctor Consultation",
+          reason: finalReason,
           source: "doctor-portal",
           consultationMode,
           idempotencyKey: `walkin-${patientId}-${Date.now()}`,
@@ -625,7 +989,8 @@ export function DoctorPatientRegistration() {
             input: {
               queueDate: todayDateInputValue(),
               priority: queuePriority,
-              notes: visitReason || "Walk-in Queue",
+              notes: finalReason,
+              branchId: effectiveBranchId,
             },
           });
           if (checkInRes.appointment?.tokenNumber) {
@@ -646,10 +1011,11 @@ export function DoctorPatientRegistration() {
         const bookRes = await bookMutation.mutate({
           patientId,
           doctorId: selectedDoctorId || currentDoctorId,
+          branchId: effectiveBranchId,
           serviceId: selectedServiceId || undefined,
           startsAt: selectedSlot.startsAt,
           endsAt: selectedSlot.endsAt,
-          reason: visitReason || notes || "Scheduled Consultation",
+          reason: finalReason,
           source: "doctor-portal",
           consultationMode,
           idempotencyKey: `sched-${patientId}-${Date.now()}`,
@@ -663,6 +1029,24 @@ export function DoctorPatientRegistration() {
         appointment: bookedAppointment,
         tokenNumber,
         queueEntryId,
+        consultationServiceName: effectiveConsultationService.name,
+        consultationFee,
+        extraServices,
+        totalCharges,
+        priorityLabel: queuePriority === 2 ? "Urgent" : queuePriority === 1 ? "Priority" : "Normal",
+        branchName: doctorBranches.find((b) => b.id === (branchId || defaultBranchId))?.name ?? "Main Hospital",
+        doctorName: selectedDoctorRecord?.displayName ?? doctor?.displayName ?? "Attending Clinician",
+        doctorSpecialty: selectedDoctorRecord?.specialtyName ?? doctor?.specialtyName ?? "Clinical Specialist",
+        scheduleTimeDisplay: bookedAppointment
+          ? new Date(bookedAppointment.startsAt).toLocaleDateString("en-PK", {
+              weekday: "short",
+              day: "numeric",
+              month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "Walk-in Queue for Today",
+        bookingMode,
       });
     } catch (cause) {
       setSubmitError(readError(cause));
@@ -679,9 +1063,9 @@ export function DoctorPatientRegistration() {
     setBookingMode("WALK_IN_QUEUE");
   }
 
-  // Render Post-Registration & Booking Slip
+  // Render Post-Registration & Booking Slip with prominent on-screen displayable Token Slip
   if (registeredResult) {
-    const { patient, appointment, tokenNumber, queueEntryId } = registeredResult;
+    const { patient, tokenNumber, queueEntryId } = registeredResult;
     return (
       <div className="space-y-6 pb-12">
         <DoctorPageHeader
@@ -691,83 +1075,118 @@ export function DoctorPatientRegistration() {
           title="Registration &amp; Booking Confirmed"
         />
 
-        <div className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
+        <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <div className="space-y-5">
-            <section className="relative overflow-hidden rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50/90 via-white to-emerald-50/40 p-5 shadow-[0_20px_50px_rgba(16,185,129,0.12)] sm:p-6 dark:border-emerald-500/30 dark:bg-slate-900">
-              <div className="flex flex-col gap-4 border-b border-emerald-100/80 pb-5 sm:flex-row sm:items-center sm:justify-between dark:border-emerald-500/20">
-                <div className="flex items-center gap-3.5">
-                  <span className="grid size-12 place-items-center rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white shadow-lg shadow-emerald-500/30 sm:size-14">
-                    <CheckCircle2 size={28} />
-                  </span>
-                  <div>
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-300">
-                      Confirmed
+            {/* Displayable On-Screen Official Visit Token Slip */}
+            <article className="relative overflow-hidden rounded-3xl border-2 border-indigo-200/90 bg-white shadow-xl dark:border-indigo-800/80 dark:bg-slate-900">
+              {/* Slip Header */}
+              <div className="bg-gradient-to-r from-[#172554] via-[#312e81] to-[#4338ca] p-5 text-white">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="grid size-10 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/20">
+                      <Receipt className="size-5 text-indigo-200" />
                     </span>
-                    <h2 className="text-lg font-black text-slate-950 dark:text-white sm:text-2xl">
-                      {patient.displayName}
-                    </h2>
-                    <p className="text-xs font-bold text-emerald-700 dark:text-emerald-400">
-                      MRN: {patient.patientNumber}
-                    </p>
+                    <div>
+                      <h2 className="text-base font-black tracking-tight">{registeredResult.branchName}</h2>
+                      <p className="text-[11px] font-bold uppercase tracking-wider text-indigo-200">
+                        OPD Visit Token &amp; Clinical Charges Receipt
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className="rounded-full bg-emerald-500/20 px-3 py-1 font-mono text-xs font-black uppercase text-emerald-300 ring-1 ring-emerald-400/30">
+                    Confirmed
+                  </span>
+                </div>
+              </div>
+
+              {/* Huge Live Queue Token Display */}
+              <div className="border-b-2 border-dashed border-slate-200 bg-slate-50/60 p-6 text-center dark:border-slate-800 dark:bg-slate-800/40">
+                <span className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                  Live Queue Token Number
+                </span>
+                <div className="my-1 font-mono text-5xl font-black text-indigo-600 sm:text-6xl dark:text-indigo-400">
+                  #{String(tokenNumber ?? "01").padStart(2, "0")}
+                </div>
+                <div className="flex items-center justify-center gap-2">
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-black uppercase tracking-wider ${
+                      registeredResult.priorityLabel === "Urgent"
+                        ? "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                        : registeredResult.priorityLabel === "Priority"
+                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                        : "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300"
+                    }`}
+                  >
+                    <Zap className="size-3" />
+                    {registeredResult.priorityLabel} Priority Order
+                  </span>
+                  <span className="text-xs text-slate-400">·</span>
+                  <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                    {registeredResult.bookingMode === "WALK_IN_QUEUE" ? "Walk-in Queue" : "Scheduled Slot"}
+                  </span>
+                </div>
+              </div>
+
+              {/* Patient & Clinical Details Grid */}
+              <div className="grid gap-3 p-5 sm:grid-cols-2 text-xs border-b border-slate-100 dark:border-slate-800">
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/50">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Patient Details</span>
+                  <p className="mt-1 text-sm font-black text-slate-900 dark:text-white">{patient.displayName}</p>
+                  <p className="font-mono text-xs font-bold text-indigo-600 dark:text-indigo-400">MRN: {patient.patientNumber}</p>
+                  {mobileNumber ? <p className="mt-0.5 text-slate-600 dark:text-slate-300">{mobileNumber}</p> : null}
+                  {cnicNumber ? <p className="font-mono text-[11px] text-slate-500">CNIC: {formatPatientCnic(cnicNumber)}</p> : null}
+                </div>
+
+                <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/50">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Consulting Clinician</span>
+                  <p className="mt-1 text-sm font-black text-slate-900 dark:text-white">{registeredResult.doctorName}</p>
+                  <p className="text-xs font-semibold text-slate-600 dark:text-slate-300">{registeredResult.doctorSpecialty}</p>
+                  <p className="mt-1 text-xs text-indigo-600 dark:text-indigo-400">{registeredResult.scheduleTimeDisplay}</p>
+                </div>
+              </div>
+
+              {/* Itemized Services & Charges Receipt Section */}
+              <div className="p-5 bg-slate-50/40 dark:bg-slate-900/60">
+                <div className="flex items-center gap-2 mb-3">
+                  <Banknote className="size-4 text-emerald-600 dark:text-emerald-400" />
+                  <span className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                    Clinical Services &amp; Charges Breakdown
+                  </span>
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 bg-white p-3.5 space-y-2 dark:border-slate-800 dark:bg-slate-800">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-900 dark:text-white">{registeredResult.consultationServiceName}</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      PKR {registeredResult.consultationFee.toLocaleString()}
+                    </span>
+                  </div>
+
+                  {registeredResult.extraServices.map((svc) => (
+                    <div className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300" key={svc.id}>
+                      <span>+ {svc.name}</span>
+                      <span className="font-mono font-medium">PKR {svc.price.toLocaleString()}</span>
+                    </div>
+                  ))}
+
+                  <div className="pt-2 mt-2 border-t border-dashed border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                    <span className="text-xs font-black uppercase text-slate-900 dark:text-white">Total Payable Charges:</span>
+                    <span className="font-mono text-base font-black text-emerald-600 dark:text-emerald-400">
+                      PKR {registeredResult.totalCharges.toLocaleString()}
+                    </span>
                   </div>
                 </div>
 
-                {tokenNumber ? (
-                  <div className="flex flex-col items-center justify-center rounded-2xl border-2 border-emerald-300 bg-white px-5 py-2.5 shadow-sm dark:border-emerald-700 dark:bg-slate-800">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-                      Live Queue Token
-                    </span>
-                    <span className="text-2xl font-black tracking-tight text-emerald-600 sm:text-3xl dark:text-emerald-400">
-                      #{String(tokenNumber).padStart(2, "0")}
-                    </span>
+                {visitReason ? (
+                  <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-bold">Chief Complaint:</span> {visitReason}
                   </div>
                 ) : null}
               </div>
 
-              {/* Booking Summary */}
-              <div className="mt-5 rounded-2xl border border-slate-200/80 bg-white/90 p-4 shadow-xs dark:border-slate-800 dark:bg-slate-800/80">
-                <h3 className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                  <Calendar className="size-3.5 text-indigo-500" />
-                  Clinical Booking Details
-                </h3>
-                <div className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
-                  <div>
-                    <span className="font-semibold text-slate-500 dark:text-slate-400">Consulting Doctor:</span>
-                    <p className="font-bold text-slate-900 dark:text-white">
-                      {selectedDoctorRecord?.displayName} ({selectedDoctorRecord?.specialtyName})
-                    </p>
-                  </div>
-                  <div>
-                    <span className="font-semibold text-slate-500 dark:text-slate-400">Location / Branch:</span>
-                    <p className="font-bold text-slate-900 dark:text-white">
-                      {doctorBranches.find((b) => b.id === branchId)?.name ?? "Main Hospital"}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="font-semibold text-slate-500 dark:text-slate-400">Schedule:</span>
-                    <p className="font-bold text-indigo-700 dark:text-indigo-400">
-                      {appointment
-                        ? new Date(appointment.startsAt).toLocaleDateString("en-PK", {
-                            weekday: "short",
-                            day: "numeric",
-                            month: "short",
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "Walk-in Queue for Today"}
-                    </p>
-                  </div>
-                  <div>
-                    <span className="font-semibold text-slate-500 dark:text-slate-400">Status:</span>
-                    <p className="font-bold text-emerald-600 dark:text-emerald-400">
-                      {tokenNumber ? `In Live Queue (Token #${tokenNumber})` : appointment ? "Booked" : "Active Profile"}
-                    </p>
-                  </div>
-                </div>
-              </div>
-
               {/* Action Buttons */}
-              <div className="mt-6 flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-3 p-5 bg-white border-t border-slate-100 dark:bg-slate-900 dark:border-slate-800">
                 <Link
                   className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-700 px-6 text-xs font-black text-white shadow-lg shadow-indigo-500/25 transition hover:scale-[1.02]"
                   href={
@@ -781,12 +1200,21 @@ export function DoctorPatientRegistration() {
                 </Link>
 
                 <button
-                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-xs font-bold text-slate-700 shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                  onClick={() => window.print()}
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-50 border border-indigo-200 px-4 text-xs font-black text-indigo-700 shadow-xs transition hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300"
+                  onClick={() => void printTokenSlip(registeredResult, "thermal")}
                   type="button"
                 >
-                  <Printer className="size-4 text-slate-500" />
-                  Print Token Slip
+                  <Printer className="size-4 text-indigo-600 dark:text-indigo-400" />
+                  Thermal (80mm)
+                </button>
+
+                <button
+                  className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-50 border border-indigo-200 px-4 text-xs font-black text-indigo-700 shadow-xs transition hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300"
+                  onClick={() => void printTokenSlip(registeredResult, "pdf")}
+                  type="button"
+                >
+                  <FileText className="size-4 text-indigo-600 dark:text-indigo-400" />
+                  Slip (PDF)
                 </button>
 
                 <button
@@ -795,7 +1223,7 @@ export function DoctorPatientRegistration() {
                   type="button"
                 >
                   <UserPlus className="size-4 text-slate-500" />
-                  Register Another Patient
+                  Book Another Patient
                 </button>
 
                 <Link
@@ -806,7 +1234,7 @@ export function DoctorPatientRegistration() {
                   Patients Directory
                 </Link>
               </div>
-            </section>
+            </article>
 
             <SectionCard
               description="Attach past discharge summaries, scan reports or prescriptions."
@@ -840,6 +1268,10 @@ export function DoctorPatientRegistration() {
                   <span className="text-slate-500">Phone:</span>
                   <span className="font-bold text-slate-800 dark:text-slate-200">{mobileNumber || "N/A"}</span>
                 </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Total Charges:</span>
+                  <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">PKR {registeredResult.totalCharges.toLocaleString()}</span>
+                </div>
               </div>
             </div>
           </aside>
@@ -848,18 +1280,40 @@ export function DoctorPatientRegistration() {
     );
   }
 
-  // Fast Unified Form
   return (
     <div className="space-y-5 pb-12">
       <DoctorPageHeader
-        description="Search existing hospital patients to auto-fill or register a new patient with instant queue check-in."
-        eyebrow="Clinical Registration Desk"
-        icon={<UserPlus size={20} />}
-        title="Register &amp; Book Patient"
+        action={
+          existingPatient ? (
+            <button
+              className="inline-flex items-center gap-1.5 rounded-xl border border-indigo-200 bg-white/80 px-3 py-1.5 text-xs font-bold text-indigo-700 shadow-sm transition hover:bg-white hover:border-indigo-300 dark:border-indigo-800 dark:bg-slate-800 dark:text-indigo-300"
+              onClick={clearExistingPatient}
+              type="button"
+            >
+              <UserPlus size={14} />
+              <span>Register New Patient</span>
+            </button>
+          ) : undefined
+        }
+        description={
+          existingPatient
+            ? `MRN: ${existingPatient.patientNumber} · Selecting services & booking OPD visit.`
+            : "Search existing hospital patients to auto-fill or register a new patient with instant queue check-in."
+        }
+        eyebrow={existingPatient ? "Direct Patient Booking Desk" : "Clinical Registration Desk"}
+        icon={existingPatient ? <CalendarPlus size={20} /> : <UserPlus size={20} />}
+        title={
+          existingPatient
+            ? `Book Visit: ${existingPatient.givenName} ${existingPatient.familyName}`
+            : "Register & Book Patient"
+        }
       />
 
-      {/* TOP SEARCH & AUTO-FILL BAR */}
-      <div className="relative rounded-3xl border-2 border-indigo-200 bg-gradient-to-r from-indigo-50/80 via-white to-violet-50/80 p-4 shadow-sm backdrop-blur-md dark:border-indigo-800/60 dark:bg-slate-900">
+      {/* TOP SEARCH & AUTO-FILL BAR (relative z-40 overflow-visible guarantees dropdown floats above all lower cards) */}
+      <div
+        className="relative z-40 overflow-visible rounded-3xl border-2 border-indigo-200 bg-gradient-to-r from-indigo-50 via-white to-violet-50 p-4 shadow-sm dark:border-indigo-800/60 dark:bg-slate-900"
+        ref={searchContainerRef}
+      >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2">
             <span className="grid size-8 place-items-center rounded-xl bg-indigo-600 text-white shadow-xs">
@@ -867,19 +1321,19 @@ export function DoctorPatientRegistration() {
             </span>
             <div>
               <h3 className="text-xs font-black uppercase tracking-wider text-indigo-950 dark:text-indigo-200">
-                Quick Search &amp; Auto-Fill
+                {existingPatient ? "Switch or Search Another Patient" : "Quick Search & Select Patient"}
               </h3>
               <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                Search existing patients by Name, Phone, CNIC, or MRN.
+                Search existing hospital patients by Name, Phone (0300...), CNIC, or MRN.
               </p>
             </div>
           </div>
 
           {existingPatient ? (
-            <div className="flex items-center gap-2 rounded-xl bg-emerald-100/80 px-3 py-1.5 dark:bg-emerald-950/60">
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-100/90 px-3 py-1.5 dark:border-emerald-800 dark:bg-emerald-950/60">
               <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
               <span className="text-xs font-bold text-emerald-900 dark:text-emerald-200">
-                Auto-filled: {existingPatient.givenName} {existingPatient.familyName} ({existingPatient.patientNumber})
+                Selected: {existingPatient.givenName} {existingPatient.familyName} ({existingPatient.patientNumber})
               </span>
               <button
                 className="ml-1 rounded-md p-1 text-slate-500 hover:bg-emerald-200 dark:hover:bg-emerald-900"
@@ -893,7 +1347,7 @@ export function DoctorPatientRegistration() {
           ) : null}
         </div>
 
-        <div className="relative mt-3">
+        <div className="relative mt-3 z-40 overflow-visible">
           <div className="relative flex items-center">
             <Search className="pointer-events-none absolute left-3.5 size-4 text-slate-400" />
             <input
@@ -905,10 +1359,14 @@ export function DoctorPatientRegistration() {
               onFocus={() => {
                 if (searchResults.length > 0) setIsSearchOpen(true);
               }}
-              placeholder="Search by patient name, phone (0300...), CNIC (35201...), or MRN..."
+              placeholder={
+                existingPatient
+                  ? `Search to change patient from ${existingPatient.givenName}…`
+                  : "Search by patient name, phone (0300...), CNIC (35201...), or MRN..."
+              }
               value={searchQuery}
             />
-            {isSearching ? (
+            {isSearching || isLoadingUrlPatient ? (
               <RefreshCw className="absolute right-3.5 size-4 animate-spin text-indigo-600" />
             ) : searchQuery ? (
               <button
@@ -916,6 +1374,7 @@ export function DoctorPatientRegistration() {
                 onClick={() => {
                   setSearchQuery("");
                   setSearchResults([]);
+                  setIsSearchOpen(false);
                 }}
                 type="button"
               >
@@ -924,9 +1383,9 @@ export function DoctorPatientRegistration() {
             ) : null}
           </div>
 
-          {/* Autocomplete Dropdown */}
+          {/* Autocomplete Dropdown - elevated z-50 with shadow-2xl so it always floats over lower sections */}
           {isSearchOpen && searchResults.length > 0 ? (
-            <div className="absolute z-30 mt-2 w-full overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-80 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_rgba(15,23,42,0.22)] ring-1 ring-black/10 dark:border-slate-800 dark:bg-slate-900">
               <div className="border-b border-slate-100 bg-slate-50 px-3.5 py-2 text-[10px] font-black uppercase tracking-wider text-slate-500 dark:border-slate-800 dark:bg-slate-800">
                 Found {searchResults.length} existing patient record{searchResults.length === 1 ? "" : "s"} — click to auto-fill:
               </div>
@@ -949,7 +1408,7 @@ export function DoctorPatientRegistration() {
                           </p>
                         </div>
                         <span className="inline-flex items-center gap-1 rounded-lg bg-indigo-600 px-2.5 py-1 text-[10px] font-black text-white shadow-xs">
-                          Auto-fill
+                          Select Patient
                           <ArrowRight className="size-3" />
                         </span>
                       </button>
@@ -970,198 +1429,54 @@ export function DoctorPatientRegistration() {
         </div>
       ) : null}
 
-      {/* MAIN FORM GRID */}
-      <form onSubmit={(event) => void submit(event)}>
+      {/* MAIN FORM GRID (relative z-10 ensures search dropdown at z-40 stays completely on top) */}
+      <form className="relative z-10" onSubmit={(event) => void submit(event)}>
         <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
           <div className="space-y-5">
-            {/* BOOKING MODE SELECTOR FIRST (Quick & Intuitive) */}
+            {/* 1. PATIENT INFORMATION SECTION (Auto-filled if existing patient, no questions asked) */}
             <SectionCard
-              badge="Quick Action"
-              description="Choose how to process this patient visit."
-              icon={<Zap className="size-5" />}
-              title="Visit Booking Mode"
-            >
-              <div className="grid gap-3 sm:grid-cols-3">
-                <button
-                  className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
-                    bookingMode === "WALK_IN_QUEUE"
-                      ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
-                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
-                  }`}
-                  onClick={() => setBookingMode("WALK_IN_QUEUE")}
-                  type="button"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="grid size-7 place-items-center rounded-xl bg-indigo-600 text-white">
-                      <Zap className="size-3.5" />
-                    </span>
-                    {bookingMode === "WALK_IN_QUEUE" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
-                  </div>
-                  <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
-                    ⚡ Walk-in &amp; Live Queue
-                  </strong>
-                  <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                    Assigns live queue token for today.
-                  </span>
-                </button>
-
-                <button
-                  className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
-                    bookingMode === "SCHEDULED_SLOT"
-                      ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
-                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
-                  }`}
-                  onClick={() => setBookingMode("SCHEDULED_SLOT")}
-                  type="button"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="grid size-7 place-items-center rounded-xl bg-violet-600 text-white">
-                      <CalendarDays className="size-3.5" />
-                    </span>
-                    {bookingMode === "SCHEDULED_SLOT" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
-                  </div>
-                  <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
-                    📅 Schedule Slot
-                  </strong>
-                  <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                    Pick specific date and sitting time.
-                  </span>
-                </button>
-
-                <button
-                  className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
-                    bookingMode === "NO_BOOKING"
-                      ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
-                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
-                  }`}
-                  onClick={() => setBookingMode("NO_BOOKING")}
-                  type="button"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="grid size-7 place-items-center rounded-xl bg-slate-600 text-white">
-                      <User className="size-3.5" />
-                    </span>
-                    {bookingMode === "NO_BOOKING" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
-                  </div>
-                  <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
-                    📝 Register Only
-                  </strong>
-                  <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                    Save record without visit booking.
-                  </span>
-                </button>
-              </div>
-
-              {/* Slot and Date picker if SCHEDULED_SLOT */}
-              {bookingMode === "SCHEDULED_SLOT" ? (
-                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3 dark:border-slate-800 dark:bg-slate-800/40">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Appointment Date">
-                      <input
-                        className={INPUT_CLASS_NAME}
-                        min={todayDateInputValue()}
-                        onChange={(e) => setAppointmentDate(e.target.value)}
-                        type="date"
-                        value={appointmentDate}
-                      />
-                    </Field>
-
-                    <Field label="Consultation Mode">
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          className={`rounded-xl border py-2.5 text-xs font-bold transition ${
-                            consultationMode === "IN_PERSON"
-                              ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
-                              : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                          }`}
-                          onClick={() => setConsultationMode("IN_PERSON")}
-                          type="button"
-                        >
-                          In-Person
-                        </button>
-                        <button
-                          className={`rounded-xl border py-2.5 text-xs font-bold transition ${
-                            consultationMode === "ONLINE"
-                              ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
-                              : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                          }`}
-                          onClick={() => setConsultationMode("ONLINE")}
-                          type="button"
-                        >
-                          Online Video
-                        </button>
-                      </div>
-                    </Field>
-                  </div>
-
-                  {/* Slots list */}
-                  <div className="pt-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
-                        Available Slots on {appointmentDate}:
-                      </span>
-                      {slotLoading ? (
-                        <span className="flex items-center gap-1 text-[11px] text-indigo-600">
-                          <RefreshCw className="size-3 animate-spin" /> Loading…
-                        </span>
-                      ) : null}
-                    </div>
-
-                    {slotUnavailableReason ? (
-                      <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{slotUnavailableReason}</p>
-                    ) : (
-                      <div className="mt-2.5 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
-                        {slots.map((slot) => {
-                          const isSelected = selectedSlot?.start === slot.start;
-                          return (
-                            <button
-                              className={`rounded-xl border p-2 text-center transition ${
-                                isSelected
-                                  ? "border-indigo-600 bg-indigo-600 text-white shadow-xs"
-                                  : slot.available
-                                  ? "border-slate-200 bg-white text-slate-800 hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                                  : "cursor-not-allowed border-slate-100 bg-slate-100/50 text-slate-400 dark:border-slate-800 dark:bg-slate-800/30"
-                              }`}
-                              disabled={!slot.available}
-                              key={slot.start}
-                              onClick={() => setSelectedSlot(slot)}
-                              type="button"
-                            >
-                              <span className="text-xs font-black">{slot.label}</span>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-
-              {/* Chief complaint / Visit reason */}
-              {bookingMode !== "NO_BOOKING" ? (
-                <div className="mt-3">
-                  <Field label="Chief Complaint / Reason for Visit">
-                    <input
-                      className={INPUT_CLASS_NAME}
-                      onChange={(e) => setVisitReason(e.target.value)}
-                      placeholder="e.g. Follow-up consultation, fever, abdominal discomfort"
-                      value={visitReason}
-                    />
-                  </Field>
-                </div>
-              ) : null}
-            </SectionCard>
-
-            {/* SIMPLIFIED PATIENT DETAILS */}
-            <SectionCard
-              badge="Identity"
-              description="Essential patient information."
+              badge={existingPatient ? "Record Auto-filled" : "New Patient Record"}
+              description={
+                existingPatient
+                  ? "All patient demographics are auto-filled directly from hospital records."
+                  : "Essential patient demographic information."
+              }
               icon={<User className="size-5" />}
               title="Patient Information"
             >
+              {existingPatient ? (
+                <div className="mb-4 flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50/70 p-3.5 dark:border-emerald-800 dark:bg-emerald-950/40">
+                  <div className="flex items-center gap-3">
+                    <div className="grid size-10 place-items-center rounded-xl bg-emerald-600 text-xs font-black text-white shadow-xs">
+                      {fullName.slice(0, 2).toUpperCase() || "PT"}
+                    </div>
+                    <div>
+                      <span className="rounded bg-emerald-200/80 px-1.5 py-0.5 font-mono text-[9px] font-black uppercase tracking-wider text-emerald-900 dark:bg-emerald-900 dark:text-emerald-200">
+                        MRN: {existingPatient.patientNumber}
+                      </span>
+                      <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                        {fullName}
+                      </h3>
+                      <p className="text-[11px] text-slate-500">
+                        {mobileNumber ? `Phone: ${mobileNumber} · ` : ""}
+                        {gender.toUpperCase()} · {estimatedAgeDisplay || "Age TBD"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-xs transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    onClick={clearExistingPatient}
+                    type="button"
+                  >
+                    <X className="size-3.5 text-slate-400" />
+                    <span>Change Patient</span>
+                  </button>
+                </div>
+              ) : null}
+
               <div className="grid gap-4 sm:grid-cols-2">
-                {/* Single Full Name field */}
-                <Field error={errors.fullName} label="Patient Full Name" required>
+                <Field error={errors.fullName} label="Patient Full Name" required={!existingPatient}>
                   <input
                     className={INPUT_CLASS_NAME}
                     onChange={(e) => {
@@ -1169,13 +1484,12 @@ export function DoctorPatientRegistration() {
                       if (errors.fullName) setErrors((prev) => ({ ...prev, fullName: "" }));
                     }}
                     placeholder="e.g. Muhammad Javaid"
-                    required
+                    required={!existingPatient}
                     value={fullName}
                   />
                 </Field>
 
-                {/* Single Father / Guardian Name */}
-                <Field error={errors.fatherName} label="Father / Guardian Name" required>
+                <Field error={errors.fatherName} label="Father / Guardian Name" required={!existingPatient}>
                   <input
                     className={INPUT_CLASS_NAME}
                     onChange={(e) => {
@@ -1183,13 +1497,12 @@ export function DoctorPatientRegistration() {
                       if (errors.fatherName) setErrors((prev) => ({ ...prev, fatherName: "" }));
                     }}
                     placeholder="Father or legal guardian"
-                    required
+                    required={!existingPatient}
                     value={fatherName}
                   />
                 </Field>
 
-                {/* Mobile Number */}
-                <Field error={errors.mobileNumber} label="Mobile Phone Number" required>
+                <Field error={errors.mobileNumber} label="Mobile Phone Number" required={!existingPatient}>
                   <input
                     className={INPUT_CLASS_NAME}
                     onChange={(e) => {
@@ -1197,12 +1510,11 @@ export function DoctorPatientRegistration() {
                       if (errors.mobileNumber) setErrors((prev) => ({ ...prev, mobileNumber: "" }));
                     }}
                     placeholder="03001234567"
-                    required
+                    required={!existingPatient}
                     value={mobileNumber}
                   />
                 </Field>
 
-                {/* CNIC / B-Form */}
                 <Field helperText="13 digits without dashes" label="CNIC / B-Form Number">
                   <input
                     className={INPUT_CLASS_NAME}
@@ -1213,7 +1525,6 @@ export function DoctorPatientRegistration() {
                   />
                 </Field>
 
-                {/* Gender quick pill selector */}
                 <div>
                   <span className="mb-1.5 block text-xs font-bold text-slate-700 dark:text-slate-300">
                     Gender
@@ -1236,7 +1547,6 @@ export function DoctorPatientRegistration() {
                   </div>
                 </div>
 
-                {/* Date of Birth (DD/MM/YYYY) & Estimated Age */}
                 <div className="grid grid-cols-2 gap-3">
                   <Field helperText="Format: DD/MM/YYYY" label="Date of Birth">
                     <input
@@ -1280,7 +1590,6 @@ export function DoctorPatientRegistration() {
                 </div>
               </div>
 
-              {/* City quick pills */}
               <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">
                 <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
                   City:
@@ -1303,7 +1612,6 @@ export function DoctorPatientRegistration() {
                 </div>
               </div>
 
-              {/* Collapsible Additional Details (Address, Blood Group, Emergency, Notes) */}
               <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
                 <button
                   className="flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
@@ -1311,7 +1619,7 @@ export function DoctorPatientRegistration() {
                   type="button"
                 >
                   {showOptionalFields ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
-                  {showOptionalFields ? "Hide Extra Details" : "+ Add Blood Group, Address & Clinical Notes (Optional)"}
+                  {showOptionalFields ? "Hide Extra Details" : "+ Add Blood Group, Address & Notes (Optional)"}
                 </button>
 
                 {showOptionalFields ? (
@@ -1372,6 +1680,526 @@ export function DoctorPatientRegistration() {
                 ) : null}
               </div>
             </SectionCard>
+
+            {/* 2. DOCTOR SERVICES, CHARGES & CLINICAL ADD-ONS (Requirement 4) */}
+            <SectionCard
+              badge="Pricing & Billing"
+              description="Configure primary consultation service, fee, and any extra clinical procedures."
+              icon={<Banknote className="size-5" />}
+              title="Doctor Services &amp; Charges"
+            >
+              {/* Primary Consultation Service Selection */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                    Primary Consultation Service:
+                  </span>
+                  <span className="font-mono text-xs font-black text-indigo-700 dark:text-indigo-400">
+                    Base Fee: PKR {consultationFee.toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <select
+                      className={SELECT_CLASS_NAME}
+                      onChange={(e) => setSelectedServiceId(e.target.value)}
+                      value={selectedServiceId}
+                    >
+                      {/* Doctor-specific consultation services */}
+                      {doctorServices.map((svc) => (
+                        <option key={svc.id} value={svc.id}>
+                          {svc.name} — PKR {svc.priceMinorUnits ? (svc.priceMinorUnits / 100).toLocaleString() : "3,000"} ({svc.durationMinutes} min)
+                        </option>
+                      ))}
+                      {/* Catalog services */}
+                      {catalog?.services
+                        ?.filter((s) => s.category === "CONSULTATION" && !doctorServices.some((d) => d.id === s.id))
+                        .map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name} — PKR {s.price ? s.price.toLocaleString() : "3,000"} ({s.durationMinutes || 20} min)
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className="relative flex items-center">
+                      <span className="absolute left-3 text-xs font-bold text-slate-400">PKR</span>
+                      <input
+                        className={`${INPUT_CLASS_NAME} pl-12`}
+                        min="0"
+                        onChange={(e) => setConsultationFeeOverride(e.target.value)}
+                        placeholder={`Fee override (Default: ${effectiveConsultationService.price})`}
+                        type="number"
+                        value={consultationFeeOverride}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Extra Services & Clinical Procedures Section */}
+              <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                      Extra Services &amp; Clinical Procedures
+                    </h3>
+                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                      Add extra clinical procedures, dressing, ECG, or lab orders to this visit.
+                    </p>
+                  </div>
+                  <button
+                    className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+                    onClick={() => setShowCustomExtraInput(!showCustomExtraInput)}
+                    type="button"
+                  >
+                    <Plus className="size-3.5" />
+                    <span>Add Custom Service</span>
+                  </button>
+                </div>
+
+                {/* Quick Add-on Preset Chips */}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {CLINICAL_ADDON_PRESETS.map((preset) => {
+                    const isAdded = extraServices.some((s) => s.name.toLowerCase() === preset.name.toLowerCase());
+                    return (
+                      <button
+                        className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                          isAdded
+                            ? "border-indigo-600 bg-indigo-50 text-indigo-700 shadow-xs dark:bg-indigo-950/60 dark:text-indigo-300"
+                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                        key={preset.id}
+                        onClick={() => togglePresetService(preset)}
+                        type="button"
+                      >
+                        {isAdded ? <Check className="size-3.5 text-indigo-600" /> : <Plus className="size-3.5 text-slate-400" />}
+                        <span>{preset.name}</span>
+                        <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                          +PKR {preset.price.toLocaleString()}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Additional Catalog Services Dropdown */}
+                {otherHospitalServices.length > 0 ? (
+                  <div className="mt-3 flex items-center gap-2">
+                    <select
+                      className={`${SELECT_CLASS_NAME} h-9 text-xs`}
+                      onChange={(e) => {
+                        setSelectedCatalogExtraId(e.target.value);
+                        addCatalogServiceAsExtra(e.target.value);
+                      }}
+                      value={selectedCatalogExtraId}
+                    >
+                      <option value="">+ Add other Hospital Diagnostic / Service…</option>
+                      {otherHospitalServices.map((svc) => (
+                        <option key={svc.id} value={svc.id}>
+                          {svc.name} ({svc.category}) — PKR {svc.price?.toLocaleString() || "1,000"}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                ) : null}
+
+                {/* Custom Extra Service Form */}
+                {showCustomExtraInput ? (
+                  <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3 sm:flex-row dark:border-indigo-900/40 dark:bg-indigo-950/30">
+                    <input
+                      className={`${INPUT_CLASS_NAME} h-9 text-xs flex-1`}
+                      onChange={(e) => setCustomExtraName(e.target.value)}
+                      placeholder="Procedure / service name (e.g. Suture Removal)"
+                      value={customExtraName}
+                    />
+                    <div className="relative flex items-center sm:w-36">
+                      <span className="absolute left-3 text-xs font-bold text-slate-400">PKR</span>
+                      <input
+                        className={`${INPUT_CLASS_NAME} h-9 pl-11 text-xs`}
+                        min="0"
+                        onChange={(e) => setCustomExtraPrice(e.target.value)}
+                        placeholder="Price"
+                        type="number"
+                        value={customExtraPrice}
+                      />
+                    </div>
+                    <button
+                      className="inline-flex h-9 items-center justify-center gap-1 rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white shadow-xs hover:bg-indigo-700"
+                      onClick={addCustomExtraService}
+                      type="button"
+                    >
+                      <Plus className="size-3.5" />
+                      Add
+                    </button>
+                  </div>
+                ) : null}
+
+                {/* Active Added Extra Services List */}
+                {extraServices.length > 0 ? (
+                  <div className="mt-4 space-y-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                      Selected Extra Services ({extraServices.length}):
+                    </span>
+                    <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+                      {extraServices.map((svc) => (
+                        <div className="flex items-center justify-between px-3.5 py-2.5 text-xs" key={svc.id}>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-900 dark:text-white">{svc.name}</span>
+                            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                              {svc.category}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono font-bold text-slate-900 dark:text-white">
+                              PKR {svc.price.toLocaleString()}
+                            </span>
+                            <button
+                              className="text-slate-400 hover:text-rose-600"
+                              onClick={() => removeExtraService(svc.id)}
+                              type="button"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Total Itemized Charges Summary Box */}
+                <div className="mt-4 flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-800 dark:bg-emerald-950/40">
+                  <div className="flex items-center gap-2.5">
+                    <span className="grid size-9 place-items-center rounded-xl bg-emerald-600 text-white shadow-xs">
+                      <CreditCard className="size-4" />
+                    </span>
+                    <div>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                        Total Visit Charges
+                      </span>
+                      <p className="text-xs text-slate-600 dark:text-slate-300">
+                        Consultation (PKR {consultationFee.toLocaleString()})
+                        {extraServices.length > 0 ? ` + ${extraServices.length} extra service${extraServices.length === 1 ? "" : "s"} (PKR ${totalExtraServicesFee.toLocaleString()})` : ""}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-right">
+                    <span className="font-mono text-xl font-black text-emerald-700 dark:text-emerald-300">
+                      PKR {totalCharges.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+
+            {/* 3. APPOINTMENT & QUEUE BOOKING CONFIGURATION */}
+            <SectionCard
+              badge={existingPatient ? "Booking Details" : "Visit Action"}
+              description="Choose how this patient's consultation is scheduled or queued."
+              icon={<Zap className="size-5" />}
+              title={existingPatient ? "Appointment & Live Queue" : "Visit Booking Mode"}
+            >
+              <div className={`grid gap-3 ${existingPatient ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
+                <button
+                  className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
+                    bookingMode === "WALK_IN_QUEUE"
+                      ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
+                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
+                  }`}
+                  onClick={() => setBookingMode("WALK_IN_QUEUE")}
+                  type="button"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="grid size-7 place-items-center rounded-xl bg-indigo-600 text-white">
+                      <Zap className="size-3.5" />
+                    </span>
+                    {bookingMode === "WALK_IN_QUEUE" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
+                  </div>
+                  <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
+                    ⚡ Walk-in &amp; Live Queue
+                  </strong>
+                  <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    Assigns live queue token for today.
+                  </span>
+                </button>
+
+                <button
+                  className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
+                    bookingMode === "SCHEDULED_SLOT"
+                      ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
+                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
+                  }`}
+                  onClick={() => setBookingMode("SCHEDULED_SLOT")}
+                  type="button"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="grid size-7 place-items-center rounded-xl bg-violet-600 text-white">
+                      <CalendarDays className="size-3.5" />
+                    </span>
+                    {bookingMode === "SCHEDULED_SLOT" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
+                  </div>
+                  <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
+                    📅 Schedule Slot
+                  </strong>
+                  <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    Pick specific date and sitting time.
+                  </span>
+                </button>
+
+                {!existingPatient ? (
+                  <button
+                    className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
+                      bookingMode === "NO_BOOKING"
+                        ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
+                        : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
+                    }`}
+                    onClick={() => setBookingMode("NO_BOOKING")}
+                    type="button"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="grid size-7 place-items-center rounded-xl bg-slate-600 text-white">
+                        <User className="size-3.5" />
+                      </span>
+                      {bookingMode === "NO_BOOKING" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
+                    </div>
+                    <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
+                      📝 Register Only
+                    </strong>
+                    <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      Save record without visit booking.
+                    </span>
+                  </button>
+                ) : null}
+              </div>
+
+              {/* Live Queue Priority (if Walk-in Queue) */}
+              {bookingMode === "WALK_IN_QUEUE" ? (
+                <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3.5 dark:border-indigo-900/40 dark:bg-indigo-950/30">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Queue Priority:
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-500">
+                      {queuePriority === 0 ? "Normal order" : queuePriority === 1 ? "Priority care" : "Urgent / Emergency"}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {[
+                      { label: "Normal (0)", val: 0 },
+                      { label: "Priority (1)", val: 1 },
+                      { label: "Urgent (2)", val: 2 },
+                    ].map((item) => (
+                      <button
+                        className={`rounded-xl border py-2 text-xs font-bold transition ${
+                          queuePriority === item.val
+                            ? "border-indigo-600 bg-indigo-600 text-white shadow-xs"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                        key={item.val}
+                        onClick={() => setQueuePriority(item.val)}
+                        type="button"
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Slot and Date picker if SCHEDULED_SLOT */}
+              {bookingMode === "SCHEDULED_SLOT" ? (
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3 dark:border-slate-800 dark:bg-slate-800/40">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Appointment Date">
+                      <input
+                        className={INPUT_CLASS_NAME}
+                        min={todayDateInputValue()}
+                        onChange={(e) => setAppointmentDate(e.target.value)}
+                        type="date"
+                        value={appointmentDate}
+                      />
+                    </Field>
+
+                    <Field label="Consultation Delivery Mode">
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          className={`rounded-xl border py-2.5 text-xs font-bold transition ${
+                            consultationMode === "IN_PERSON"
+                              ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                              : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          }`}
+                          onClick={() => setConsultationMode("IN_PERSON")}
+                          type="button"
+                        >
+                          In-Person Clinic
+                        </button>
+                        <button
+                          className={`rounded-xl border py-2.5 text-xs font-bold transition ${
+                            consultationMode === "ONLINE"
+                              ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                              : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          }`}
+                          onClick={() => setConsultationMode("ONLINE")}
+                          type="button"
+                        >
+                          Online Video
+                        </button>
+                      </div>
+                    </Field>
+                  </div>
+
+                  {/* Slots list */}
+                  <div className="pt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                        Available Sitting Slots on {appointmentDate}:
+                      </span>
+                      {slotLoading ? (
+                        <span className="flex items-center gap-1 text-[11px] text-indigo-600">
+                          <RefreshCw className="size-3 animate-spin" /> Loading…
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {slotUnavailableReason ? (
+                      <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{slotUnavailableReason}</p>
+                    ) : (
+                      <div className="mt-2.5 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+                        {slots.map((slot) => {
+                          const isSelected = selectedSlot?.start === slot.start;
+                          return (
+                            <button
+                              className={`rounded-xl border p-2 text-center transition ${
+                                isSelected
+                                  ? "border-indigo-600 bg-indigo-600 text-white shadow-xs"
+                                  : slot.available
+                                  ? "border-slate-200 bg-white text-slate-800 hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                  : "cursor-not-allowed border-slate-100 bg-slate-100/50 text-slate-400 dark:border-slate-800 dark:bg-slate-800/30"
+                              }`}
+                              disabled={!slot.available}
+                              key={slot.start}
+                              onClick={() => setSelectedSlot(slot)}
+                              type="button"
+                            >
+                              <span className="text-xs font-black">{slot.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* CLINICIAN & BRANCH DETAILS */}
+              <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 dark:border-slate-800">
+                <Field label="Consulting Doctor">
+                  <select
+                    className={SELECT_CLASS_NAME}
+                    onChange={(e) => setSelectedDoctorId(e.target.value)}
+                    value={selectedDoctorId || currentDoctorId}
+                  >
+                    {catalog?.practitioners.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.displayName} ({doc.specialtyName}) {doc.id === currentDoctorId ? "— You" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="Hospital Branch / Location">
+                  <select
+                    className={SELECT_CLASS_NAME}
+                    onChange={(e) => setBranchId(e.target.value)}
+                    value={branchId || defaultBranchId}
+                  >
+                    {doctorBranches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                {/* Delivery Mode if in Walk-in */}
+                {bookingMode === "WALK_IN_QUEUE" ? (
+                  <Field label="Delivery Mode">
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className={`rounded-xl border py-2.5 text-xs font-bold transition ${
+                          consultationMode === "IN_PERSON"
+                            ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                        onClick={() => setConsultationMode("IN_PERSON")}
+                        type="button"
+                      >
+                        In-Person
+                      </button>
+                      <button
+                        className={`rounded-xl border py-2.5 text-xs font-bold transition ${
+                          consultationMode === "ONLINE"
+                            ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                        onClick={() => setConsultationMode("ONLINE")}
+                        type="button"
+                      >
+                        Online Video
+                      </button>
+                    </div>
+                  </Field>
+                ) : null}
+              </div>
+
+              {/* Chief complaint / Visit reason */}
+              {bookingMode !== "NO_BOOKING" ? (
+                <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">
+                  <Field label="Chief Complaint / Reason for Visit">
+                    <input
+                      className={INPUT_CLASS_NAME}
+                      onChange={(e) => setVisitReason(e.target.value)}
+                      placeholder="e.g. Follow-up consultation, fever, abdominal discomfort"
+                      value={visitReason}
+                    />
+                  </Field>
+
+                  {/* Quick complaint tags */}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {CHIEF_COMPLAINT_TAGS.map((tag) => (
+                      <button
+                        className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                          visitReason === tag
+                            ? "bg-indigo-600 text-white shadow-xs"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                        key={tag}
+                        onClick={() => setVisitReason(tag)}
+                        type="button"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </SectionCard>
+
+            {/* Document attachment if existing patient */}
+            {existingPatient ? (
+              <SectionCard
+                badge="Optional"
+                description="Attach previous discharge summaries or scan reports to this visit."
+                icon={<FileHeart className="size-5" />}
+                title="Medical History &amp; Records"
+              >
+                <PreviousHistoryUpload patientId={existingPatient.id} />
+              </SectionCard>
+            ) : null}
           </div>
 
           {/* RIGHT LIVE SUMMARY & SUBMIT PANEL */}
@@ -1380,7 +2208,7 @@ export function DoctorPatientRegistration() {
               <div className="flex items-center justify-between border-b border-slate-100 pb-3 dark:border-slate-800">
                 <span className="flex items-center gap-1.5 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">
                   <Sparkles className="size-3.5 text-indigo-500" />
-                  Live Preview
+                  Live Booking Summary
                 </span>
                 <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[9px] font-black text-indigo-600 dark:bg-indigo-950/60 dark:text-indigo-400">
                   {existingPatient ? "Existing Patient" : "New Patient"}
@@ -1390,23 +2218,29 @@ export function DoctorPatientRegistration() {
               {/* Avatar & Patient Name */}
               <div className="mt-4 flex items-center gap-3">
                 <div className="grid size-12 shrink-0 place-items-center rounded-2xl bg-gradient-to-tr from-indigo-600 to-violet-700 font-black text-white shadow-md shadow-indigo-500/20">
-                  {fullName.trim() ? fullName.slice(0, 2).toUpperCase() : "PT"}
+                  {fullName.trim() ? fullName.slice(0, 2).toUpperCase() : existingPatient ? (existingPatient.givenName?.[0] || "P") : "PT"}
                 </div>
                 <div className="min-w-0 flex-1">
                   <h3 className="truncate text-sm font-black text-slate-950 dark:text-white">
-                    {fullName.trim() || "Patient Name"}
+                    {fullName.trim() || (existingPatient ? `${existingPatient.givenName} ${existingPatient.familyName}` : "Patient Name")}
                   </h3>
                   <p className="truncate text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                    {fatherName ? `s/o / d/o ${fatherName}` : "Guardian not entered"}
+                    {existingPatient
+                      ? `MRN: ${existingPatient.patientNumber}`
+                      : fatherName
+                      ? `s/o / d/o ${fatherName}`
+                      : "Guardian not entered"}
                   </p>
                 </div>
               </div>
 
               {/* Badges */}
               <div className="mt-3 flex flex-wrap gap-1.5 text-[10px]">
-                <span className="rounded-lg bg-slate-100 px-2 py-0.5 font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
-                  {gender.toUpperCase()}
-                </span>
+                {gender !== "unknown" ? (
+                  <span className="rounded-lg bg-slate-100 px-2 py-0.5 font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    {gender.toUpperCase()}
+                  </span>
+                ) : null}
                 <span className="rounded-lg bg-slate-100 px-2 py-0.5 font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
                   {estimatedAgeDisplay || "AGE TBD"}
                 </span>
@@ -1423,19 +2257,54 @@ export function DoctorPatientRegistration() {
                   <span className="text-slate-500">Phone:</span>
                   <span className="font-bold text-slate-900 dark:text-white">{mobileNumber || "Required"}</span>
                 </div>
+                {cnicNumber ? (
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">CNIC:</span>
+                    <span className="font-mono font-bold text-slate-900 dark:text-white">
+                      {formatPatientCnic(cnicNumber)}
+                    </span>
+                  </div>
+                ) : null}
                 <div className="flex justify-between">
-                  <span className="text-slate-500">CNIC:</span>
-                  <span className="font-mono font-bold text-slate-900 dark:text-white">
-                    {formatPatientCnic(cnicNumber) || "Optional"}
+                  <span className="text-slate-500">Branch:</span>
+                  <span className="font-bold text-slate-900 dark:text-white">
+                    {doctorBranches.find((b) => b.id === (branchId || defaultBranchId))?.name ?? "Main Hospital"}
                   </span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">City:</span>
-                  <span className="font-bold text-slate-900 dark:text-white">{city}</span>
                 </div>
               </div>
 
-              {/* Booking Target Summary (NO FEE DISPLAY) */}
+              {/* Charges & Billing Summary Card in Live Preview */}
+              <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-2 dark:border-emerald-900/40 dark:bg-emerald-950/30">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                    Charges &amp; Billing Summary
+                  </span>
+                  <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400">
+                    PKR {totalCharges.toLocaleString()}
+                  </span>
+                </div>
+
+                <div className="space-y-1 text-xs text-slate-700 dark:text-slate-300">
+                  <div className="flex justify-between">
+                    <span className="truncate pr-2">{effectiveConsultationService.name}:</span>
+                    <span className="font-mono font-bold">PKR {consultationFee.toLocaleString()}</span>
+                  </div>
+                  {extraServices.map((svc) => (
+                    <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400" key={svc.id}>
+                      <span className="truncate pr-2">+ {svc.name}:</span>
+                      <span className="font-mono">PKR {svc.price.toLocaleString()}</span>
+                    </div>
+                  ))}
+                  <div className="pt-1.5 mt-1 border-t border-dashed border-emerald-200 dark:border-emerald-800 flex justify-between font-black text-slate-900 dark:text-white">
+                    <span>Total Estimated Bill:</span>
+                    <span className="font-mono text-emerald-700 dark:text-emerald-300">
+                      PKR {totalCharges.toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Booking Target Summary */}
               <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 dark:border-indigo-900/40 dark:bg-indigo-950/30">
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black uppercase tracking-wider text-indigo-800 dark:text-indigo-300">
@@ -1452,6 +2321,11 @@ export function DoctorPatientRegistration() {
                     ? `📅 ${selectedSlot?.label ?? "Select Slot"} on ${appointmentDate}`
                     : "No visit booked (Save profile only)"}
                 </p>
+                {visitReason ? (
+                  <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-400 truncate">
+                    Reason: <em>{visitReason}</em>
+                  </p>
+                ) : null}
               </div>
 
               {/* Primary Submit Button */}
@@ -1461,12 +2335,24 @@ export function DoctorPatientRegistration() {
                   disabled={isSubmitting || registerSaveState === "saving"}
                   type="submit"
                 >
-                  <UserPlus className="size-4" />
+                  {isSubmitting ? (
+                    <RefreshCw className="size-4 animate-spin" />
+                  ) : bookingMode === "WALK_IN_QUEUE" ? (
+                    <Zap className="size-4" />
+                  ) : bookingMode === "SCHEDULED_SLOT" ? (
+                    <CalendarPlus className="size-4" />
+                  ) : (
+                    <UserPlus className="size-4" />
+                  )}
                   {isSubmitting
                     ? "Processing…"
                     : existingPatient
-                    ? `Confirm Booking for ${fullName.split(" ")[0] || "Patient"}`
-                    : `Register & Book Patient`}
+                    ? bookingMode === "WALK_IN_QUEUE"
+                      ? `Issue Token · PKR ${totalCharges.toLocaleString()}`
+                      : bookingMode === "SCHEDULED_SLOT"
+                      ? `Confirm Slot · PKR ${totalCharges.toLocaleString()}`
+                      : `Save Record`
+                    : `Register & Book · PKR ${totalCharges.toLocaleString()}`}
                 </button>
               </div>
             </div>

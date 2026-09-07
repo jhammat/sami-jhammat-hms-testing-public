@@ -199,6 +199,7 @@ export function CarePlanTaskView() {
   }, [categorizedTasks.historyList]);
 
   const todayCompletedCount = todayCompleted.length;
+  const totalTodayTasks = categorizedTasks.todayList.length + todayCompletedCount;
 
   /** Today's outstanding work, split by state. Status palette, not series. */
   const todayStatusMix = useMemo<DonutSlice[]>(
@@ -424,8 +425,7 @@ export function CarePlanTaskView() {
           <div className="flex items-center space-x-3">
             <div className="rounded-xl bg-white/10 p-3 text-center backdrop-blur-md">
               <div className="text-2xl font-extrabold text-white">
-                {todayCompletedCount} /{" "}
-                {categorizedTasks.todayList.length}
+                {todayCompletedCount} / {totalTodayTasks}
               </div>
               <div className="text-xs text-emerald-200">Today&apos;s Completed</div>
             </div>
@@ -435,14 +435,14 @@ export function CarePlanTaskView() {
 
       {/* The day at a glance. One ring for "how far through am I", one
           donut for "what is the day actually made of". */}
-      {categorizedTasks.todayList.length > 0 ? (
+      {totalTodayTasks > 0 ? (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
           <div className="flex items-center justify-center rounded-2xl border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(11,18,32,0.04)]">
             <RadialMeter
               value={todayCompletedCount}
-              target={categorizedTasks.todayList.length}
+              target={totalTodayTasks}
               label="Today's progress"
-              caption={`${todayCompletedCount} of ${categorizedTasks.todayList.length} done`}
+              caption={`${todayCompletedCount} of ${totalTodayTasks} done`}
               size={132}
               thickness={11}
             />
@@ -452,7 +452,7 @@ export function CarePlanTaskView() {
             title="Today's tasks"
             subtitle="Where you are up to"
             slices={todayStatusMix}
-            centerValue={`${todayCompletedCount}/${categorizedTasks.todayList.length}`}
+            centerValue={`${todayCompletedCount}/${totalTodayTasks}`}
             centerLabel="Done"
             size={168}
             thickness={20}
@@ -488,7 +488,7 @@ export function CarePlanTaskView() {
       )}
 
       {/* Tabs */}
-      <div className="flex space-x-2 border-b border-slate-200 pb-2">
+      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
         <button
           onClick={() => setActiveTab("today")}
           className={`flex items-center rounded-lg px-4 py-2 text-sm font-semibold transition ${

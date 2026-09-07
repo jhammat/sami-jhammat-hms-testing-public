@@ -20,7 +20,7 @@ export interface AuthenticatedAccount {
   suspendedOrganizationLabel: string | null;
 }
 
-const workspaceRoles: Record<WorkspaceCode, WonFlowRole> = {
+export const workspaceRoles: Record<WorkspaceCode, WonFlowRole> = {
   ADMIN: "admin", RECEPTION: "reception", DOCTOR: "doctor", PATIENT: "patient",
   LABORATORY: "laboratory", RADIOLOGY: "radiology", PHARMACY: "pharmacy",
   BILLING: "billing", MANAGEMENT: "management",
@@ -44,8 +44,42 @@ function findIdentityForLogin(where: Prisma.IdentityWhereUniqueInput) {
 
 type IdentityWithContext = NonNullable<Awaited<ReturnType<typeof findIdentityForLogin>>>;
 
-export async function authenticateAccount(email: string, password: string): Promise<AuthenticatedAccount | null> {
-  const identity = await findIdentityForLogin({ normalizedEmail: email.trim().toLowerCase() });
+export async function authenticateAccount(emailOrUsername: string, password: string): Promise<AuthenticatedAccount | null> {
+  const clean = emailOrUsername.trim().toLowerCase();
+  if (!clean || !password) return null;
+
+  let identity = await findIdentityForLogin({ normalizedEmail: clean });
+  if (!identity && !clean.includes("@")) {
+    identity = await findIdentityForLogin({ normalizedEmail: `${clean}@wonflow.local` });
+    if (!identity) {
+      identity = await findIdentityForLogin({ normalizedEmail: `${clean}@samijhammat.local` });
+    }
+    if (!identity) {
+      // Look up patient by MR Number (patientNumber)
+      const rawInput = emailOrUsername.trim();
+      const strippedInput = rawInput.replace(/[^a-zA-Z0-9]/g, "");
+      const patient = await database.patient.findFirst({
+        where: {
+          OR: [
+            { patientNumber: { equals: rawInput, mode: "insensitive" } },
+            { patientNumber: { equals: strippedInput, mode: "insensitive" } },
+          ],
+        },
+        include: {
+          accessAccounts: {
+            where: { isActive: true },
+            include: { identity: true },
+            take: 1,
+          },
+        },
+      });
+
+      if (patient?.accessAccounts?.[0]?.identity?.id) {
+        identity = await findIdentityForLogin({ id: patient.accessAccounts[0].identity.id });
+      }
+    }
+  }
+
   if (!identity?.passwordHash || identity.status !== "ACTIVE" || (identity.lockedUntil && identity.lockedUntil > new Date())) return null;
   if (!(await verifyPassword(password, identity.passwordHash))) {
     const failures = identity.failedLoginCount + 1;
@@ -123,7 +157,12 @@ async function buildAccount(identity: IdentityWithContext): Promise<Authenticate
     include: {
       patient: {
         include: {
-          tenant: true,
+          tenant: {
+            include: {
+              organizations: { where: { status: "ACTIVE" }, take: 1, select: { id: true } },
+              branches: { where: { status: "ACTIVE", archivedAt: null }, take: 1, select: { id: true } },
+            },
+          },
         },
       },
     },
@@ -135,6 +174,8 @@ async function buildAccount(identity: IdentityWithContext): Promise<Authenticate
     const orgLabel = access.patient.tenant.displayName;
     const isCaregiver = access.relationship !== "self";
     const branchLabel = isCaregiver ? `Caregiver for ${patientName} (${access.relationship})` : `Patient Portal`;
+    const organizationId = access.patient.tenant.organizations[0]?.id ?? null;
+    const branchId = access.patient.tenant.branches[0]?.id ?? null;
 
     // If an existing membership context for this tenant is already a patient context without a patientId, enrich it
     const existingMembershipPatientContext = contexts.find(
@@ -145,6 +186,12 @@ async function buildAccount(identity: IdentityWithContext): Promise<Authenticate
       existingMembershipPatientContext.patientId = access.patient.id;
       existingMembershipPatientContext.relationship = access.relationship;
       existingMembershipPatientContext.patientName = patientName;
+      if (!existingMembershipPatientContext.organizationId && organizationId) {
+        existingMembershipPatientContext.organizationId = organizationId;
+      }
+      if (!existingMembershipPatientContext.branchId && branchId) {
+        existingMembershipPatientContext.branchId = branchId;
+      }
       if (isCaregiver) {
         existingMembershipPatientContext.branchLabel = branchLabel;
       }
@@ -159,9 +206,9 @@ async function buildAccount(identity: IdentityWithContext): Promise<Authenticate
       contexts.push({
         membershipId: null,
         tenantId: access.patient.tenantId,
-        organizationId: null,
-        branchId: null,
-        workspace: null,
+        organizationId,
+        branchId,
+        workspace: "PATIENT",
         role: "patient",
         organizationLabel: orgLabel,
         branchLabel,

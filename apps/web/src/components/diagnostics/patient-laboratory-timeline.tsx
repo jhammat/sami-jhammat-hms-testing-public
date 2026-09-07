@@ -35,7 +35,7 @@ export function PatientLaboratoryTimeline({ patientId }: { patientId: string }) 
           </div>
           {order.results.filter((result) => result.releasedAt).map((result) => (
             <div className="mt-2 rounded-xl bg-slate-50 p-3 text-sm" key={result.id}>
-              {result.critical ? <p className="mb-1 font-black text-red-700">Critical — {result.criticalNotes}</p> : null}
+              {result.critical ? <p className="mb-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs font-bold text-amber-900">Priority Clinical Finding — Your doctor has been notified of an urgent finding in this result.</p> : null}
               <p className="whitespace-pre-wrap">{result.reportText ?? "Structured result released."}</p>
               <p className="mt-1 text-xs text-slate-400">Released {new Date(result.releasedAt!).toLocaleDateString("en-PK")}</p>
             </div>

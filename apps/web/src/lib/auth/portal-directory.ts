@@ -118,3 +118,16 @@ export function portalFor(role: string): PortalDescriptor | undefined {
 export function audienceOf(role: string): PortalAudience {
   return portalFor(role)?.audience ?? "hospital";
 }
+
+/** The audiences the sign-in screen offers, in the order it offers them. */
+export const PORTAL_AUDIENCES: readonly PortalAudience[] = ["hospital", "patient"];
+
+export function isPortalAudience(value: unknown): value is PortalAudience {
+  return typeof value === "string" && (PORTAL_AUDIENCES as readonly string[]).includes(value);
+}
+
+/** How the sign-in screen names an audience when it has to explain a refusal. */
+export const AUDIENCE_LABELS: Record<PortalAudience, string> = {
+  hospital: "hospital staff",
+  patient: "patient",
+};

@@ -38,6 +38,7 @@ export interface ActionReadinessBlocker {
 export interface ActionReadinessProps {
   blockers: readonly ActionReadinessBlocker[];
   className?: string;
+  hideLinks?: boolean;
 }
 
 /**
@@ -46,7 +47,7 @@ export interface ActionReadinessProps {
  * the readiness endpoint returned, rather than deciding for itself whether
  * to show it.
  */
-export function ActionReadiness({ blockers, className }: ActionReadinessProps) {
+export function ActionReadiness({ blockers, className, hideLinks = false }: ActionReadinessProps) {
   if (blockers.length === 0) {
     return null;
   }
@@ -71,7 +72,7 @@ export function ActionReadiness({ blockers, className }: ActionReadinessProps) {
                 <p>{blocker.reason}</p>
                 <p className="mt-0.5 flex items-center gap-1 text-xs text-[var(--ink-500)]">
                   <span>{blocker.resolverLabel} can fix this.</span>
-                  {blocker.resolutionHref ? (
+                  {!hideLinks && blocker.resolutionHref ? (
                     <a
                       className="inline-flex items-center gap-0.5 font-medium text-[var(--blue-600)] underline underline-offset-2"
                       href={blocker.resolutionHref}

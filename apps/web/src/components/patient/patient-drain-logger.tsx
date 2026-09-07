@@ -221,7 +221,7 @@ export function PatientDrainLogger() {
 
         {/* Drain Tabs (if multi-drain) */}
         {drains.length > 1 && (
-          <div className="mt-4 flex space-x-2 overflow-x-auto border-t border-slate-100 pt-4 dark:border-slate-800">
+          <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4 dark:border-slate-800">
             {drains.map((d) => (
               <button
                 key={d.id}

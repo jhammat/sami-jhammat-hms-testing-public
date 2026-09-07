@@ -83,7 +83,15 @@ export interface DiagnosticOrderRecord {
 export interface PrescriptionItemRecord {
   id: string;
   medicationId: string;
-  medication: { id: string; name: string } | null;
+  medication: {
+    id: string;
+    name?: string;
+    genericName?: string;
+    brandName?: string | null;
+    strength?: string | null;
+    dosageForm?: string | null;
+    code?: string;
+  } | null;
   dose: string;
   route: string | null;
   frequency: string;

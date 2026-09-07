@@ -1,6 +1,8 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 
+import { isPortalAudience, type PortalAudience } from "./portal-directory";
+
 /**
  * The short-lived proof that a password was accepted a moment ago.
  *
@@ -51,9 +53,28 @@ function safeEqual(a: string, b: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
-export async function setPendingLoginCookie(identityId: string, secure: boolean): Promise<void> {
+export interface PendingLogin {
+  identityId: string;
+  /**
+   * Which side of the sign-in screen the password was entered on.
+   *
+   * The audience used to be decoration: the screen asked "hospital staff or
+   * patient?" and then ignored the answer, so patient credentials typed on
+   * the staff side signed in perfectly well. It is carried here, signed,
+   * because the second step must be held to the same answer as the first —
+   * otherwise the choice could simply be skipped by posting a context from
+   * the other side.
+   */
+  audience: PortalAudience;
+}
+
+export async function setPendingLoginCookie(
+  identityId: string,
+  audience: PortalAudience,
+  secure: boolean,
+): Promise<void> {
   const expiresAt = Date.now() + TTL_SECONDS * 1000;
-  const payload = `${identityId}.${expiresAt}`;
+  const payload = `${identityId}.${audience}.${expiresAt}`;
   const value = `${payload}.${sign(payload)}`;
 
   (await cookies()).set(COOKIE, value, {
@@ -65,21 +86,22 @@ export async function setPendingLoginCookie(identityId: string, secure: boolean)
   });
 }
 
-/** The identity a pending login belongs to, or null if there is not a valid one. */
-export async function readPendingLoginIdentity(): Promise<string | null> {
+/** The identity and side a pending login belongs to, or null if there is not a valid one. */
+export async function readPendingLogin(): Promise<PendingLogin | null> {
   const raw = (await cookies()).get(COOKIE)?.value;
   if (!raw) return null;
 
   const parts = raw.split(".");
-  if (parts.length !== 3) return null;
+  if (parts.length !== 4) return null;
 
-  const [identityId, expiresAtRaw, signature] = parts as [string, string, string];
-  if (!safeEqual(signature, sign(`${identityId}.${expiresAtRaw}`))) return null;
+  const [identityId, audience, expiresAtRaw, signature] = parts as [string, string, string, string];
+  if (!safeEqual(signature, sign(`${identityId}.${audience}.${expiresAtRaw}`))) return null;
+  if (!isPortalAudience(audience)) return null;
 
   const expiresAt = Number(expiresAtRaw);
   if (!Number.isFinite(expiresAt) || expiresAt < Date.now()) return null;
 
-  return identityId;
+  return { identityId, audience };
 }
 
 export async function clearPendingLoginCookie(): Promise<void> {

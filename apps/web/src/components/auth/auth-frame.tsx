@@ -30,7 +30,7 @@ export function AuthFrame({
       <div className="relative flex min-h-screen w-full items-center justify-center px-4 py-8 sm:px-6 sm:py-10">
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 opacity-[0.28] [background-image:linear-gradient(rgba(99,102,241,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(99,102,241,0.05)_1px,transparent_1px)] [background-size:36px_36px] dark:opacity-[0.10]"
+          className="pointer-events-none absolute inset-0 opacity-[0.28] bg-[linear-gradient(rgba(99,102,241,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(99,102,241,0.05)_1px,transparent_1px)] bg-size-[36px_36px] dark:opacity-[0.10]"
         />
 
         <svg
@@ -65,7 +65,7 @@ export function AuthFrame({
         <section className={`relative z-[1] w-full ${width === "wide" ? "max-w-[840px]" : "max-w-[520px]"} rounded-[30px] border border-white/90 bg-white/95 p-5 shadow-[0_38px_110px_rgba(30,64,175,0.24)] ring-1 ring-blue-100/80 backdrop-blur-xl transition dark:border-slate-800 dark:bg-slate-900/90 dark:shadow-[0_38px_110px_rgba(0,0,0,0.75)] dark:ring-slate-800 sm:p-7 lg:p-8`}>
           <div
             aria-hidden="true"
-            className="absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-blue-400 to-transparent dark:via-blue-600"
+            className="absolute inset-x-8 top-0 h-px bg-linear-to-r from-transparent via-blue-400 to-transparent dark:via-blue-600"
           />
 
           <div className="mb-6 flex flex-col items-center text-center">

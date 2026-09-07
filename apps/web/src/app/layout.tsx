@@ -96,23 +96,31 @@ export default async function RootLayout({
       className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
       suppressHydrationWarning
     >
-      <body className="min-h-full flex flex-col" suppressHydrationWarning>
-        <ClientStorageGuard />
+      <head>
         <script
+          id="wonflow-data-cleanup"
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: `try{const marker="wonflow-data-cleanup-v1";const stalePrefix="wonflow-demo"+"-";if(localStorage.getItem(marker)!=="complete"){for(let index=localStorage.length-1;index>=0;index-=1){const key=localStorage.key(index);if(key?.startsWith(stalePrefix)){localStorage.removeItem(key)}}for(let index=sessionStorage.length-1;index>=0;index-=1){const key=sessionStorage.key(index);if(key?.startsWith(stalePrefix)){sessionStorage.removeItem(key)}}localStorage.setItem(marker,"complete")}}catch{}`,
           }}
         />
         <script
+          id="wonflow-color-theme"
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: `try{if(localStorage.getItem("wonflow-color-theme")==="dark"){document.documentElement.classList.add("dark");document.documentElement.style.colorScheme="dark"}}catch{}`,
           }}
         />
         <script
+          id="wonflow-sw-register"
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: `if("serviceWorker"in navigator){window.addEventListener("load",function(){navigator.serviceWorker.register("/sw.js").catch(function(){})})}`,
           }}
         />
+      </head>
+      <body className="min-h-full flex flex-col" suppressHydrationWarning>
+        <ClientStorageGuard />
         <WonFlowApplicationProvider
           configuration={configuration}
         >

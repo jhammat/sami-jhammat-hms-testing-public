@@ -698,7 +698,7 @@ function PatientRegistrationForm({
       >
         <div
           className={[
-            "bg-gradient-to-r",
+            "bg-linear-to-r",
             "from-emerald-600",
             "to-teal-600",
             "p-6 text-white",
@@ -840,7 +840,7 @@ function PatientRegistrationForm({
                   "flex min-h-11 w-full",
                   "items-center justify-center",
                   "rounded-xl",
-                  "bg-gradient-to-r",
+                  "bg-linear-to-r",
                   "from-emerald-600",
                   "to-teal-600",
                   "px-4 text-sm",
@@ -880,7 +880,7 @@ function PatientRegistrationForm({
                   "flex min-h-11 w-full",
                   "items-center justify-center",
                   "rounded-xl",
-                  "bg-gradient-to-r",
+                  "bg-linear-to-r",
                   "from-blue-600",
                   "to-indigo-600",
                   "px-4 text-sm",
@@ -1721,7 +1721,7 @@ function PatientRegistrationForm({
 
         <aside className="wf-workflow-aside">
           <section className="overflow-hidden rounded-3xl border border-indigo-100 bg-white shadow-sm">
-            <div className="bg-gradient-to-r from-blue-600 to-violet-600 p-5 text-white">
+            <div className="bg-linear-to-r from-blue-600 to-violet-600 p-5 text-white">
               <div className="text-xs font-extrabold uppercase tracking-[0.15em] text-blue-100">
                 Registration Summary
               </div>
@@ -1750,7 +1750,7 @@ function PatientRegistrationForm({
 
               <div className="mt-3 h-2.5 overflow-hidden rounded-full bg-slate-100">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500"
+                  className="h-full rounded-full bg-linear-to-r from-blue-500 to-violet-500"
                   style={{
                     width:
                       `${completionPercentage}%`,
@@ -1948,11 +1948,11 @@ function SummaryItem({
 }) {
   return (
     <div>
-      <dt className="text-[11px] font-extrabold uppercase tracking-[0.1em] text-slate-400">
+      <dt className="text-[11px] font-extrabold uppercase tracking-widest text-slate-400">
         {label}
       </dt>
 
-      <dd className="mt-1 break-words text-sm font-bold capitalize text-slate-800">
+      <dd className="mt-1 wrap-break-word text-sm font-bold capitalize text-slate-800">
         {value}
       </dd>
     </div>

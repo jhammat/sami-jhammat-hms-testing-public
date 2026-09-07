@@ -846,7 +846,7 @@ function AppointmentDirectoryContent({
       {rescheduleBooking !== undefined ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
           <section className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-3xl border border-indigo-100 bg-white shadow-2xl">
-            <div className="bg-gradient-to-r from-blue-600 to-violet-600 p-5 text-white">
+            <div className="bg-linear-to-r from-blue-600 to-violet-600 p-5 text-white">
               <div className="text-xs font-bold uppercase tracking-[0.15em] text-blue-100">Reschedule Appointment</div>
               <div className="mt-2 text-xl font-black">{rescheduleBooking.service?.name ?? "Appointment"}</div>
               <div className="mt-1 text-sm text-indigo-100">{patientDisplayName(rescheduleBooking.patient)}</div>
@@ -968,7 +968,7 @@ export function AppointmentDirectoryWorkflow() {
     <div className="space-y-6">
       <WonFlowPageHeader
         actions={
-          <Link className="inline-flex min-h-10 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm" href="/operations/reception">
+          <Link className="inline-flex min-h-10 items-center justify-center rounded-xl bg-linear-to-r from-blue-600 to-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm" href="/operations/reception">
             Book Appointment
           </Link>
         }

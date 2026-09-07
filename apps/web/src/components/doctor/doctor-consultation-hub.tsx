@@ -112,8 +112,6 @@ function useStartConsultationReadiness(
             code: blocker.code,
             reason: blocker.reason,
             resolverLabel: RESOLVER_LABELS[blocker.resolverRole] ?? blocker.resolverRole,
-            resolutionHref: blocker.resolutionHref || undefined,
-            resolutionLabel: blocker.resolutionHref ? "Fix this" : undefined,
           })),
         );
       } catch (caught: unknown) {
@@ -129,7 +127,7 @@ function useStartConsultationReadiness(
         if (!controller.signal.aborted) setLoading(false);
       }
     };
-    void load().catch(() => {});
+    void load().catch(() => { });
     return () => {
       try {
         controller.abort();
@@ -156,7 +154,7 @@ export function DoctorConsultationHub({
     usePracticeLocation();
   const locationEmptyDescription =
     locationContext.selectedLocation !== undefined &&
-    locationContext.selectedLocation.linkedBranchId === undefined
+      locationContext.selectedLocation.linkedBranchId === undefined
       ? "This worklist has no branch-linked demo records for the selected external location."
       : "No items at this location";
   const hub = useConsultationHubData();
@@ -219,12 +217,12 @@ export function DoctorConsultationHub({
       hub.data.encounters.filter(
         (encounter) =>
           encounter.practitionerId ===
-            portal.doctorId &&
+          portal.doctorId &&
           locationContext.matchesLegacyBranch(
             encounter.branchId,
           ) &&
           encounter.status !==
-            "cancelled",
+          "cancelled",
       ),
     [
       hub.data.encounters,
@@ -301,12 +299,12 @@ export function DoctorConsultationHub({
       hub.data.queueEntries.filter(
         (entry) =>
           entry.practitionerId ===
-            portal.doctorId &&
+          portal.doctorId &&
           locationContext.matchesLegacyBranch(
             entry.branchId,
           ) &&
           entry.businessDate ===
-            portal.businessDate,
+          portal.businessDate,
       ),
     [
       hub.data.queueEntries,
@@ -325,9 +323,9 @@ export function DoctorConsultationHub({
     hub.data.queueEntries.some(
       (entry) =>
         entry.practitionerId ===
-          portal.doctorId &&
+        portal.doctorId &&
         entry.businessDate ===
-          portal.businessDate &&
+        portal.businessDate &&
         locationContext.matchesLegacyBranch(
           entry.branchId,
         ) &&
@@ -444,7 +442,7 @@ export function DoctorConsultationHub({
         return (
           getLocalBusinessDate(
             encounter.completedAt ??
-              encounter.updatedAt,
+            encounter.updatedAt,
           ) === portal.businessDate
         );
       })
@@ -452,13 +450,13 @@ export function DoctorConsultationHub({
       .sort((left, right) =>
         String(
           right.encounter.completedAt ??
-            right.encounter.updatedAt ??
-            "",
+          right.encounter.updatedAt ??
+          "",
         ).localeCompare(
           String(
             left.encounter.completedAt ??
-              left.encounter.updatedAt ??
-              "",
+            left.encounter.updatedAt ??
+            "",
           ),
         ),
       );
@@ -467,8 +465,8 @@ export function DoctorConsultationHub({
     initialQueueEntryId === undefined
       ? undefined
       : queueEntriesById.get(
-          initialQueueEntryId,
-        );
+        initialQueueEntryId,
+      );
   const requestedEntryVisible = [
     ...activeRecords,
     ...draftRecords,
@@ -581,7 +579,7 @@ export function DoctorConsultationHub({
           href="/doctor/queue"
         >
           <ListOrdered size={14} />
-          Todayâ€™s Queue
+          Today&apos;s Queue
         </Link>
       }
       description="Manage active, draft and recently completed clinical encounters."
@@ -636,7 +634,7 @@ export function DoctorConsultationHub({
           className={[
             "flex flex-col gap-2 rounded-xl border px-3 py-2.5 text-[11px] sm:flex-row sm:items-center sm:justify-between",
             portal.sitting?.status ===
-            "on-break"
+              "on-break"
               ? "border-amber-200 bg-amber-50 text-amber-800"
               : "border-slate-200 bg-slate-50 text-slate-600",
           ].join(" ")}
@@ -647,9 +645,9 @@ export function DoctorConsultationHub({
               size={14}
             />
             {portal.sitting?.status ===
-            "on-break"
+              "on-break"
               ? "The doctor is on break. Resume the sitting before starting another consultation."
-              : "No available sitting. Start todayâ€™s sitting before beginning a consultation."}
+              : "No available sitting. Start today's sitting before beginning a consultation."}
           </span>
           <Link
             className="shrink-0 font-black text-indigo-700 hover:text-indigo-900"
@@ -662,22 +660,22 @@ export function DoctorConsultationHub({
 
       {initialQueueEntryId !==
         undefined &&
-      !requestedEntryVisible ? (
+        !requestedEntryVisible ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] font-bold text-amber-800">
           {requestedQueueEntry ===
-          undefined
+            undefined
             ? "The requested queue record is unavailable."
             : requestedQueueMessage(
-                requestedQueueEntry,
-                {
-                  practitionerId:
-                    portal.doctorId,
-                  branchId:
-                    locationContext.selectedLocation?.linkedBranchId ?? "",
-                  businessDate:
-                    portal.businessDate,
-                },
-              )}
+              requestedQueueEntry,
+              {
+                practitionerId:
+                  portal.doctorId,
+                branchId:
+                  locationContext.selectedLocation?.linkedBranchId ?? "",
+                businessDate:
+                  portal.businessDate,
+              },
+            )}
         </div>
       ) : null}
 
@@ -719,25 +717,25 @@ export function DoctorConsultationHub({
               <EmptyState
                 description={
                   servingWithoutEncounter.length >
-                  0
-                    ? "A serving queue record has no open clinical encounter. Restore the encounter without changing the patientâ€™s queue position."
+                    0
+                    ? "A serving queue record has no open clinical encounter. Restore the encounter without changing the patient's queue position."
                     : locationEmptyDescription
                 }
                 title={
                   servingWithoutEncounter.length >
-                  0
+                    0
                     ? "Encounter link unavailable"
                     : "No active consultation"
                 }
                 tone={
                   servingWithoutEncounter.length >
-                  0
+                    0
                     ? "rose"
                     : "slate"
                 }
               />
               {servingWithoutEncounter[0] !==
-              undefined ? (
+                undefined ? (
                 <button
                   className="mx-auto mt-2 flex h-9 items-center gap-1.5 rounded-lg bg-violet-600 px-3 text-[10px] font-black text-white transition hover:bg-violet-700 disabled:cursor-not-allowed disabled:bg-slate-300"
                   disabled={!sittingAvailable}
@@ -756,9 +754,9 @@ export function DoctorConsultationHub({
           ) : (
             <article
               className={[
-                "rounded-xl border bg-gradient-to-br from-white to-indigo-50/50 p-3",
+                "rounded-xl border bg-linear-to-br from-white to-indigo-50/50 p-3",
                 activeRecord.queueEntry?.id ===
-                initialQueueEntryId
+                  initialQueueEntryId
                   ? "border-indigo-400 ring-2 ring-indigo-100"
                   : "border-indigo-200",
               ].join(" ")}
@@ -770,7 +768,7 @@ export function DoctorConsultationHub({
                   }
                   urgent={
                     activeRecord.queueEntry !==
-                      undefined &&
+                    undefined &&
                     activeRecord.queueEntry
                       .priority !== "routine"
                   }
@@ -789,12 +787,12 @@ export function DoctorConsultationHub({
                           activeRecord.patient
                             .mrNumber
                         }
-                        {" Â· "}
+                        {" · "}
                         {activeRecord.patient
                           .age === undefined
                           ? "Age not recorded"
                           : `${activeRecord.patient.age} years`}
-                        {" Â· "}
+                        {" · "}
                         {humanize(
                           activeRecord.patient
                             .gender,
@@ -816,11 +814,11 @@ export function DoctorConsultationHub({
                       <StatusPill className="bg-violet-50 text-violet-700 ring-violet-200">
                         {activeRecord
                           .documentation?.status ===
-                        "completed"
+                          "completed"
                           ? "Finalized"
                           : activeRecord
-                                .documentation ===
-                              undefined
+                            .documentation ===
+                            undefined
                             ? "Documentation not started"
                             : "Clinical draft"}
                       </StatusPill>
@@ -845,8 +843,8 @@ export function DoctorConsultationHub({
                     value: formatTime(
                       activeRecord.queueEntry
                         ?.serviceStartedAt ??
-                        activeRecord.encounter
-                          .startedAt,
+                      activeRecord.encounter
+                        .startedAt,
                     ),
                   },
                   {
@@ -854,8 +852,8 @@ export function DoctorConsultationHub({
                     value: formatElapsed(
                       activeRecord.queueEntry
                         ?.serviceStartedAt ??
-                        activeRecord.encounter
-                          .startedAt,
+                      activeRecord.encounter
+                        .startedAt,
                       now,
                     ),
                   },
@@ -1035,7 +1033,7 @@ export function DoctorConsultationHub({
                 className={[
                   "grid gap-2 py-3 first:pt-0 last:pb-0 lg:grid-cols-[minmax(180px,1.2fr)_minmax(90px,0.55fr)_minmax(110px,0.7fr)_minmax(110px,0.7fr)_minmax(180px,1.2fr)_auto] lg:items-center",
                   record.queueEntry?.id ===
-                  initialQueueEntryId
+                    initialQueueEntryId
                     ? "rounded-xl bg-indigo-50 px-2 ring-1 ring-indigo-100"
                     : "",
                 ].join(" ")}
@@ -1063,7 +1061,7 @@ export function DoctorConsultationHub({
                       ?.tokenNumber ??
                       "Unavailable"}
                     {record.queueEntry ===
-                    undefined ? (
+                      undefined ? (
                       <span className="ml-1 rounded-full bg-rose-50 px-1.5 py-0.5 text-[8px] font-black text-rose-700 ring-1 ring-rose-100">
                         Queue link missing
                       </span>
@@ -1089,8 +1087,8 @@ export function DoctorConsultationHub({
                     {formatDateTime(
                       record.documentation
                         ?.updatedAt ??
-                        record.encounter
-                          .updatedAt,
+                      record.encounter
+                        .updatedAt,
                     )}
                   </p>
                 </div>
@@ -1178,8 +1176,8 @@ export function DoctorConsultationHub({
                       {formatDateTime(
                         record.encounter
                           .completedAt ??
-                          record.encounter
-                            .updatedAt,
+                        record.encounter
+                          .updatedAt,
                       )}
                     </p>
                   </div>
@@ -1331,7 +1329,7 @@ function ReadyRecordCard({
       </div>
 
       {blockers.length > 0 ? (
-        <ActionReadiness blockers={blockers} className="mt-2" />
+        <ActionReadiness blockers={blockers} className="mt-2" hideLinks />
       ) : null}
 
       <div className="mt-2.5 flex flex-wrap gap-2">

@@ -1,3 +1,4 @@
+import { randomBytes } from "crypto";
 import { database } from "@wonflow/database";
 import type { Prisma } from "@wonflow/database";
 import { requirePermission } from "@wonflow/contracts";
@@ -62,8 +63,8 @@ function requiredText(value: string | undefined, label: string, minimum = 2): st
   return normalized;
 }
 
-function optionalDate(value: string | undefined, label: string): Date | null {
-  if (!value?.trim()) return null;
+function optionalDate(value: string | null | undefined, label: string): Date | null {
+  if (!value || typeof value !== "string" || !value.trim()) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) throw new WonFlowApiError(400, "invalid-activation", `${label} is invalid.`);
   return date;
@@ -744,7 +745,7 @@ export class PlatformAdministrationService {
     });
   }
 
-  async updateSubscription(context: WonFlowPlatformRequestContext, input: TenantReference & { planCode: string; status: "UNCONFIGURED" | "TRIAL" | "ACTIVE" | "PAST_DUE" | "SUSPENDED" | "CANCELLED"; monthlyAmountMinor: number; seatCount: number; currencyCode: string; trialEndsAt?: string; renewsAt?: string }) {
+  async updateSubscription(context: WonFlowPlatformRequestContext, input: TenantReference & { planCode: string; status: "UNCONFIGURED" | "TRIAL" | "ACTIVE" | "PAST_DUE" | "SUSPENDED" | "CANCELLED"; monthlyAmountMinor: number; seatCount: number; currencyCode: string; trialEndsAt?: string | null; renewsAt?: string | null }) {
     requirePermission(context, "platform.subscriptions.manage");
     return database.$transaction(async (transaction) => {
       const resolved = await resolveTenant(transaction, input);
@@ -992,7 +993,7 @@ export class PlatformAdministrationService {
     input: { tenantId: string; password?: string },
   ) {
     requirePermission(context, "platform.tenants.manage");
-    const newPassword = input.password?.trim() || "WonFlowDemo2026!";
+    const newPassword = input.password?.trim() || `Wf7!${randomBytes(9).toString("base64url")}`;
     validateNewPassword(newPassword);
     const passwordHash = await hashPassword(newPassword);
 

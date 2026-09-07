@@ -165,9 +165,9 @@ export async function getPatientBookingCatalog(requestContext: WonFlowRequestCon
   const weekday = selectedDate.getUTCDay();
   const weekdayName = WEEKDAY_NAMES[weekday]!;
 
-  const branches = await database.branch.findMany({ where: { tenantId: context.tenantId, organizationId: context.organizationId, status: "ACTIVE", archivedAt: null }, select: { id: true, name: true, timezone: true } });
+  const branches = await database.branch.findMany({ where: { tenantId: context.tenantId, status: "ACTIVE", archivedAt: null }, select: { id: true, name: true, timezone: true } });
   if (branches.length === 0) {
-    return { date, branches, options: [], slots: [], blockers: [{ code: "no-active-branch", message: "This hospital has no active location open for online booking yet. Please call the hospital to arrange your visit." }] };
+    return { date, nextAvailableDate: null, branches, options: [], slots: [], blockers: [{ code: "no-active-branch", message: "This hospital has no active location open for online booking yet. Please call the hospital to arrange your visit." }] };
   }
 
   // Every rostered window for the date, before the publish flags are applied.
@@ -180,10 +180,25 @@ export async function getPatientBookingCatalog(requestContext: WonFlowRequestCon
       weekday,
       validFrom: { lte: selectedDate },
       OR: [{ validUntil: null }, { validUntil: { gte: selectedDate } }],
-      branch: { organizationId: context.organizationId, status: "ACTIVE", archivedAt: null },
+      branch: { status: "ACTIVE", archivedAt: null },
     },
     include: { branch: true, service: true, doctor: { include: { staffProfile: { include: { membership: true } } } } },
   });
+
+  const defaultServices = await database.serviceDefinition.findMany({
+    where: { tenantId: context.tenantId, isActive: true, publiclyBookable: true },
+    orderBy: [{ doctorId: "desc" }, { createdAt: "asc" }],
+  });
+  const fallbackService = defaultServices[0] ?? null;
+  for (const candidate of candidateRules) {
+    if (!candidate.serviceId || !candidate.service) {
+      const matched = defaultServices.find((s) => s.doctorId === candidate.doctorId) ?? fallbackService;
+      if (matched) {
+        candidate.serviceId = matched.id;
+        candidate.service = matched;
+      }
+    }
+  }
 
   const rules = candidateRules.filter((rule) => rule.doctor.publiclyBookable && rule.serviceId !== null && rule.service?.isActive === true && rule.service.publiclyBookable);
 
@@ -231,8 +246,32 @@ export async function getPatientBookingCatalog(requestContext: WonFlowRequestCon
     return [{ ruleId: rule.id, branchId: rule.branchId, branchName: rule.branch.name, doctorId: rule.doctorId, doctorName: rule.doctor.staffProfile.membership.displayName, specialty: rule.doctor.specialty, serviceId: rule.serviceId!, serviceName: rule.service!.name, consultationModes: rule.service!.consultationModes, requiresPrepayment: rule.service!.requiresPrepayment, durationMinutes: slotDurationMinutes(window, rule), priceMinorUnits: rule.service!.priceMinorUnits, currencyCode: rule.service!.currencyCode, availabilitySource: window.source, roomLabel: window.roomLabel }];
   });
 
+  let nextAvailableDate: string | null = null;
+  if (!slots.some((slot) => slot.available)) {
+    const allActiveRules = await database.availabilityRule.findMany({
+      where: {
+        tenantId: context.tenantId,
+        isActive: true,
+        branch: { status: "ACTIVE", archivedAt: null },
+        doctor: { publiclyBookable: true },
+      },
+      select: { weekday: true },
+    });
+    const weekdaysWithClinics = new Set(allActiveRules.map((r) => r.weekday));
+    if (weekdaysWithClinics.size > 0) {
+      const base = new Date(`${date}T00:00:00.000Z`);
+      for (let offset = 1; offset <= 14; offset += 1) {
+        const nextCandidate = new Date(base.getTime() + offset * 86_400_000);
+        if (weekdaysWithClinics.has(nextCandidate.getUTCDay())) {
+          nextAvailableDate = nextCandidate.toISOString().slice(0, 10);
+          break;
+        }
+      }
+    }
+  }
+
   const blockers = await diagnoseEmptyCatalog({ tenantId: context.tenantId, organizationId: context.organizationId, date, weekdayName, candidateRules, rules, options, slots });
-  return { date, branches, options, slots, blockers };
+  return { date, nextAvailableDate, branches, options, slots, blockers };
 }
 
 /**
@@ -255,7 +294,7 @@ async function diagnoseEmptyCatalog(input: {
   if (options.length > 0 && slots.some((slot) => slot.available)) return [];
 
   if (candidateRules.length === 0) {
-    const rosteredAnywhere = await database.availabilityRule.count({ where: { tenantId: input.tenantId, isActive: true, branch: { organizationId: input.organizationId, status: "ACTIVE", archivedAt: null } } });
+    const rosteredAnywhere = await database.availabilityRule.count({ where: { tenantId: input.tenantId, isActive: true, branch: { status: "ACTIVE", archivedAt: null } } });
     return [rosteredAnywhere === 0
       ? { code: "no-schedules-published", message: "This hospital has not published any clinic schedules for online booking yet. Please call the hospital to arrange your visit." }
       : { code: "no-clinic-on-weekday", message: `No clinic is scheduled on ${weekdayName}. Choose another date to see available consultation times.` }];
@@ -305,10 +344,25 @@ export async function bookMyAppointment(requestContext: WonFlowRequestContext, i
   return database.$transaction(async (transaction) => {
     const existing = await transaction.idempotencyRecord.findUnique({ where: { tenantId_key_operation: { tenantId: context.tenantId, key: input.idempotencyKey, operation: "patient.appointment.book" } } });
     if (existing?.responsePayload && typeof existing.responsePayload === "object" && "appointmentId" in existing.responsePayload) return transaction.appointment.findUnique({ where: { id: String(existing.responsePayload.appointmentId) } });
-    // Scoped to the patient organization, not only the tenant: a rule id from a
-    // sibling organization must never be bookable from this portal session.
-    const rule = await transaction.availabilityRule.findFirst({ where: { id: ruleId, tenantId: context.tenantId, isActive: true, branch: { organizationId: context.organizationId, status: "ACTIVE", archivedAt: null }, doctor: { publiclyBookable: true }, service: { isActive: true, publiclyBookable: true } }, include: { branch: true, service: true, doctor: true } });
-    if (!rule?.serviceId || !rule.service) throw new WonFlowApiError(409, "booking-slot-unavailable", "This appointment option is no longer available.");
+    // Scoped to the tenant active branches
+    const rule = await transaction.availabilityRule.findFirst({
+      where: {
+        id: ruleId,
+        tenantId: context.tenantId,
+        isActive: true,
+        branch: { status: "ACTIVE", archivedAt: null },
+        doctor: { publiclyBookable: true },
+      },
+      include: { branch: true, service: true, doctor: true },
+    });
+    let service = rule?.service;
+    if (rule && (!service || !service.isActive || !service.publiclyBookable)) {
+      service = await transaction.serviceDefinition.findFirst({
+        where: { tenantId: context.tenantId, isActive: true, publiclyBookable: true, OR: [{ doctorId: rule.doctorId }, { doctorId: null }] },
+        orderBy: [{ doctorId: "desc" }, { createdAt: "asc" }],
+      });
+    }
+    if (!rule || !service) throw new WonFlowApiError(409, "booking-slot-unavailable", "This appointment option is no longer available.");
     // A slot id carries only a rule and an instant, so the instant is re-checked
     // against the rule it claims to come from. The roster covers one weekday
     // inside a validity range, and the minute-of-day check below would happily
@@ -320,7 +374,7 @@ export async function bookMyAppointment(requestContext: WonFlowRequestContext, i
     // Mode must be chosen explicitly whenever the service allows more than
     // one — defaulting silently would hide the online payment requirement
     // from a patient who assumed they were booking in person.
-    const availableModes = rule.service.consultationModes;
+    const availableModes = service.consultationModes;
     const mode = availableModes.length === 1 ? availableModes[0]! : input.mode;
     if (!mode) throw new WonFlowApiError(400, "consultation-mode-required", "Choose whether this is an in-person or online consultation.");
     if (!availableModes.includes(mode)) throw new WonFlowApiError(400, "consultation-mode-unavailable", `This service does not offer ${mode === "ONLINE" ? "online" : "in-person"} consultations.`);
@@ -328,7 +382,7 @@ export async function bookMyAppointment(requestContext: WonFlowRequestContext, i
     // after this slot was rendered. It also sets the consultation length, so it
     // has to be resolved before endsAt is computed.
     const sitting = await transaction.doctorSitting.findFirst({ where: { tenantId: context.tenantId, doctorId: rule.doctorId, branchId: rule.branchId, businessDate: businessDateUtc } });
-    const duration = slotDurationMinutes({ slotMinutes: sitting?.averageConsultationMinutes ?? null }, rule);
+    const duration = slotDurationMinutes({ slotMinutes: sitting?.averageConsultationMinutes ?? null }, { ...rule, service });
     if (duration < 1) throw new WonFlowApiError(409, "booking-slot-unavailable", "This appointment option is not configured for booking. Please call the hospital.");
     const endsAt = new Date(startsAt.getTime() + duration * 60_000);
     const withinWindow = await assertWithinEffectiveWindow(transaction, { tenantId: context.tenantId, doctorId: rule.doctorId, branchId: rule.branchId, startsAt, endsAt, timezone: rule.branch.timezone, rosterStartsMinute: rule.startsMinute, rosterEndsMinute: rule.endsMinute });
@@ -340,11 +394,12 @@ export async function bookMyAppointment(requestContext: WonFlowRequestContext, i
     if ((localMinuteOfDay(startsAt, rule.branch.timezone) - windowStartsMinute) % duration !== 0) throw new WonFlowApiError(409, "booking-slot-unavailable", "That appointment time is no longer offered. Choose another time.");
     const reserved = await transaction.appointment.count({ where: { tenantId: context.tenantId, branchId: rule.branchId, doctorId: rule.doctorId, status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_QUEUE", "IN_PROGRESS"] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } });
     if (reserved >= rule.capacity) throw new WonFlowApiError(409, "booking-slot-taken", "That appointment time was just taken. Choose another time.");
-    const requiresPrepayment = mode === "ONLINE" && rule.service.requiresPrepayment;
-    const appointment = await transaction.appointment.create({ data: { tenantId: context.tenantId, patientId: patient.id, doctorId: rule.doctorId, branchId: rule.branchId, serviceId: rule.serviceId, consultationMode: mode, paymentStatus: requiresPrepayment ? "AWAITING_PAYMENT" : "NOT_REQUIRED", status: "CONFIRMED", source: "PATIENT_PORTAL", reason: reason || null, startsAt, endsAt, idempotencyKey: input.idempotencyKey } });
+    const requiresPrepayment = mode === "ONLINE" && service.requiresPrepayment;
+    const appointment = await transaction.appointment.create({ data: { tenantId: context.tenantId, patientId: patient.id, doctorId: rule.doctorId, branchId: rule.branchId, serviceId: service.id, consultationMode: mode, paymentStatus: requiresPrepayment ? "AWAITING_PAYMENT" : "NOT_REQUIRED", status: "CONFIRMED", source: "PATIENT_PORTAL", reason: reason || null, startsAt, endsAt, idempotencyKey: input.idempotencyKey } });
+    const isUuid = (val?: string | null): val is string => typeof val === "string" && /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(val);
     await transaction.idempotencyRecord.create({ data: { tenantId: context.tenantId, key: input.idempotencyKey, operation: "patient.appointment.book", responsePayload: { appointmentId: appointment.id }, expiresAt: new Date(Date.now() + 86_400_000) } });
     await transaction.notification.create({ data: { tenantId: context.tenantId, identityId: context.identityId, patientId: patient.id, channel: "IN_APP", status: "PENDING", templateCode: "appointment-confirmed", payload: { appointmentId: appointment.id, startsAt: appointment.startsAt.toISOString(), branchId: appointment.branchId } } });
-    await transaction.auditEvent.create({ data: { tenantId: context.tenantId, branchId: rule.branchId, actorMembershipId: context.membershipId, sessionId: context.sessionId, requestId: context.requestId, action: "patient.appointment.booked", entityType: "appointment", entityId: appointment.id, severity: "INFORMATION", sourceApplication: context.sourceApplication } });
+    await transaction.auditEvent.create({ data: { tenantId: context.tenantId, branchId: rule.branchId, actorMembershipId: isUuid(context.membershipId) ? context.membershipId : null, sessionId: isUuid(context.sessionId) ? context.sessionId : null, requestId: context.requestId, action: "patient.appointment.booked", entityType: "appointment", entityId: appointment.id, severity: "INFORMATION", sourceApplication: context.sourceApplication } });
     return appointment;
   }, { isolationLevel: "Serializable" });
 }

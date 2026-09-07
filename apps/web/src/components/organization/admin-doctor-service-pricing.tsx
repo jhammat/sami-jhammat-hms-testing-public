@@ -501,9 +501,14 @@ function PendingFeeRequestsPanel({ onActionCompleted }: { onActionCompleted(): v
 
 function ServiceCard({ authority, onSaved, service }: { authority: FeeAuthority; onSaved(): void; service: ServiceOverview["services"][number] }) {
   const category = getServiceCategory(service.category);
-  const hospitalMayEdit = !service.doctor || authority === "HOSPITAL";
-  const hospitalMaySetPrice = hospitalMayEdit && service.billingOwner !== "DOCTOR";
+  // A service fee is strictly doctor-managed ONLY when the hospital's policy delegates fee authority ("DOCTOR")
+  // AND the service fee is controlled by the doctor ("DOCTOR").
+  // Under "APPROVAL_REQUIRED" or "HOSPITAL", hospital administration / owners govern the catalog and fees.
+  const isDoctorFeeManaged = authority === "DOCTOR" && service.billingOwner === "DOCTOR" && Boolean(service.doctor);
+  const hospitalMaySetPrice = !isDoctorFeeManaged;
+  const hospitalMayEdit = true;
   const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(service.name);
   const [price, setPrice] = useState(service.priceMinorUnits === null ? "" : String(service.priceMinorUnits / 100));
   const [duration, setDuration] = useState(String(service.durationMinutes));
   const [publiclyBookable, setPubliclyBookable] = useState(service.publiclyBookable);
@@ -520,8 +525,10 @@ function ServiceCard({ authority, onSaved, service }: { authority: FeeAuthority;
       await phaseOneApi(`/api/v1/admin/services/${service.id}`, {
         method: "PATCH",
         body: JSON.stringify({
+          name: name.trim() || undefined,
           durationMinutes: Number(duration),
           priceMinorUnits: hospitalMaySetPrice ? (price === "" ? null : Math.round(Number(price) * 100)) : undefined,
+          billingOwner: hospitalMaySetPrice && service.billingOwner === "DOCTOR" ? "HOSPITAL" : undefined,
           publiclyBookable,
           consultationModes,
         }),
@@ -584,33 +591,111 @@ function ServiceCard({ authority, onSaved, service }: { authority: FeeAuthority;
 
       {editing ? (
         <div className="mt-4 space-y-3 border-t border-slate-100 pt-3 dark:border-slate-700">
+          <Field label="Service name">
+            <input
+              className={fieldClass}
+              onChange={(event) => setName(event.target.value)}
+              required
+              type="text"
+              value={name}
+            />
+          </Field>
           <div className="grid grid-cols-2 gap-3">
             {hospitalMaySetPrice ? (
-              <Field label={`Price (${service.currencyCode})`}><input className={fieldClass} min="0" onChange={(event) => setPrice(event.target.value)} step="0.01" type="number" value={price} /></Field>
+              <Field label={`Price (${service.currencyCode})`}>
+                <input
+                  className={fieldClass}
+                  min="0"
+                  onChange={(event) => setPrice(event.target.value)}
+                  step="0.01"
+                  type="number"
+                  value={price}
+                />
+              </Field>
             ) : (
-              <p className="self-end rounded-xl bg-amber-50 px-3 py-2 text-[10px] font-bold leading-4 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">The assigned doctor controls this fee.</p>
+              <p className="self-end rounded-xl bg-amber-50 px-3 py-2 text-[10px] font-bold leading-4 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                The assigned doctor controls this fee.
+              </p>
             )}
-            <Field label="Minutes"><input className={fieldClass} min="5" onChange={(event) => setDuration(event.target.value)} required type="number" value={duration} /></Field>
+            <Field label="Minutes">
+              <input
+                className={fieldClass}
+                min="5"
+                onChange={(event) => setDuration(event.target.value)}
+                required
+                type="number"
+                value={duration}
+              />
+            </Field>
           </div>
-          {service.category === "CONSULTATION" ? <Field label="Consultation delivery"><ConsultationModeCheckboxes onChange={setConsultationModes} value={consultationModes} /></Field> : null}
-          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300"><input checked={publiclyBookable} onChange={(event) => setPubliclyBookable(event.target.checked)} type="checkbox" />Available for booking</label>
+          {service.category === "CONSULTATION" ? (
+            <Field label="Consultation delivery">
+              <ConsultationModeCheckboxes onChange={setConsultationModes} value={consultationModes} />
+            </Field>
+          ) : null}
+          <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
+            <input
+              checked={publiclyBookable}
+              onChange={(event) => setPubliclyBookable(event.target.checked)}
+              type="checkbox"
+            />
+            Available for booking
+          </label>
           <ErrorMessage message={error} />
           <div className="flex gap-2">
-            <button className={buttonClass} disabled={saving || duration === ""} onClick={save} type="button"><Save aria-hidden="true" size={16} />{saving ? "Saving" : "Save service"}</button>
-            <button className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700" disabled={saving} onClick={() => setEditing(false)} type="button">Cancel</button>
+            <button
+              className={buttonClass}
+              disabled={saving || duration === "" || !name.trim()}
+              onClick={save}
+              type="button"
+            >
+              <Save aria-hidden="true" size={16} />
+              {saving ? "Saving" : "Save service"}
+            </button>
+            <button
+              className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              disabled={saving}
+              onClick={() => {
+                setEditing(false);
+                setName(service.name);
+                setPrice(service.priceMinorUnits === null ? "" : String(service.priceMinorUnits / 100));
+                setDuration(String(service.durationMinutes));
+                setPubliclyBookable(service.publiclyBookable);
+                setConsultationModes(service.consultationModes);
+                setError("");
+              }}
+              type="button"
+            >
+              Cancel
+            </button>
           </div>
         </div>
-      ) : hospitalMayEdit ? (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-3 dark:border-slate-800">
-          <button className="inline-flex min-h-9 items-center rounded-xl border border-indigo-200 bg-white px-3 text-xs font-bold text-indigo-700 transition hover:bg-indigo-50 dark:border-indigo-500/30 dark:bg-slate-800 dark:text-indigo-300 dark:hover:bg-slate-700" onClick={() => setEditing(true)} type="button">
-            Edit service & fee
-          </button>
-          <button className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60 dark:border-rose-500/30 dark:bg-slate-800 dark:text-rose-400 dark:hover:bg-slate-700" disabled={deleting} onClick={() => void remove()} type="button">
-            <Trash2 size={14} />{deleting ? "Deleting..." : "Delete service"}
-          </button>
-        </div>
       ) : (
-        <p className="mt-3 text-[10px] font-bold text-amber-700 dark:text-amber-400">Doctor-managed: this fee is read-only for hospital administrators.</p>
+        <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800">
+          {isDoctorFeeManaged ? (
+            <p className="mb-2 text-[10px] font-bold text-amber-700 dark:text-amber-400">
+              Doctor-managed: fee is set by doctor in doctor portal.
+            </p>
+          ) : null}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <button
+              className="inline-flex min-h-9 items-center rounded-xl border border-indigo-200 bg-white px-3 text-xs font-bold text-indigo-700 transition hover:bg-indigo-50 dark:border-indigo-500/30 dark:bg-slate-800 dark:text-indigo-300 dark:hover:bg-slate-700"
+              onClick={() => setEditing(true)}
+              type="button"
+            >
+              {hospitalMaySetPrice ? "Edit service & fee" : "Edit service"}
+            </button>
+            <button
+              className="inline-flex min-h-9 items-center gap-1.5 rounded-xl border border-rose-200 bg-white px-3 text-xs font-bold text-rose-700 transition hover:bg-rose-50 disabled:opacity-60 dark:border-rose-500/30 dark:bg-slate-800 dark:text-rose-400 dark:hover:bg-slate-700"
+              disabled={deleting}
+              onClick={() => void remove()}
+              type="button"
+            >
+              <Trash2 size={14} />
+              {deleting ? "Deleting..." : "Delete service"}
+            </button>
+          </div>
+        </div>
       )}
     </article>
   );

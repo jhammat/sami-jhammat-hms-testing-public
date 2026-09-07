@@ -91,6 +91,9 @@ export class BillingService {
       const lines = await this.resolveInvoiceLines(tx, c.tenantId, branchId, input.lines);
       const subtotalMinor = lines.reduce((sum, line) => sum + line.totalMinor, 0);
       const discountMinor = Math.min(Math.max(0, input.discountMinor ?? 0), subtotalMinor);
+      if (discountMinor > 0 && !input.reason?.trim()) {
+        throw new WonFlowApiError(400, "discount-reason-required", "A reason or authority note is required when applying a discount.");
+      }
       const totalMinor = subtotalMinor - discountMinor;
       const invoiceNumber = await nextInvoiceNumber(tx, c.tenantId);
       const invoice = await tx.invoice.create({
@@ -212,12 +215,17 @@ export class BillingService {
     if (!Number.isInteger(input.amountMinor) || input.amountMinor <= 0) throw new WonFlowApiError(400, "invalid-refund-amount", "The refund amount must be a positive whole number of minor units.");
 
     return database.$transaction(async (tx) => {
+      const invoice = await tx.invoice.findFirst({ where: { id: input.invoiceId, tenantId: c.tenantId } });
+      if (!invoice) throw new WonFlowApiError(404, "invoice-not-found", "The invoice could not be found.");
       const payment = await tx.payment.findFirst({ where: { id: input.paymentId, tenantId: c.tenantId, invoiceId: input.invoiceId, status: "COMPLETED" } });
       if (!payment) throw new WonFlowApiError(404, "payment-not-found", "The payment could not be found.");
       const existingRefunds = await tx.refund.aggregate({ where: { paymentId: payment.id, status: { in: ["REQUESTED", "APPROVED", "COMPLETED"] } }, _sum: { amountMinor: true } });
       const alreadyRefundedMinor = existingRefunds._sum.amountMinor ?? 0;
       const refundableMinor = payment.amountMinor - alreadyRefundedMinor;
       if (input.amountMinor > refundableMinor) throw new WonFlowApiError(409, "refund-exceeds-payment", `This refund of ${input.amountMinor} exceeds the refundable balance of ${refundableMinor} on this payment.`);
+
+      const locked = await tx.invoice.updateMany({ where: { id: invoice.id, version: invoice.version }, data: { version: { increment: 1 } } });
+      if (locked.count !== 1) throw new WonFlowApiError(409, "concurrent-refund-conflict", "The invoice was modified by a concurrent transaction. Please refresh and try again.");
 
       const refund = await tx.refund.create({
         data: { tenantId: c.tenantId, invoiceId: input.invoiceId, paymentId: payment.id, amountMinor: input.amountMinor, currencyCode: payment.currencyCode, reason: input.reason.trim(), requestedByMembershipId: c.membershipId! },
@@ -227,7 +235,7 @@ export class BillingService {
     });
   }
 
-  /** A refund is never released on the requester's own authority — approving it records a distinct approver and a reason, and only ever moves REQUESTED -> APPROVED. Paying it out is a separate step outside this task's scope. */
+  /** A refund is never released on the requester's own authority — approving it records a distinct approver and a reason, and moves REQUESTED -> APPROVED. */
   async approveRefund(rc: WonFlowRequestContext, refundId: string, input: { reason: string }) {
     const c = requireTenantContext(rc);
     requirePermission(c, "billing.refunds.manage");
@@ -242,6 +250,99 @@ export class BillingService {
       const approved = await tx.refund.update({ where: { id: refund.id }, data: { status: "APPROVED", approvedByMembershipId: c.membershipId!, approvedAt: new Date() } });
       await tx.auditEvent.create({ data: { tenantId: c.tenantId, branchId, actorMembershipId: c.membershipId, sessionId: c.sessionId, requestId: c.requestId, action: "billing.refund.approved", entityType: "refund", entityId: refund.id, severity: "INFORMATION", reason: input.reason.trim(), sourceApplication: c.sourceApplication } });
       return approved;
+    });
+  }
+
+  /** Disburse an approved (or requested) refund to the patient, moving it to COMPLETED and adjusting the invoice paid balance. */
+  async completeRefund(rc: WonFlowRequestContext, refundId: string, input: { reason?: string }) {
+    const c = requireTenantContext(rc);
+    requirePermission(c, "billing.refunds.manage");
+    const branchId = requireBranchId(c);
+
+    return database.$transaction(async (tx) => {
+      const refund = await tx.refund.findFirst({
+        where: { id: refundId, tenantId: c.tenantId },
+        include: { invoice: true },
+      });
+      if (!refund) throw new WonFlowApiError(404, "refund-not-found", "The refund request could not be found.");
+      if (refund.status !== "APPROVED" && refund.status !== "REQUESTED") {
+        throw new WonFlowApiError(409, "refund-not-completable", `Only an approved or requested refund can be completed. Current status: ${refund.status}`);
+      }
+
+      const completed = await tx.refund.update({
+        where: { id: refund.id },
+        data: {
+          status: "COMPLETED",
+          completedAt: new Date(),
+          ...(refund.approvedAt ? {} : { approvedAt: new Date(), approvedByMembershipId: c.membershipId }),
+        },
+      });
+
+      // Decrement invoice paidMinor to reflect funds returned to the patient
+      const newPaidMinor = Math.max(0, refund.invoice.paidMinor - refund.amountMinor);
+      const newInvoiceStatus = newPaidMinor === 0 ? "ISSUED" : "PARTIALLY_PAID";
+      await tx.invoice.update({
+        where: { id: refund.invoiceId },
+        data: {
+          paidMinor: newPaidMinor,
+          status: newInvoiceStatus,
+          version: { increment: 1 },
+        },
+      });
+
+      await tx.auditEvent.create({
+        data: {
+          tenantId: c.tenantId,
+          branchId,
+          actorMembershipId: c.membershipId,
+          sessionId: c.sessionId,
+          requestId: c.requestId,
+          action: "billing.refund.completed",
+          entityType: "refund",
+          entityId: refund.id,
+          severity: "INFORMATION",
+          reason: input.reason?.trim() || "Refund disbursed and completed",
+          sourceApplication: c.sourceApplication,
+        },
+      });
+
+      return completed;
+    });
+  }
+
+  async rejectRefund(rc: WonFlowRequestContext, refundId: string, input: { reason: string }) {
+    const c = requireTenantContext(rc);
+    requirePermission(c, "billing.refunds.manage");
+    const branchId = requireBranchId(c);
+    if (!input.reason?.trim()) throw new WonFlowApiError(400, "reason-required", "A reason is required to reject a refund.");
+
+    return database.$transaction(async (tx) => {
+      const refund = await tx.refund.findFirst({ where: { id: refundId, tenantId: c.tenantId } });
+      if (!refund) throw new WonFlowApiError(404, "refund-not-found", "The refund request could not be found.");
+      if (refund.status !== "REQUESTED") throw new WonFlowApiError(409, "refund-not-rejectable", "Only a requested refund can be rejected.");
+
+      const rejected = await tx.refund.update({
+        where: { id: refund.id },
+        data: { status: "REJECTED" },
+      });
+
+      await tx.auditEvent.create({
+        data: {
+          tenantId: c.tenantId,
+          branchId,
+          actorMembershipId: c.membershipId,
+          sessionId: c.sessionId,
+          requestId: c.requestId,
+          action: "billing.refund.rejected",
+          entityType: "refund",
+          entityId: refund.id,
+          severity: "INFORMATION",
+          reason: input.reason.trim(),
+          sourceApplication: c.sourceApplication,
+        },
+      });
+
+      return rejected;
     });
   }
 

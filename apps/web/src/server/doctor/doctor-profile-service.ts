@@ -54,10 +54,16 @@ function serializeProfile(profile: Awaited<ReturnType<typeof resolveProfile>>["p
     qualifications: profile.qualifications ?? "",
     biography: profile.biography ?? "",
     contactPhone: profile.contactPhone ?? "",
-    durationMinutes: profile.durationMinutes,
+    durationMinutes: profile.durationMinutes && profile.durationMinutes >= 5 ? profile.durationMinutes : 15,
     publiclyBookable: profile.publiclyBookable,
     signatureImageData: profile.signatureImageData ?? null,
   };
+}
+
+function toUuid(val: string | null | undefined): string | null {
+  if (!val) return null;
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRegex.test(val) ? val : null;
 }
 
 export class DoctorProfileService {
@@ -85,26 +91,44 @@ export class DoctorProfileService {
     };
     const displayName = text("displayName", 250);
     if (displayName !== undefined && displayName.length < 2) {
-      throw new WonFlowApiError(400, "invalid-doctor-name", "Enter the doctor's full name.");
+      throw new WonFlowApiError(400, "invalid-doctor-name", "Enter the doctor's full name (minimum 2 characters).");
     }
     const branchId = text("primaryBranchId", 80);
-    if (branchId) {
+    const branchUuid = toUuid(branchId);
+    if (branchId && !branchUuid) {
+      throw new WonFlowApiError(400, "invalid-doctor-branch", "Please select a valid hospital location.");
+    }
+    if (branchUuid) {
       const branch = await database.branch.findFirst({
-        where: { id: branchId, tenantId: context.tenantId, organizationId: context.organizationId, archivedAt: null },
+        where: { id: branchUuid, tenantId: context.tenantId, organizationId: context.organizationId, archivedAt: null },
       });
       if (!branch) throw new WonFlowApiError(400, "invalid-doctor-branch", "Select a valid hospital location.");
     }
+
     const profileImageData = input.profileImageData;
     if (
       profileImageData !== undefined &&
       profileImageData !== null &&
-      (typeof profileImageData !== "string" ||
-        !/^data:image\/(jpeg|png|webp);base64,/.test(profileImageData) ||
-        profileImageData.length > 1_500_000)
+      profileImageData !== ""
     ) {
-      throw new WonFlowApiError(400, "invalid-profile-photo", "Upload a JPG, PNG or WebP image smaller than 1 MB.");
+      if (typeof profileImageData !== "string") {
+        throw new WonFlowApiError(400, "invalid-profile-photo", "Upload a JPG, PNG or WebP image smaller than 1 MB.");
+      }
+      const isDataUrl = /^data:image\/(jpeg|jpg|png|webp);(?:[^;]+;)*base64,/i.test(profileImageData);
+      const isHttpUrl = /^https?:\/\//i.test(profileImageData) || /^\//i.test(profileImageData);
+      if (!isDataUrl && !isHttpUrl) {
+        throw new WonFlowApiError(400, "invalid-profile-photo", "Upload a JPG, PNG or WebP image smaller than 1 MB.");
+      }
+      if (profileImageData.length > 2_500_000) {
+        throw new WonFlowApiError(400, "invalid-profile-photo", "The profile photo exceeds 1 MB. Please upload a smaller image.");
+      }
     }
-    const duration = input.durationMinutes;
+
+    const rawDuration = input.durationMinutes;
+    const duration =
+      typeof rawDuration === "string" && rawDuration.trim() !== ""
+        ? Number(rawDuration)
+        : rawDuration;
     if (duration !== undefined && (!Number.isInteger(duration) || Number(duration) < 5 || Number(duration) > 480)) {
       throw new WonFlowApiError(400, "invalid-consultation-duration", "Consultation duration must be between 5 and 480 minutes.");
     }
@@ -114,51 +138,102 @@ export class DoctorProfileService {
     if (
       signatureImageData !== undefined &&
       signatureImageData !== null &&
-      (typeof signatureImageData !== "string" ||
-        !/^data:image\/(jpeg|png|webp);base64,/.test(signatureImageData) ||
-        signatureImageData.length > 1_500_000)
+      signatureImageData !== ""
     ) {
-      throw new WonFlowApiError(400, "invalid-signature-image", "Upload a JPG, PNG or WebP signature smaller than 1 MB.");
+      if (typeof signatureImageData !== "string") {
+        throw new WonFlowApiError(400, "invalid-signature-image", "Upload a JPG, PNG or WebP signature smaller than 1 MB.");
+      }
+      const isSigDataUrl = /^data:image\/(jpeg|jpg|png|webp);(?:[^;]+;)*base64,/i.test(signatureImageData);
+      const isSigHttpUrl = /^https?:\/\//i.test(signatureImageData) || /^\//i.test(signatureImageData);
+      if (!isSigDataUrl && !isSigHttpUrl) {
+        throw new WonFlowApiError(400, "invalid-signature-image", "Upload a JPG, PNG or WebP signature smaller than 1 MB.");
+      }
+      if (signatureImageData.length > 2_500_000) {
+        throw new WonFlowApiError(400, "invalid-signature-image", "Upload a JPG, PNG or WebP signature smaller than 1 MB.");
+      }
     }
 
-    await database.$transaction(async (tx) => {
-      await tx.tenantMembership.update({
-        where: { id: profile.staffProfile.membershipId },
-        data: { displayName },
-      });
-      await tx.staffProfile.update({
-        where: { id: profile.staffProfileId },
-        data: { title: text("title", 120), branchId: branchId || undefined },
-      });
-      await tx.doctorProfile.update({
-        where: { id: profile.id },
-        data: {
-          specialty: text("specialtyName", 200),
-          registrationNumber: text("registrationNumber", 150),
-          qualifications: text("qualifications", 2000),
-          biography: text("biography", 5000),
-          contactPhone: text("contactPhone", 80),
-          durationMinutes: duration === undefined ? undefined : Number(duration),
-          publiclyBookable: typeof input.publiclyBookable === "boolean" ? input.publiclyBookable : undefined,
-          profileImageData: profileImageData === undefined ? undefined : profileImageData,
-          signatureImageData: signatureImageData === undefined ? undefined : signatureImageData,
-        },
-      });
-      await tx.auditEvent.create({
-        data: {
+    const regNum = text("registrationNumber", 150) || null;
+    if (regNum) {
+      const existing = await database.doctorProfile.findFirst({
+        where: {
           tenantId: context.tenantId,
-          branchId: context.branchId,
-          actorMembershipId: context.membershipId,
-          sessionId: context.sessionId,
-          requestId: context.requestId,
-          action: "doctor.profile.updated",
-          entityType: "doctor-profile",
-          entityId: profile.id,
-          severity: "INFORMATION",
-          sourceApplication: context.sourceApplication,
+          registrationNumber: regNum,
+          id: { not: profile.id },
         },
       });
-    });
+      if (existing) {
+        throw new WonFlowApiError(
+          400,
+          "duplicate-registration-number",
+          "This registration number is already in use by another practitioner in your hospital.",
+        );
+      }
+    }
+
+    try {
+      await database.$transaction(async (tx) => {
+        await tx.tenantMembership.update({
+          where: { id: profile.staffProfile.membershipId },
+          data: { displayName },
+        });
+        await tx.staffProfile.update({
+          where: { id: profile.staffProfileId },
+          data: { title: text("title", 120) || null, branchId: branchUuid || null },
+        });
+        await tx.doctorProfile.update({
+          where: { id: profile.id },
+          data: {
+            specialty: text("specialtyName", 200) || null,
+            registrationNumber: regNum,
+            qualifications: text("qualifications", 2000) || null,
+            biography: text("biography", 5000) || null,
+            contactPhone: text("contactPhone", 80) || null,
+            durationMinutes: duration === undefined ? undefined : Number(duration),
+            publiclyBookable: typeof input.publiclyBookable === "boolean" ? input.publiclyBookable : undefined,
+            profileImageData: profileImageData === undefined ? undefined : (profileImageData || null),
+            signatureImageData: signatureImageData === undefined ? undefined : (signatureImageData || null),
+          },
+        });
+        await tx.auditEvent.create({
+          data: {
+            tenantId: context.tenantId,
+            branchId: toUuid(context.branchId) || branchUuid,
+            actorMembershipId: toUuid(context.membershipId),
+            sessionId: toUuid(context.sessionId),
+            requestId: context.requestId,
+            action: "doctor.profile.updated",
+            entityType: "doctor-profile",
+            entityId: profile.id,
+            severity: "INFORMATION",
+            sourceApplication: context.sourceApplication,
+          },
+        });
+      });
+    } catch (caught: unknown) {
+      if (caught instanceof WonFlowApiError) {
+        throw caught;
+      }
+      if (typeof caught === "object" && caught !== null && "code" in caught && (caught as { code: string }).code === "P2002") {
+        throw new WonFlowApiError(
+          400,
+          "duplicate-registration-number",
+          "This registration number is already registered for another practitioner.",
+        );
+      }
+      const message = caught instanceof Error ? caught.message : String(caught);
+      if (/registration/i.test(message)) {
+        throw new WonFlowApiError(400, "duplicate-registration-number", "Registration number error. Please check this field.");
+      }
+      if (/branch/i.test(message) || /location/i.test(message)) {
+        throw new WonFlowApiError(400, "invalid-doctor-branch", "Location error. Please select a valid hospital location.");
+      }
+      if (/image|photo/i.test(message)) {
+        throw new WonFlowApiError(400, "invalid-profile-photo", "Profile photo error. Please upload a smaller image.");
+      }
+      console.error("[DoctorProfileService.updateProfile error]", caught);
+      throw new WonFlowApiError(500, "profile-save-failed", `Could not save profile: ${message}`);
+    }
     return (await this.getProfile(requestContext)).profile;
   }
 

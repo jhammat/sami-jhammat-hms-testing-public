@@ -787,6 +787,7 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
   // The letterhead comes from the organization record so every counter prints
   // the same logo, not just the workstation that uploaded it.
   const [hospitalLogoUrl, setHospitalLogoUrl] = useState<string>("");
+  const [hospitalDisplayName, setHospitalDisplayName] = useState<string>("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -795,8 +796,11 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
         try {
           const response = await fetch("/api/v1/organization/branding", { cache: "no-store", signal: controller.signal });
           if (!response.ok) return;
-          const body = (await response.json()) as { logoDataUrl?: string | null };
-          if (!controller.signal.aborted && body.logoDataUrl) setHospitalLogoUrl(body.logoDataUrl);
+          const body = (await response.json()) as { displayName?: string | null; logoDataUrl?: string | null };
+          if (!controller.signal.aborted) {
+            if (body.displayName) setHospitalDisplayName(body.displayName);
+            if (body.logoDataUrl) setHospitalLogoUrl(body.logoDataUrl);
+          }
         } catch {}
       })();
     });
@@ -809,10 +813,10 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
     if (!inv) return;
     const paid = paidAmountMinor ?? receipt?.paidMinor ?? inv.paidMinor;
 
-    const hospitalLogo = hospitalLogoUrl || "/brand/wonflow-logo.png";
-
     const popup = window.open("", "_blank", "width=580,height=820");
     if (!popup) return;
+
+    const displayOrgTitle = (hospitalDisplayName || session?.orgLabel || "Hospital Care").toUpperCase();
 
     const lineRows = inv.lines
       .map(
@@ -831,11 +835,18 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
 
     popup.document.write(`<!DOCTYPE html><html><head><title>Receipt ${inv.invoiceNumber}</title></head><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;padding:32px;color:#0f172a;max-width:520px;margin:0 auto">
       <div style="text-align:center;border-bottom:2px solid #0f172a;padding-bottom:16px;margin-bottom:16px">
+        ${hospitalLogoUrl ? `
         <div style="display:flex;align-items:center;justify-content:center;margin-bottom:8px">
-          <img src="${hospitalLogo}" alt="Hospital Logo" style="max-height:55px;max-width:200px;object-fit:contain" onerror="this.style.display='none'" />
-        </div>
-        <h2 style="margin:4px 0 0 0;font-size:20px;font-weight:900;letter-spacing:-0.5px;color:#1e3a8a">WONFLOW HOSPITAL PLATFORM</h2>
-        <p style="margin:3px 0 0 0;font-size:11px;color:#475569;font-weight:700">Official Diagnostic Authorization & Counter Payment Token</p>
+          <img src="${hospitalLogoUrl}" alt="Hospital Logo" style="max-height:55px;max-width:200px;object-fit:contain" onerror="this.style.display='none'" />
+        </div>` : `
+        <div style="display:flex;align-items:center;justify-content:center;margin-bottom:6px">
+          <svg viewBox="0 0 48 48" width="40" height="40" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="48" height="48" rx="12" fill="#0f172a"/>
+            <path d="M24 11v26M11 24h26" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round"/>
+          </svg>
+        </div>`}
+        <h2 style="margin:4px 0 0 0;font-size:18px;font-weight:900;letter-spacing:-0.5px;color:#0f172a">${displayOrgTitle}</h2>
+        <p style="margin:3px 0 0 0;font-size:11px;color:#475569;font-weight:700">Official Diagnostic Authorization &amp; Counter Payment Token</p>
       </div>
 
       <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:16px;background:#f8fafc;padding:12px 14px;border-radius:10px;border:1px solid #e2e8f0">
@@ -897,6 +908,9 @@ export function BillingCounterWorkflow({ initialPatientId }: { initialPatientId?
           <div style="width:140px;border-bottom:1px dashed #94a3b8;height:24px"></div>
           <span style="font-size:10px;text-transform:uppercase">Cashier Stamp / Signature</span>
         </div>
+      </div>
+      <div style="margin-top:16px;text-align:center;font-size:8px;color:#94a3b8">
+        Powered by WonFlow Health Systems
       </div>
     </body></html>`);
     popup.document.close();

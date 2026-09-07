@@ -146,7 +146,7 @@ export async function flushOutbox(): Promise<{
 
   const pending = await getPendingOutboxItems();
   if (pending.length === 0) {
-    return { synced: 0, duplicate: 0, rejected: 0, results: [] };
+    return null;
   }
 
   try {
@@ -169,9 +169,9 @@ export async function flushOutbox(): Promise<{
 
     const data = (await res.json()) as BatchSyncResponse;
 
-    // Purge items that are accepted or already registered as duplicates
+    // Purge items that are accepted, already registered as duplicates, or rejected
     const idsToPurge = data.results
-      .filter((r) => r.status === "PROCESSED" || r.status === "DUPLICATE_IGNORED")
+      .filter((r) => r.status === "PROCESSED" || r.status === "DUPLICATE_IGNORED" || r.status === "REJECTED")
       .map((r) => r.id);
 
     await removeOutboxItems(idsToPurge);
@@ -206,9 +206,14 @@ export function useOfflineSyncStatus() {
   const triggerSync = useCallback(async () => {
     if (!navigator.onLine || isSyncing) return;
     try {
+      const items = await getPendingOutboxItems();
+      if (items.length === 0) {
+        setPendingCount(0);
+        return;
+      }
       setIsSyncing(true);
       const result = await flushOutbox();
-      if (result) {
+      if (result && result.synced > 0) {
         setLastSyncedAt(new Date());
       }
     } finally {
@@ -229,7 +234,6 @@ export function useOfflineSyncStatus() {
 
     window.addEventListener("online", handleOnline);
     window.addEventListener("offline", handleOffline);
-    window.addEventListener("focus", () => void triggerSync());
 
     const listener: SyncListener = () => {
       void refreshCount();
