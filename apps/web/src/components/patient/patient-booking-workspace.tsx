@@ -557,9 +557,9 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
                 return (
                   <button
                     aria-pressed={selected}
-                    className={`rounded-2xl border px-4 py-2.5 text-xs font-black transition-all ${
+                    className={`inline-flex items-center gap-1.5 rounded-2xl border px-3.5 py-2 text-xs font-black transition-all ${
                       !slot.available
-                        ? "cursor-not-allowed border-slate-100 bg-slate-100 text-slate-400 line-through dark:border-slate-800 dark:bg-slate-800/40"
+                        ? "cursor-not-allowed border-slate-200 bg-slate-100/90 text-slate-400 dark:border-slate-800 dark:bg-slate-800/40"
                         : selected
                           ? "border-blue-600 bg-blue-600 text-white shadow-md ring-2 ring-blue-300 dark:ring-blue-900"
                           : "border-slate-200 bg-white text-slate-700 hover:border-blue-200 hover:bg-blue-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
@@ -570,7 +570,12 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
                     title={slot.available ? undefined : "This slot has already been reserved."}
                     type="button"
                   >
-                    {new Intl.DateTimeFormat("en-PK", { timeStyle: "short", timeZone: slot.timezone }).format(new Date(slot.startsAt))}
+                    <span>{new Intl.DateTimeFormat("en-PK", { timeStyle: "short", timeZone: slot.timezone }).format(new Date(slot.startsAt))}</span>
+                    {!slot.available ? (
+                      <span className="rounded-md bg-slate-200 px-1.5 py-0.5 text-[9px] font-extrabold uppercase text-slate-500 dark:bg-slate-700 dark:text-slate-400">
+                        Booked
+                      </span>
+                    ) : null}
                   </button>
                 );
               })}

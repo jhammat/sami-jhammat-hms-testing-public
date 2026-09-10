@@ -6,7 +6,8 @@ export interface ReceptionOverview{patientsToday:number;appointmentsToday:number
 export interface RegisterPatientInput{givenName:string;middleName?:string;familyName:string;dateOfBirth?:string;sex?:string;phone?:string;email?:string;fatherName?:string;bloodGroup?:string;emergencyContact?:string;address?:unknown;guardianData?:unknown;consentData?:unknown;identifiers?:{type:string;system:string;value:string;isPrimary?:boolean}[]}
 export interface BookAppointmentInput{patientId:string;doctorId?:string;serviceId?:string;startsAt:string;endsAt:string;reason?:string;source:"reception"|"walk-in"|"patient"|"public";idempotencyKey:string;consultationMode?:"IN_PERSON"|"ONLINE"}
 export interface ReceptionSlot{start:string;end:string;label:string;available:boolean;startsAt:string;endsAt:string;roomLabel:string|null}
-export interface ReceptionSlotsResult{slots:ReceptionSlot[];slotMinutes:number;maxSlots:number;doctorTimingLabel?:string;unavailableReason?:string}
+export interface ReceptionRosteredDay{weekday:number;weekdayName:string;timing:string}
+export interface ReceptionSlotsResult{slots:ReceptionSlot[];slotMinutes:number;maxSlots:number;doctorTimingLabel?:string;unavailableReason?:string;rosteredDays?:ReceptionRosteredDay[];nextAvailableDate?:string}
 export const getReceptionOverview=(date:string)=>phaseOneApi<{overview:ReceptionOverview}>(`/api/v1/reception/overview?date=${encodeURIComponent(date)}`);
 export const searchReceptionPatients=(query:string)=>phaseOneApi<{patients:ReceptionPatient[]}>(`/api/v1/patients?query=${encodeURIComponent(query)}`);
 export const registerReceptionPatient=(input:RegisterPatientInput)=>phaseOneApi<{patient:ReceptionPatient;possibleDuplicates:ReceptionPatient[]}>("/api/v1/patients",{method:"POST",body:JSON.stringify(input)});

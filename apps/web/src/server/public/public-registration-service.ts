@@ -272,7 +272,7 @@ export async function submitPublicBooking(tenantSlug: string, input: PublicBooki
       const endsAt = new Date(startsAt.getTime() + rule.service.durationMinutes * 60_000);
       const withinWindow = await assertWithinEffectiveWindow(transaction, { tenantId: tenant.id, doctorId: rule.doctorId, branchId: rule.branchId, startsAt, endsAt, timezone: rule.branch.timezone, rosterStartsMinute: rule.startsMinute, rosterEndsMinute: rule.endsMinute });
       if (!withinWindow.ok) throw new WonFlowApiError(409, "booking-slot-unavailable", withinWindow.reason);
-      const reserved = await transaction.appointment.count({ where: { tenantId: tenant.id, branchId: rule.branchId, doctorId: rule.doctorId, status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_QUEUE", "IN_PROGRESS"] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } });
+      const reserved = await transaction.appointment.count({ where: { tenantId: tenant.id, doctorId: rule.doctorId, status: { notIn: ["CANCELLED", "NO_SHOW"] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } });
       if (reserved >= rule.capacity) throw new WonFlowApiError(409, "booking-slot-taken", "That appointment time was just taken. Choose another time.");
       const requiresPrepayment = mode === "ONLINE" && rule.service.requiresPrepayment;
 

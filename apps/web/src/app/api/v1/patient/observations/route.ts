@@ -18,7 +18,7 @@ async function resolvePatientFromContext(rc: {
     throw new WonFlowApiError(401, "unauthorized", "User identity is required.");
   }
 
-  const access = await database.patientAccess.findFirst({
+  let access = await database.patientAccess.findFirst({
     where: {
       identityId: idToMatch,
       isActive: true,
@@ -26,6 +26,41 @@ async function resolvePatientFromContext(rc: {
     },
     include: { patient: true },
   });
+
+  if (!access) {
+    const identity = await database.identity.findUnique({
+      where: { id: idToMatch },
+      select: { email: true, normalizedEmail: true, phone: true },
+    });
+
+    if (identity) {
+      const matchingPatient = await database.patient.findFirst({
+        where: {
+          tenantId: rc.tenantId,
+          status: "ACTIVE",
+          OR: [
+            ...(identity.normalizedEmail ? [{ normalizedEmail: identity.normalizedEmail }] : []),
+            ...(identity.email ? [{ email: identity.email }] : []),
+            ...(identity.phone ? [{ phone: identity.phone }, { normalizedPhone: identity.phone }] : []),
+          ],
+        },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (matchingPatient) {
+        access = await database.patientAccess.create({
+          data: {
+            identityId: idToMatch,
+            patientId: matchingPatient.id,
+            isPrimary: true,
+            isActive: true,
+            relationship: "self",
+          },
+          include: { patient: true },
+        });
+      }
+    }
+  }
 
   if (!access) {
     throw new WonFlowApiError(404, "patient-access-not-found", "No active patient access found.");

@@ -7,7 +7,7 @@ import { assertWithinEffectiveWindow, localMinuteOfDay, resolveEffectiveAvailabi
 async function resolvePatient(requestContext: WonFlowRequestContext) {
   const context = requireTenantContext(requestContext);
   const now = new Date();
-  const access = await database.patientAccess.findFirst({
+  let access = await database.patientAccess.findFirst({
     where: {
       identityId: context.identityId,
       isActive: true,
@@ -17,6 +17,41 @@ async function resolvePatient(requestContext: WonFlowRequestContext) {
     include: { patient: { include: { identifiers: true } } },
     orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
   });
+
+  if (!access) {
+    const identity = await database.identity.findUnique({
+      where: { id: context.identityId },
+      select: { email: true, normalizedEmail: true, phone: true },
+    });
+    if (identity) {
+      const matchingPatient = await database.patient.findFirst({
+        where: {
+          tenantId: context.tenantId,
+          status: "ACTIVE",
+          OR: [
+            ...(identity.normalizedEmail ? [{ normalizedEmail: identity.normalizedEmail }] : []),
+            ...(identity.email ? [{ email: identity.email }] : []),
+            ...(identity.phone ? [{ phone: identity.phone }, { normalizedPhone: identity.phone }] : []),
+          ],
+        },
+        include: { identifiers: true },
+        orderBy: { createdAt: "desc" },
+      });
+      if (matchingPatient) {
+        access = await database.patientAccess.create({
+          data: {
+            identityId: context.identityId,
+            patientId: matchingPatient.id,
+            isPrimary: true,
+            isActive: true,
+            relationship: "self",
+          },
+          include: { patient: { include: { identifiers: true } } },
+        });
+      }
+    }
+  }
+
   if (!access) throw new WonFlowApiError(403, "patient-access-required", "This account is not linked to an active patient record.");
   return { context, patient: access.patient, access };
 }
@@ -37,7 +72,22 @@ export async function updateMyPatientProfile(requestContext: WonFlowRequestConte
 
 export async function listMyAppointments(requestContext: WonFlowRequestContext) {
   const { context, patient } = await resolvePatient(requestContext);
-  return database.appointment.findMany({ where: { tenantId: context.tenantId, patientId: patient.id }, include: { service: true, branch: true, doctor: { include: { staffProfile: { include: { membership: true } } } } }, orderBy: { startsAt: "desc" }, take: 100 });
+  return database.appointment.findMany({
+    where: { tenantId: context.tenantId, patientId: patient.id },
+    include: {
+      service: true,
+      branch: true,
+      doctor: { include: { staffProfile: { include: { membership: true } } } },
+      encounter: {
+        include: {
+          notes: { where: { status: { in: ["SIGNED", "RELEASED", "AMENDED"] } } },
+          diagnoses: true,
+        },
+      },
+    },
+    orderBy: { startsAt: "desc" },
+    take: 100,
+  });
 }
 
 async function findMyAppointment(requestContext: WonFlowRequestContext, appointmentId: string) {
@@ -230,7 +280,7 @@ export async function getPatientBookingCatalog(requestContext: WonFlowRequestCon
     dayEnd = new Date(new Date(`${date}T23:59:59.999Z`).getTime() + 86_400_000);
   const appointments = rules.length === 0
     ? []
-    : await database.appointment.findMany({ where: { tenantId: context.tenantId, doctorId: { in: [...new Set(rules.map((rule) => rule.doctorId))] }, startsAt: { lte: dayEnd }, endsAt: { gte: dayStart }, status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_QUEUE", "IN_PROGRESS"] } }, select: { doctorId: true, startsAt: true, endsAt: true } });
+    : await database.appointment.findMany({ where: { tenantId: context.tenantId, doctorId: { in: [...new Set(rules.map((rule) => rule.doctorId))] }, startsAt: { lte: dayEnd }, endsAt: { gte: dayStart }, status: { notIn: ["CANCELLED", "NO_SHOW"] } }, select: { doctorId: true, startsAt: true, endsAt: true } });
   // The roster is only the expected arrival window. Where the doctor has
   // recorded a sitting for this date, that sitting replaces it.
   const windows = await resolveEffectiveAvailability({ tenantId: context.tenantId, date, rules });
@@ -407,7 +457,7 @@ export async function bookMyAppointment(requestContext: WonFlowRequestContext, i
     // straddle two offered slots and silently block both.
     const windowStartsMinute = sitting?.startsMinute ?? rule.startsMinute;
     if ((localMinuteOfDay(startsAt, rule.branch.timezone) - windowStartsMinute) % duration !== 0) throw new WonFlowApiError(409, "booking-slot-unavailable", "That appointment time is no longer offered. Choose another time.");
-    const reserved = await transaction.appointment.count({ where: { tenantId: context.tenantId, branchId: rule.branchId, doctorId: rule.doctorId, status: { in: ["PENDING", "CONFIRMED", "CHECKED_IN", "IN_QUEUE", "IN_PROGRESS"] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } });
+    const reserved = await transaction.appointment.count({ where: { tenantId: context.tenantId, doctorId: rule.doctorId, status: { notIn: ["CANCELLED", "NO_SHOW"] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } } });
     if (reserved >= rule.capacity) throw new WonFlowApiError(409, "booking-slot-taken", "That appointment time was just taken. Choose another time.");
     const requiresPrepayment = mode === "ONLINE" && service.requiresPrepayment;
     const appointment = await transaction.appointment.create({ data: { tenantId: context.tenantId, patientId: patient.id, doctorId: rule.doctorId, branchId: rule.branchId, serviceId: service.id, consultationMode: mode, paymentStatus: requiresPrepayment ? "AWAITING_PAYMENT" : "NOT_REQUIRED", status: "CONFIRMED", source: "PATIENT_PORTAL", reason: reason || null, startsAt, endsAt, idempotencyKey: input.idempotencyKey } });
@@ -422,12 +472,28 @@ export async function bookMyAppointment(requestContext: WonFlowRequestContext, i
 export async function getMyActiveCarePlan(requestContext: WonFlowRequestContext) {
   const { context, patient, access } = await resolvePatient(requestContext);
 
+  /*
+   * The patient's current plan, chosen deterministically.
+   *
+   * This was `findFirst` on status alone with no ordering, so a patient who
+   * holds more than one active plan was shown whichever row the database
+   * happened to return — and it could differ between two loads of the same
+   * screen. That is not hypothetical: a surgical recovery plan plus the
+   * "Post-Discharge Medication & Recovery Schedule" that
+   * `generateMedicationTasksFromPrescription` creates on its own is two, and
+   * there are patients in this database with exactly that.
+   *
+   * The most recently started plan is the one being lived now, so that is the
+   * one shown, and `otherActivePlans` reports the rest rather than letting
+   * them vanish silently.
+   */
   const carePlan = await database.carePlan.findFirst({
     where: {
       tenantId: context.tenantId,
       patientId: patient.id,
       status: "ACTIVE",
     },
+    orderBy: [{ startDate: "desc" }, { createdAt: "desc" }],
     include: {
       template: true,
       managingDoctor: {
@@ -450,6 +516,7 @@ export async function getMyActiveCarePlan(requestContext: WonFlowRequestContext)
 
   if (!carePlan) {
     return {
+      otherActivePlans: [] as Array<{ id: string; title: string; startDate: string }>,
       carePlan: null,
       patient: {
         id: patient.id,
@@ -463,7 +530,26 @@ export async function getMyActiveCarePlan(requestContext: WonFlowRequestContext)
   const doctorName =
     carePlan.managingDoctor?.staffProfile?.membership?.displayName || "Care Team Clinician";
 
+  // Anything else still running, so a second plan is visible rather than lost.
+  const otherActivePlans = (
+    await database.carePlan.findMany({
+      where: {
+        tenantId: context.tenantId,
+        patientId: patient.id,
+        status: "ACTIVE",
+        id: { not: carePlan.id },
+      },
+      select: { id: true, title: true, startDate: true },
+      orderBy: [{ startDate: "desc" }],
+    })
+  ).map((plan) => ({
+    id: plan.id,
+    title: plan.title,
+    startDate: plan.startDate.toISOString(),
+  }));
+
   return {
+    otherActivePlans,
     carePlan: {
       id: carePlan.id,
       tenantId: carePlan.tenantId,

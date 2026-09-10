@@ -3396,7 +3396,7 @@ function formatScheduleWindow(startsMinute: number, endsMinute: number): string 
 }
 function timeToMinute(value: string): number { const [hours = "0", minutes = "0"] = value.split(":"); return Number(hours) * 60 + Number(minutes); }
 
-type ScheduleForm = { doctorId: string; branchId: string; serviceId: string; weekday: string; startsAt: string; endsAt: string; capacity: string; validFrom: string };
+type ScheduleForm = { doctorId: string; branchId: string; serviceId: string; weekday: string; weekdays: number[]; startsAt: string; endsAt: string; capacity: string; validFrom: string };
 
 /**
  * Rostered hours are necessary but not sufficient for the patient portal: it
@@ -3443,6 +3443,7 @@ function scheduleToForm(schedule: ScheduleRecord): ScheduleForm {
     branchId: schedule.branch.id,
     serviceId: schedule.service?.id ?? "",
     weekday: String(schedule.weekday),
+    weekdays: [schedule.weekday],
     startsAt: formatMinute(schedule.startsMinute),
     endsAt: schedule.endsMinute === 1440 ? "00:00" : formatMinute(schedule.endsMinute),
     capacity: String(schedule.capacity),
@@ -3451,7 +3452,7 @@ function scheduleToForm(schedule: ScheduleRecord): ScheduleForm {
 }
 
 function ScheduleManager({ schedules, doctors, branches, services, onCreated }: { schedules: ScheduleRecord[]; doctors: DoctorRecord[]; branches: BranchRecord[]; services: ServiceRecord[]; onCreated(): void }) {
-  const blankForm: ScheduleForm = { doctorId: doctors[0]?.id ?? "", branchId: branches[0]?.id ?? "", serviceId: "", weekday: "1", startsAt: "09:00", endsAt: "17:00", capacity: "1", validFrom: "" };
+  const blankForm: ScheduleForm = { doctorId: doctors[0]?.id ?? "", branchId: branches[0]?.id ?? "", serviceId: "", weekday: "1", weekdays: [1], startsAt: "09:00", endsAt: "17:00", capacity: "1", validFrom: "" };
   const [form, setForm] = useState<ScheduleForm>(blankForm);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [loadedForm, setLoadedForm] = useState<ScheduleForm>(blankForm);
@@ -3482,6 +3483,10 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!form.weekdays || form.weekdays.length === 0) {
+      setError("Please select at least one day for the doctor's roster.");
+      return;
+    }
     const startsMinute = timeToMinute(form.startsAt);
     let endsMinute = timeToMinute(form.endsAt);
     if (endsMinute === 0 && startsMinute > 0) {
@@ -3490,7 +3495,17 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
     if (endsMinute === startsMinute) { setError("End time cannot be the same as start time."); return; }
     setSaving(true);
     setError("");
-    const body = JSON.stringify({ doctorId: form.doctorId, branchId: form.branchId, serviceId: form.serviceId || (editingId ? null : undefined), weekday: Number(form.weekday), startsMinute, endsMinute, capacity: Number(form.capacity), validFrom: form.validFrom });
+    const body = JSON.stringify({
+      doctorId: form.doctorId,
+      branchId: form.branchId,
+      serviceId: form.serviceId || (editingId ? null : undefined),
+      weekday: Number(form.weekdays[0] ?? form.weekday),
+      weekdays: form.weekdays,
+      startsMinute,
+      endsMinute,
+      capacity: Number(form.capacity),
+      validFrom: form.validFrom,
+    });
     try {
       if (editingId) await phaseOneApi(`/api/v1/admin/schedules/${editingId}`, { method: "PATCH", body });
       else await phaseOneApi("/api/v1/admin/schedules", { method: "POST", body });
@@ -3609,7 +3624,7 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
           </>
         )}
       </Panel>
-      <Panel description={editingId ? "Change this weekly window, then save it." : "Create a recurring weekly expected-attendance window."} title={editingId ? "Edit rostered hours" : "Add rostered hours"}>
+      <Panel description={editingId ? "Change this weekly window, then save it." : "Create a recurring weekly expected-attendance window across one or more days."} title={editingId ? "Edit rostered hours" : "Add rostered hours"}>
         <form className="space-y-3" onSubmit={save}>
           <LabeledField label="Doctor">
             <select className={fieldClass} disabled={!canCreate} onChange={(event) => setForm({ ...form, doctorId: event.target.value })} required value={form.doctorId}>
@@ -3629,12 +3644,95 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
               {services.map((service) => <option key={service.id} value={service.id}>{service.name}</option>)}
             </select>
           </LabeledField>
-          <div className="grid grid-cols-2 gap-3">
-            <LabeledField label="Weekday">
-              <select className={fieldClass} onChange={(event) => setForm({ ...form, weekday: event.target.value })} value={form.weekday}>
-                {weekdayNames.map((day, index) => <option key={day} value={index}>{day}</option>)}
-              </select>
-            </LabeledField>
+
+          {/* Multi-day / Weekday selector */}
+          <div className="space-y-2 rounded-2xl border border-slate-200/80 bg-slate-50/50 p-3 dark:border-slate-800 dark:bg-slate-900/40">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                {editingId ? "Rostered Day" : "Rostered Days (Multi-day selection)"}
+              </span>
+              {!editingId ? (
+                <div className="flex items-center gap-1.5 text-[10px]">
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, weekdays: [0, 1, 2, 3, 4, 5, 6], weekday: "0" })}
+                    className="rounded px-1.5 py-0.5 font-bold text-indigo-600 hover:bg-indigo-100/60 dark:text-indigo-400 dark:hover:bg-indigo-950/50"
+                  >
+                    All
+                  </button>
+                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, weekdays: [1, 2, 3, 4, 5], weekday: "1" })}
+                    className="rounded px-1.5 py-0.5 font-bold text-indigo-600 hover:bg-indigo-100/60 dark:text-indigo-400 dark:hover:bg-indigo-950/50"
+                  >
+                    Mon–Fri
+                  </button>
+                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, weekdays: [0, 6], weekday: "0" })}
+                    className="rounded px-1.5 py-0.5 font-bold text-indigo-600 hover:bg-indigo-100/60 dark:text-indigo-400 dark:hover:bg-indigo-950/50"
+                  >
+                    Sat–Sun
+                  </button>
+                  <span className="text-slate-300 dark:text-slate-600">·</span>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, weekdays: [] })}
+                    className="rounded px-1.5 py-0.5 font-bold text-slate-500 hover:bg-slate-200/60 dark:text-slate-400 dark:hover:bg-slate-800"
+                  >
+                    Clear
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="grid grid-cols-7 gap-1">
+              {weekdayNames.map((day, index) => {
+                const isSelected = form.weekdays.includes(index);
+                return (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => {
+                      if (editingId) {
+                        setForm({ ...form, weekday: String(index), weekdays: [index] });
+                      } else {
+                        const next = isSelected
+                          ? form.weekdays.filter((w) => w !== index)
+                          : [...form.weekdays, index].sort((a, b) => a - b);
+                        setForm({ ...form, weekdays: next, weekday: String(next[0] ?? index) });
+                      }
+                    }}
+                    className={`flex flex-col items-center justify-center rounded-xl py-2 px-1 text-center transition ${
+                      isSelected
+                        ? "border-2 border-indigo-600 bg-indigo-600 font-black text-white shadow-sm ring-1 ring-indigo-300 dark:border-indigo-500 dark:bg-indigo-600 dark:ring-indigo-950"
+                        : "border border-slate-200 bg-white font-semibold text-slate-700 hover:border-indigo-300 hover:bg-indigo-50/50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-indigo-500/40"
+                    }`}
+                  >
+                    <span className="text-[11px] font-bold">{day.slice(0, 3)}</span>
+                    <span className={`text-[8px] mt-0.5 ${isSelected ? "text-indigo-100 font-extrabold" : "text-slate-400"}`}>
+                      {isSelected ? "Active" : "Off"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            {form.weekdays.length === 0 ? (
+              <p className="text-[10px] font-semibold text-rose-600 dark:text-rose-400">
+                ⚠️ Select at least one day for this doctor's rostered hours.
+              </p>
+            ) : (
+              <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                {form.weekdays.length === 7
+                  ? "✓ Active every day of the week (7 days)"
+                  : `✓ Active on ${form.weekdays.length} day${form.weekdays.length === 1 ? "" : "s"}: ${form.weekdays.map((w) => weekdayNames[w]).join(", ")}`}
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
             <LabeledField label="Capacity"><input className={fieldClass} min="1" onChange={(event) => setForm({ ...form, capacity: event.target.value })} required type="number" value={form.capacity} /></LabeledField>
             <LabeledField label="Start time"><input className={fieldClass} onChange={(event) => setForm({ ...form, startsAt: event.target.value })} required type="time" value={form.startsAt} /></LabeledField>
             <LabeledField label="End time"><input className={fieldClass} onChange={(event) => setForm({ ...form, endsAt: event.target.value })} required type="time" value={form.endsAt} /></LabeledField>
@@ -3651,7 +3749,8 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
                 );
               }
               if (em < sm) {
-                const nextDay = weekdayNames[(Number(form.weekday) + 1) % 7];
+                const dayIndex = form.weekdays[0] ?? Number(form.weekday);
+                const nextDay = weekdayNames[(dayIndex + 1) % 7];
                 return (
                   <p className="rounded-xl border border-indigo-200 bg-indigo-50/70 px-3 py-1.5 text-[11px] font-bold text-indigo-800 dark:border-indigo-500/30 dark:bg-indigo-950/40 dark:text-indigo-300">
                     🌙 Overnight shift: runs from {form.startsAt} through midnight to {form.endsAt} ({nextDay} morning).
@@ -3664,7 +3763,7 @@ function ScheduleManager({ schedules, doctors, branches, services, onCreated }: 
           <LabeledField label="Valid from"><input className={fieldClass} onChange={(event) => setForm({ ...form, validFrom: event.target.value })} required type="date" value={form.validFrom} /></LabeledField>
           <MutationMessage error={error} success="" />
           {editingId && isDirty ? <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300">Unsaved changes to these rostered hours.</p> : null}
-          <button className={`${primaryButtonClass} w-full`} disabled={saving || !canCreate} type="submit"><Plus aria-hidden="true" size={17} />{saving ? (editingId ? "Saving schedule" : "Creating schedule") : (editingId ? "Save schedule" : "Create schedule")}</button>
+          <button className={`${primaryButtonClass} w-full`} disabled={saving || !canCreate || form.weekdays.length === 0} type="submit"><Plus aria-hidden="true" size={17} />{saving ? (editingId ? "Saving schedule" : "Creating schedule") : (editingId ? "Save schedule" : `Create schedule (${form.weekdays.length} day${form.weekdays.length === 1 ? "" : "s"})`)}</button>
           {editingId ? (
             <div className="grid grid-cols-2 gap-2">
               <button className="min-h-11 rounded-xl border border-slate-200 bg-white px-4 text-sm font-bold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700" disabled={saving || deleting} onClick={() => void stopEditing()} type="button">Cancel</button>

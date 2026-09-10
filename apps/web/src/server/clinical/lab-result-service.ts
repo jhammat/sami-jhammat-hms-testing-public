@@ -155,6 +155,8 @@ export class LabResultService {
         critical: isCritical,
         verifiedByMembershipId: isConfirmedByClinician ? membershipIdToUse : null,
         verifiedAt: isConfirmedByClinician ? new Date() : null,
+        releasedByMembershipId: isConfirmedByClinician ? membershipIdToUse : null,
+        releasedAt: isConfirmedByClinician ? new Date() : null,
         resultData: {
           code: input.code,
           displayName,
@@ -253,6 +255,8 @@ export class LabResultService {
         status: "FINAL",
         verifiedByMembershipId: toUuid(rc.membershipId),
         verifiedAt: new Date(),
+        releasedByMembershipId: toUuid(rc.membershipId),
+        releasedAt: new Date(),
         resultData: updatedData,
       },
     });
@@ -331,7 +335,10 @@ export class LabResultService {
         tenantId: rc.tenantId,
         order: { patientId },
         ...(options?.releasedOnly
-          ? { status: { in: ["FINAL", "AMENDED", "CORRECTED"] }, releasedAt: { not: null } }
+          ? {
+              status: { in: ["FINAL", "AMENDED", "CORRECTED"] },
+              OR: [{ releasedAt: { not: null } }, { verifiedAt: { not: null } }],
+            }
           : {}),
       },
       include: { order: true },

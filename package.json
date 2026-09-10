@@ -49,7 +49,9 @@
     "db:seed:hpb": "pnpm exec tsx tooling/scripts/seed-hpb-demo.ts",
     "db:seed:sjh": "pnpm exec tsx tooling/scripts/seed-sami-jhammat-hospital.ts",
     "db:diagnose:booking": "pnpm exec tsx tooling/scripts/diagnose-patient-booking.ts",
-    "db:reset:superadmin": "pnpm exec tsx tooling/scripts/reset-to-fresh-superadmin.ts"
+    "db:reset:superadmin": "pnpm exec tsx tooling/scripts/reset-to-fresh-superadmin.ts",
+    "test:integration:careplan": "pnpm exec tsx --env-file=.env.local apps/web/tests/integration-http/care-plan-lifecycle.ts",
+    "test:integration:careplan-scope": "pnpm exec tsx --env-file=.env.local apps/web/tests/integration-http/care-plan-roster-scope.ts"
   },
   "devDependencies": {
     "dotenv": "^17.4.2",

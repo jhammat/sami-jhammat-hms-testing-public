@@ -146,7 +146,7 @@ async function buildAccount(identity: IdentityWithContext): Promise<Authenticate
    */
   const STAFF_ACCESS_RELATIONSHIPS = ["care-team-allied", "care-team"];
 
-  const patientAccesses = await database.patientAccess.findMany({
+  let patientAccesses = await database.patientAccess.findMany({
     where: {
       identityId: identity.id,
       isActive: true,
@@ -168,6 +168,56 @@ async function buildAccount(identity: IdentityWithContext): Promise<Authenticate
     },
     orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }],
   });
+
+  if (patientAccesses.length === 0) {
+    const matchingPatients = await database.patient.findMany({
+      where: {
+        status: "ACTIVE",
+        tenant: { status: "ACTIVE" },
+        OR: [
+          ...(identity.normalizedEmail ? [{ normalizedEmail: identity.normalizedEmail }] : []),
+          ...(identity.email ? [{ email: identity.email }] : []),
+          ...(identity.phone ? [{ phone: identity.phone }, { normalizedPhone: identity.phone }] : []),
+        ],
+      },
+      include: {
+        tenant: {
+          include: {
+            organizations: { where: { status: "ACTIVE" }, take: 1, select: { id: true } },
+            branches: { where: { status: "ACTIVE", archivedAt: null }, take: 1, select: { id: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+
+    for (const patient of matchingPatients) {
+      const created = await database.patientAccess.upsert({
+        where: { patientId_identityId: { patientId: patient.id, identityId: identity.id } },
+        create: {
+          identityId: identity.id,
+          patientId: patient.id,
+          isPrimary: true,
+          isActive: true,
+          relationship: "self",
+        },
+        update: { isActive: true },
+        include: {
+          patient: {
+            include: {
+              tenant: {
+                include: {
+                  organizations: { where: { status: "ACTIVE" }, take: 1, select: { id: true } },
+                  branches: { where: { status: "ACTIVE", archivedAt: null }, take: 1, select: { id: true } },
+                },
+              },
+            },
+          },
+        },
+      });
+      patientAccesses.push(created);
+    }
+  }
 
   for (const access of patientAccesses) {
     const patientName = `${access.patient.givenName} ${access.patient.familyName}`;

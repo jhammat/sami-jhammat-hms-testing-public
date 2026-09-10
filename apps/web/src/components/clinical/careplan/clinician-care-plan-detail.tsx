@@ -1008,21 +1008,36 @@ export function ClinicianCarePlanDetail({
                                 <span className="text-[11px] font-medium text-slate-400">{humanStatus(task.status)}</span>
                               )}
 
-                              {/* Edit/Delete buttons — only for PENDING tasks */}
+                              {/*
+                                Edit and remove, for a task nobody has acted on yet.
+
+                                These were `opacity-0 group-hover:opacity-100`, so the
+                                only way to discover that a task could be changed at all
+                                was to happen to sweep the mouse over its row. On a
+                                tablet — which is what a surgeon on a ward round is
+                                holding — there is no hover, so they could not be reached
+                                at all, and a keyboard user tabbed onto an invisible
+                                button. They stay quiet until the row is hovered or the
+                                button focused, but they are always there.
+                              */}
                               {task.status === "PENDING" && (
-                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex items-center gap-1">
                                   <button
                                     onClick={() => startEditTask(task)}
-                                    className="rounded-lg p-1.5 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950 transition"
-                                    title="Edit Task"
+                                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-blue-50 hover:text-blue-600 focus-visible:bg-blue-50 focus-visible:text-blue-600 group-hover:text-blue-500 dark:hover:bg-blue-950 dark:focus-visible:bg-blue-950"
+                                    aria-label={`Edit task: ${task.title}`}
+                                    title="Edit task"
+                                    type="button"
                                   >
                                     <Pencil className="h-3.5 w-3.5" />
                                   </button>
                                   <button
                                     onClick={() => void handleDeleteTask(task.id)}
                                     disabled={deletingTaskId === task.id}
-                                    className="rounded-lg p-1.5 text-red-500 hover:bg-red-50 dark:hover:bg-red-950 transition disabled:opacity-50"
-                                    title="Delete Task"
+                                    className="rounded-lg p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600 focus-visible:bg-red-50 focus-visible:text-red-600 group-hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950 dark:focus-visible:bg-red-950"
+                                    aria-label={`Remove task: ${task.title}`}
+                                    title="Remove task"
+                                    type="button"
                                   >
                                     {deletingTaskId === task.id ? (
                                       <RefreshCw className="h-3.5 w-3.5 animate-spin" />

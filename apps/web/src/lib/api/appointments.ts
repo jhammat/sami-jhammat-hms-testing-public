@@ -108,10 +108,19 @@ export interface AppointmentSlot {
   roomLabel: string | null;
 }
 
+export interface AppointmentRosteredDay {
+  weekday: number;
+  weekdayName: string;
+  timing: string;
+}
+
 export interface AppointmentSlotsResult {
   slots: AppointmentSlot[];
   slotMinutes: number;
   unavailableReason?: string;
+  doctorTimingLabel?: string;
+  rosteredDays?: AppointmentRosteredDay[];
+  nextAvailableDate?: string;
 }
 
 export interface ListAppointmentSlotsQuery {

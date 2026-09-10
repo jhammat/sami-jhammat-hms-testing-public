@@ -1144,11 +1144,16 @@ export class HospitalAdministrationService {
       return updatedDoctor;
     });
   }
-  async createSchedule(rc: WonFlowRequestContext, input: { doctorId: string; branchId: string; serviceId?: string; weekday: number; startsMinute: number; endsMinute: number; capacity?: number; validFrom: string; validUntil?: string }) {
+  async createSchedule(rc: WonFlowRequestContext, input: { doctorId: string; branchId: string; serviceId?: string; weekday?: number; weekdays?: number[]; startsMinute: number; endsMinute: number; capacity?: number; validFrom: string; validUntil?: string }) {
     const c = this.context(rc);
     requirePermission(c, "organization.schedules.manage");
-    if (!Number.isInteger(input.weekday) || input.weekday < 0 || input.weekday > 6)
-      throw new WonFlowApiError(400, "invalid-schedule-weekday", "Select a valid weekday.");
+    const weekdays = input.weekdays && Array.isArray(input.weekdays) && input.weekdays.length > 0
+      ? Array.from(new Set(input.weekdays))
+      : input.weekday !== undefined
+        ? [input.weekday]
+        : [];
+    if (weekdays.length === 0 || weekdays.some((wd) => !Number.isInteger(wd) || wd < 0 || wd > 6))
+      throw new WonFlowApiError(400, "invalid-schedule-weekday", "Select at least one valid weekday.");
     let endsMinute = input.endsMinute;
     if (endsMinute === 0 && input.startsMinute > 0) {
       endsMinute = 1440;
@@ -1172,51 +1177,59 @@ export class HospitalAdministrationService {
     if (!branch || !doctor) throw new WonFlowApiError(400, "invalid-schedule-assignment", "Doctor or branch is outside this hospital.");
     if (input.serviceId && !selectedService) throw new WonFlowApiError(400, "invalid-schedule-service", "Service is outside this hospital.");
     return database.$transaction(async (tx) => {
-      if (isOvernight) {
-        const entity = await tx.availabilityRule.create({
-          data: {
-            tenantId: c.tenantId,
-            doctorId: input.doctorId,
-            branchId: input.branchId,
-            serviceId: input.serviceId ?? null,
-            weekday: input.weekday,
-            startsMinute: input.startsMinute,
-            endsMinute: 1440,
-            capacity: input.capacity ?? 1,
-            validFrom,
-            validUntil,
-          },
-        });
-        await tx.availabilityRule.create({
-          data: {
-            tenantId: c.tenantId,
-            doctorId: input.doctorId,
-            branchId: input.branchId,
-            serviceId: input.serviceId ?? null,
-            weekday: (input.weekday + 1) % 7,
-            startsMinute: 0,
-            endsMinute,
-            capacity: input.capacity ?? 1,
-            validFrom,
-            validUntil,
-          },
-        });
-        await audit(tx, c, "organization.schedule.created", "availability-rule", entity.id);
-        return entity;
+      const createdList = [];
+      for (const wd of weekdays) {
+        if (isOvernight) {
+          const entity = await tx.availabilityRule.create({
+            data: {
+              tenantId: c.tenantId,
+              doctorId: input.doctorId,
+              branchId: input.branchId,
+              serviceId: input.serviceId ?? null,
+              weekday: wd,
+              startsMinute: input.startsMinute,
+              endsMinute: 1440,
+              capacity: input.capacity ?? 1,
+              validFrom,
+              validUntil,
+            },
+          });
+          await tx.availabilityRule.create({
+            data: {
+              tenantId: c.tenantId,
+              doctorId: input.doctorId,
+              branchId: input.branchId,
+              serviceId: input.serviceId ?? null,
+              weekday: (wd + 1) % 7,
+              startsMinute: 0,
+              endsMinute,
+              capacity: input.capacity ?? 1,
+              validFrom,
+              validUntil,
+            },
+          });
+          await audit(tx, c, "organization.schedule.created", "availability-rule", entity.id);
+          createdList.push(entity);
+        } else {
+          const entity = await tx.availabilityRule.create({
+            data: {
+              tenantId: c.tenantId,
+              doctorId: input.doctorId,
+              branchId: input.branchId,
+              weekday: wd,
+              startsMinute: input.startsMinute,
+              endsMinute,
+              serviceId: input.serviceId ?? null,
+              capacity: input.capacity ?? 1,
+              validFrom,
+              validUntil,
+            },
+          });
+          await audit(tx, c, "organization.schedule.created", "availability-rule", entity.id);
+          createdList.push(entity);
+        }
       }
-      const entity = await tx.availabilityRule.create({
-        data: {
-          tenantId: c.tenantId,
-          ...input,
-          endsMinute,
-          serviceId: input.serviceId ?? null,
-          capacity: input.capacity ?? 1,
-          validFrom,
-          validUntil,
-        },
-      });
-      await audit(tx, c, "organization.schedule.created", "availability-rule", entity.id);
-      return entity;
+      return createdList[0];
     });
   }
   async updateSchedule(rc: WonFlowRequestContext, id: string, input: { doctorId?: string; branchId?: string; serviceId?: string | null; weekday?: number; startsMinute?: number; endsMinute?: number; capacity?: number; validFrom?: string; validUntil?: string | null; isActive?: boolean }) {

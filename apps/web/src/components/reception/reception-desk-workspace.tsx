@@ -1264,12 +1264,17 @@ export function ReceptionDeskWorkspace() {
   const [
     appointmentTime,
     setAppointmentTime,
-  ] = useState("11:30");
+  ] = useState("");
 
   const [
     selectedSlot,
     setSelectedSlot,
   ] = useState<ReceptionSlot | null>(null);
+
+  useEffect(() => {
+    setSelectedSlot(null);
+    setAppointmentTime("");
+  }, [selectedDoctorId, appointmentDate]);
 
   const [
     selectedServiceIds,
@@ -1674,6 +1679,11 @@ export function ReceptionDeskWorkspace() {
         return false;
       }
 
+      const isScheduleUnavailable = Boolean(slotResult?.unavailableReason && availableSlots.length === 0);
+      if (requiresDoctorRouting && isScheduleUnavailable) {
+        return false;
+      }
+
       switch (visitPurpose) {
         case "OPD Walk-in":
           return (
@@ -1691,7 +1701,7 @@ export function ReceptionDeskWorkspace() {
             selectedDoctor !== null &&
             selectedConsultationService !== undefined &&
             appointmentDate !== "" &&
-            appointmentTime !== "" &&
+            (selectedSlot !== null || (appointmentTime !== "" && availableSlots.some((s) => s.start === appointmentTime && s.available))) &&
             consultationReason.trim() !== ""
           );
 
@@ -1702,7 +1712,7 @@ export function ReceptionDeskWorkspace() {
             selectedDoctor !== null &&
             selectedConsultationService !== undefined &&
             appointmentDate !== "" &&
-            appointmentTime !== "" &&
+            (selectedSlot !== null || (appointmentTime !== "" && availableSlots.some((s) => s.start === appointmentTime && s.available))) &&
             consultationReason.trim() !== ""
           );
 
@@ -1714,13 +1724,17 @@ export function ReceptionDeskWorkspace() {
       appointmentReference,
       appointmentStatus,
       appointmentTime,
+      availableSlots,
       consultationReason,
       emergencyComplaint,
       followUpReference,
       patientReady,
+      requiresDoctorRouting,
       selectedDoctor,
       selectedConsultationService,
+      selectedSlot,
       selectedSpecialty,
+      slotResult?.unavailableReason,
       visitPurpose,
     ]);
 
@@ -2260,6 +2274,16 @@ export function ReceptionDeskWorkspace() {
       return;
     }
 
+    if (requiresDoctorRouting && slotResult?.unavailableReason && availableSlots.length === 0) {
+      setActionError(slotResult.unavailableReason);
+      return;
+    }
+
+    if ((visitPurpose === "Scheduled Appointment" || visitPurpose === "Follow-up") && !selectedSlot && !appointmentTime) {
+      setActionError("Please choose an available appointment time slot for this doctor.");
+      return;
+    }
+
     if (!purposeReady) {
       const message = {
         "OPD Walk-in":
@@ -2356,6 +2380,16 @@ export function ReceptionDeskWorkspace() {
       return;
     }
 
+    if (slotResult?.unavailableReason && availableSlots.length === 0) {
+      setActionError(slotResult.unavailableReason);
+      return;
+    }
+
+    if ((visitPurpose === "Scheduled Appointment" || visitPurpose === "Follow-up") && !selectedSlot && !appointmentTime) {
+      setActionError("Please choose an available appointment time slot for this doctor.");
+      return;
+    }
+
     if (createdQueueEntryId !== "") {
       setActionError("");
       setConfirmationOpen(true);
@@ -2420,6 +2454,8 @@ export function ReceptionDeskWorkspace() {
         consultationMode,
         idempotencyKey: nextSourceReference,
       });
+
+      void slotsData.reload();
 
       if (!isFutureDate) {
         const { queueEntry: bookedQueueEntry } = await checkInReceptionAppointment(appointment.id, {
@@ -2702,7 +2738,7 @@ export function ReceptionDeskWorkspace() {
     setAppointmentDate(
       getToday(),
     );
-    setAppointmentTime("11:30");
+    setAppointmentTime("");
 
     setPatientError("");
     setBookedPortalAccess(null);
@@ -3999,7 +4035,7 @@ export function ReceptionDeskWorkspace() {
                           <div>
                             <span className="font-bold text-slate-400 uppercase tracking-wider text-[8px] block">Doctor Timing</span>
                             <span className="font-black text-indigo-950">
-                              {slotResult?.doctorTimingLabel ?? "09:00 AM – 05:00 PM (8.0 hrs)"}
+                              {slotResult?.doctorTimingLabel ?? (availableSlots.length > 0 ? "09:00 AM – 05:00 PM (8.0 hrs)" : "Not scheduled")}
                             </span>
                           </div>
                           <div className="h-6 w-px bg-slate-200" />
@@ -4062,8 +4098,46 @@ export function ReceptionDeskWorkspace() {
                             Calculating available doctor slots...
                           </div>
                         ) : slotResult?.unavailableReason && availableSlots.length === 0 ? (
-                          <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-3 text-center text-xs font-semibold text-amber-800">
-                            {slotResult.unavailableReason}
+                          <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-center dark:border-amber-900/50 dark:bg-amber-950/40">
+                            <div className="flex items-center justify-center gap-2 text-xs font-black text-amber-900 dark:text-amber-200">
+                              <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
+                              <span>{slotResult.unavailableReason}</span>
+                            </div>
+
+                            {slotResult.rosteredDays && slotResult.rosteredDays.length > 0 ? (
+                              <div className="mt-3 rounded-xl bg-white/90 p-2.5 dark:bg-slate-900/70 text-left border border-amber-200/70 dark:border-amber-900/40">
+                                <span className="text-[9px] font-black uppercase tracking-wider text-slate-500 block mb-1.5 dark:text-slate-400">
+                                  Doctor's Rostered Weekly Schedule:
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {slotResult.rosteredDays.map((d) => (
+                                    <span
+                                      key={d.weekday}
+                                      className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[10px] font-bold text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300"
+                                    >
+                                      📅 <span className="font-black">{d.weekdayName}:</span> {d.timing}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+
+                            {slotResult.nextAvailableDate ? (
+                              <div className="mt-3 flex justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAppointmentDate(slotResult.nextAvailableDate!);
+                                    setSelectedSlot(null);
+                                    setAppointmentTime("");
+                                  }}
+                                  className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3.5 py-1.5 text-xs font-black text-white shadow-sm hover:bg-indigo-700 transition active:scale-95 cursor-pointer"
+                                >
+                                  <CalendarDays className="h-3.5 w-3.5" />
+                                  Switch to Next Available Date ({slotResult.nextAvailableDate})
+                                </button>
+                              </div>
+                            ) : null}
                           </div>
                         ) : availableSlots.length > 0 ? (
                           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-56 overflow-y-auto pr-1">
@@ -4808,6 +4882,11 @@ export function ReceptionDeskWorkspace() {
 
                   {isBookingLive ? "Booking…" : finalActionLabel}
                 </button>
+                {requiresDoctorRouting && slotResult?.unavailableReason && availableSlots.length === 0 ? (
+                  <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[9px] font-bold text-amber-800 dark:border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-300">
+                    ⚠️ {slotResult.unavailableReason}
+                  </p>
+                ) : null}
                 </div>
               </div>
             </aside>

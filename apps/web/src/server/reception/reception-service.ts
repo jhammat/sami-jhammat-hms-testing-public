@@ -52,6 +52,24 @@ async function createPatientRecord(
   try{
     return await database.$transaction(async tx=>{
       const p=await tx.patient.create({data:{tenantId:c.tenantId,patientNumber:patientNumber(),givenName:input.givenName.trim(),middleName:input.middleName?.trim()||null,familyName:input.familyName.trim(),dateOfBirth:derived.dateOfBirth,sex:input.sex?.trim()||null,phone:input.phone?.trim()||null,normalizedPhone:derived.normalizedPhone,email:input.email?.trim()||null,normalizedEmail:derived.normalizedEmail,address:derived.address,guardianData:derived.guardianData,consentData:derived.consentData,identifiers:{create:input.identifiers?.filter(i=>i.value.trim()).map(i=>({tenantId:c.tenantId,type:i.type.trim(),system:i.system.trim(),value:i.value.trim(),normalizedValue:i.value.trim().toLowerCase(),isPrimary:i.isPrimary??false}))??[]}}});
+      if(derived.normalizedEmail||input.phone){
+        const matchingIdentity=await tx.identity.findFirst({
+          where:{
+            OR:[
+              ...(derived.normalizedEmail?[{normalizedEmail:derived.normalizedEmail},{email:derived.normalizedEmail}]:[]),
+              ...(input.phone?[{phone:input.phone}]:[]),
+            ],
+            status:"ACTIVE",
+          },
+        });
+        if(matchingIdentity){
+          await tx.patientAccess.upsert({
+            where:{patientId_identityId:{patientId:p.id,identityId:matchingIdentity.id}},
+            create:{patientId:p.id,identityId:matchingIdentity.id,isPrimary:true,isActive:true,relationship:"self"},
+            update:{isActive:true},
+          });
+        }
+      }
       await tx.auditEvent.create({data:{tenantId:c.tenantId,branchId:c.branchId,actorMembershipId:c.membershipId,sessionId:c.sessionId,requestId:c.requestId,action:"patient.registered",entityType:"patient",entityId:p.id,severity:"INFORMATION",sourceApplication:c.sourceApplication}});
       return p;
     });
@@ -338,10 +356,10 @@ async bookAppointment(rc:WonFlowRequestContext,input:{patientId:string;doctorId?
       if(doctorId&&!await tx.doctorProfile.findFirst({where:{id:doctorId,tenantId:c.tenantId,staffProfile:{membership:{organizationId:c.organizationId}}}}))throw new WonFlowApiError(400,"invalid-appointment-doctor","The selected doctor is unavailable.");
       const isDoctorDirectBooking = input.source === "doctor-portal" || (rc as { workspace?: string }).workspace === "doctor";
       if(doctorId){
-        const conflict=await tx.appointment.findFirst({where:{tenantId:c.tenantId,branchId,doctorId,status:{in:["PENDING","CONFIRMED","CHECKED_IN","IN_QUEUE","IN_PROGRESS"]},startsAt:{lt:endsAt},endsAt:{gt:startsAt}}});
+        const conflict=await tx.appointment.findFirst({where:{tenantId:c.tenantId,doctorId,status:{notIn:["CANCELLED","NO_SHOW"]},startsAt:{lt:endsAt},endsAt:{gt:startsAt}}});
         if(conflict){
           if(isDoctorDirectBooking){
-            const latestAppt = await tx.appointment.findFirst({where:{tenantId:c.tenantId,branchId,doctorId,status:{in:["PENDING","CONFIRMED","CHECKED_IN","IN_QUEUE","IN_PROGRESS"]}},orderBy:{endsAt:"desc"}});
+            const latestAppt = await tx.appointment.findFirst({where:{tenantId:c.tenantId,doctorId,status:{notIn:["CANCELLED","NO_SHOW"]}},orderBy:{endsAt:"desc"}});
             if(latestAppt && latestAppt.endsAt > startsAt){
               const diffMs = endsAt.getTime() - startsAt.getTime();
               startsAt.setTime(latestAppt.endsAt.getTime() + 60000);

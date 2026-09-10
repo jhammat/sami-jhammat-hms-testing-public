@@ -117,6 +117,8 @@ export function AppointmentBookingWorkflow({
   const [slots, setSlots] = useState<AppointmentSlot[]>();
   const [slotLoading, setSlotLoading] = useState(false);
   const [slotUnavailableReason, setSlotUnavailableReason] = useState<string>();
+  const [rosteredDays, setRosteredDays] = useState<Array<{ weekday: number; weekdayName: string; timing: string }>>();
+  const [nextAvailableDate, setNextAvailableDate] = useState<string>();
 
   const [confirmedAppointmentId, setConfirmedAppointmentId] = useState<string>();
   /**
@@ -187,9 +189,13 @@ export function AppointmentBookingWorkflow({
       });
       setSlots(result.slots);
       setSlotUnavailableReason(result.unavailableReason);
+      setRosteredDays(result.rosteredDays);
+      setNextAvailableDate(result.nextAvailableDate);
     } catch (cause) {
       setError(readError(cause));
       setSlots(undefined);
+      setRosteredDays(undefined);
+      setNextAvailableDate(undefined);
     } finally {
       setSlotLoading(false);
     }
@@ -388,22 +394,79 @@ export function AppointmentBookingWorkflow({
               />
             </label>
             {slotLoading ? <p className="text-sm text-slate-600">Loading appointment times…</p> : null}
-            {!slotLoading && slotUnavailableReason ? <WonFlowEmptyState title={slotUnavailableReason} /> : null}
+            {!slotLoading && slotUnavailableReason ? (
+              <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/40">
+                <p className="text-sm font-bold text-amber-900 dark:text-amber-200">
+                  ⚠️ {slotUnavailableReason}
+                </p>
+                {rosteredDays && rosteredDays.length > 0 ? (
+                  <div>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                      Doctor's Rostered Schedule:
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {rosteredDays.map((d) => (
+                        <span
+                          key={d.weekday}
+                          className="inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700 dark:border-indigo-850 dark:bg-indigo-950 dark:text-indigo-300"
+                        >
+                          📅 {d.weekdayName}: {d.timing}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
+                {nextAvailableDate ? (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDate(nextAvailableDate);
+                        setSelectedSlot(undefined);
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-black text-white hover:bg-blue-700 transition"
+                    >
+                      Switch to Next Available Date ({nextAvailableDate})
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
             {!slotLoading && !slotUnavailableReason && slots && slots.length === 0 ? <WonFlowEmptyState title="No appointment times are available for this date." /> : null}
             {slots && slots.length > 0 ? (
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {slots.map((slot) => (
-                  <button
-                    aria-pressed={selectedSlot?.startsAt === slot.startsAt}
-                    className={`rounded-xl border px-4 py-3 text-left text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${selectedSlot?.startsAt === slot.startsAt ? "border-blue-500 bg-blue-50 text-blue-900" : "border-slate-200 hover:border-blue-300"}`}
-                    disabled={!slot.available}
-                    key={slot.startsAt}
-                    onClick={() => setSelectedSlot(slot)}
-                    type="button"
-                  >
-                    {formatSlotLabel(slot)}
-                  </button>
-                ))}
+                {slots.map((slot) => {
+                  const isSelected = selectedSlot?.startsAt === slot.startsAt;
+                  return (
+                    <button
+                      aria-pressed={isSelected}
+                      className={`flex items-center justify-between rounded-xl border px-4 py-3 text-left text-sm font-bold transition disabled:cursor-not-allowed ${
+                        isSelected
+                          ? "border-blue-500 bg-blue-50 text-blue-900 shadow-xs ring-2 ring-blue-200"
+                          : slot.available
+                            ? "border-slate-200 bg-white text-slate-800 hover:border-blue-300 hover:bg-blue-50/40 cursor-pointer"
+                            : "border-slate-200 bg-slate-100 text-slate-400 opacity-60"
+                      }`}
+                      disabled={!slot.available}
+                      key={slot.startsAt}
+                      onClick={() => setSelectedSlot(slot)}
+                      type="button"
+                    >
+                      <span>{formatSlotLabel(slot)}</span>
+                      <span
+                        className={`rounded-md px-2 py-0.5 text-[10px] font-black uppercase tracking-wider ${
+                          isSelected
+                            ? "bg-blue-600 text-white"
+                            : slot.available
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-slate-200 text-slate-500"
+                        }`}
+                      >
+                        {isSelected ? "Selected" : slot.available ? "Available" : "Booked"}
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             ) : null}
             <label className="block">

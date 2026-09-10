@@ -1,5 +1,5 @@
 import { database } from "@wonflow/database";
-import { requireTenantContext } from "@wonflow/contracts";
+import { hasPermission, requireTenantContext } from "@wonflow/contracts";
 import type {
   CarePlanAlertRule,
   CarePlanAlertSeverity,
@@ -16,6 +16,7 @@ import type {
   InstantiateCarePlanInput,
   ObservationSource,
   WonFlowRequestContext,
+  WonFlowTenantRequestContext,
 } from "@wonflow/contracts";
 import { WonFlowApiError } from "@/server/http/route-handler";
 import { STARTER_CARE_PLAN_TEMPLATES } from "./starter-care-plan-templates";
@@ -1171,15 +1172,74 @@ export class CarePlanService {
     return generatedAlerts;
   }
 
+  /**
+   * The care plans a given member of staff is entitled to see on their roster.
+   *
+   * Returns `null` for the roles that legitimately oversee everything
+   * (administrators, management), and otherwise a set of OR conditions naming
+   * the plans this person is actually on. A clinician with no doctor or staff
+   * profile at all matches nothing rather than everything — failing closed is
+   * the only safe direction for a list of patients.
+   */
+  private async resolveRosterScope(
+    context: WonFlowTenantRequestContext,
+  ): Promise<Prisma.CarePlanWhereInput[] | null> {
+    const workspace = (context.workspace ?? "").toUpperCase();
+    if (workspace === "ADMIN" || workspace === "MANAGEMENT") return null;
+    if (hasPermission(context, "organization.profile.manage")) return null;
+
+    if (!context.membershipId) return [{ id: "00000000-0000-0000-0000-000000000000" }];
+
+    const staffProfile = await database.staffProfile.findFirst({
+      where: { membershipId: context.membershipId, tenantId: context.tenantId, status: "ACTIVE" },
+      select: { id: true, doctor: { select: { id: true } } },
+    });
+
+    if (!staffProfile) return [{ id: "00000000-0000-0000-0000-000000000000" }];
+
+    const conditions: Prisma.CarePlanWhereInput[] = [
+      { assignedTherapistId: staffProfile.id },
+      { assignedNutritionistId: staffProfile.id },
+    ];
+
+    const doctorId = staffProfile.doctor?.id;
+    if (doctorId) {
+      conditions.push({ managingDoctorId: doctorId });
+      // A supervisor is answerable for their supervisees' plans too — the same
+      // reach `requireEncounterAccess` grants in the doctor service.
+      conditions.push({ managingDoctor: { supervisorDoctorId: doctorId } });
+    }
+
+    return conditions;
+  }
+
   async listActiveCarePlanRoster(
     requestContext: WonFlowRequestContext,
   ): Promise<CarePlanRosterItem[]> {
     const context = requireTenantContext(requestContext);
 
+    /*
+     * Whose roster this is.
+     *
+     * The query filtered on tenant and status alone, so it answered with every
+     * active care plan in the hospital regardless of who asked. Each doctor
+     * saw every other doctor's plans, and a physiotherapist or dietitian saw
+     * the whole hospital's caseload rather than the patients actually referred
+     * to them — the patient's name, number and clinical progress along with
+     * it.
+     *
+     * A clinician now gets the plans they are responsible for: the doctor
+     * managing it (or supervising the doctor who does), and the therapist or
+     * dietitian named on it. Administrators and management keep the full view,
+     * which is the whole point of those roles.
+     */
+    const scope = await this.resolveRosterScope(context);
+
     const plans = await database.carePlan.findMany({
       where: {
         tenantId: context.tenantId,
         status: "ACTIVE",
+        ...(scope ? { OR: scope } : {}),
       },
       include: {
         patient: true,

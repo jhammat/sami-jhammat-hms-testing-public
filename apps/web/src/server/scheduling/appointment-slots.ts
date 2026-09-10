@@ -36,12 +36,20 @@ export interface BookableSlot {
   roomLabel: string | null;
 }
 
+export interface RosteredDayHint {
+  weekday: number;
+  weekdayName: string;
+  timing: string;
+}
+
 export interface BookableSlotsResult {
   slots: BookableSlot[];
   slotMinutes: number;
   maxSlots: number;
   doctorTimingLabel?: string;
   unavailableReason?: string;
+  rosteredDays?: RosteredDayHint[];
+  nextAvailableDate?: string;
 }
 
 function formatLabel(startMinute: number, endMinute: number): string {
@@ -155,22 +163,70 @@ export async function listBookableSlots(input: {
       })),
     });
   } else {
-    // Standard clinic timing when no rule or sitting has been explicitly recorded yet
-    windows = [{
-      doctorId: input.doctorId,
-      branchId: input.branchId,
-      ruleId: null,
-      serviceId: null,
-      startsMinute: 540, // 09:00 AM
-      endsMinute: 1020, // 05:00 PM
-      capacity: 50,
-      slotMinutes: input.fallbackSlotMinutes || 20,
-      source: "HOSPITAL_ROSTER",
-      rosterStartsMinute: 540,
-      rosterEndsMinute: 1020,
-      sittingStatus: null,
-      roomLabel: null,
-    }];
+    const doctorRoster = await database.availabilityRule.findMany({
+      where: {
+        tenantId: input.tenantId,
+        doctorId: input.doctorId,
+        ...(input.branchId ? { branchId: input.branchId } : {}),
+        isActive: true,
+      },
+      select: {
+        weekday: true,
+        startsMinute: true,
+        endsMinute: true,
+      },
+      orderBy: [{ weekday: "asc" }, { startsMinute: "asc" }],
+    });
+
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const currentDayName = dayNames[weekday] ?? `Day ${weekday}`;
+
+    if (doctorRoster.length === 0) {
+      return {
+        slots: [],
+        slotMinutes: input.fallbackSlotMinutes,
+        maxSlots: 0,
+        doctorTimingLabel: "No rostered hours configured",
+        unavailableReason: "The doctor has no rostered schedule configured at this branch.",
+        rosteredDays: [],
+      };
+    }
+
+    const dayMap = new Map<number, string[]>();
+    for (const rule of doctorRoster) {
+      const timing = formatLabel(rule.startsMinute, rule.endsMinute);
+      const list = dayMap.get(rule.weekday) ?? [];
+      list.push(timing);
+      dayMap.set(rule.weekday, list);
+    }
+
+    const rosteredDays: RosteredDayHint[] = Array.from(dayMap.entries()).map(([w, timings]) => ({
+      weekday: w,
+      weekdayName: dayNames[w] ?? `Day ${w}`,
+      timing: timings.join(", "),
+    }));
+
+    const rosterSummaries = rosteredDays.map((d) => `${d.weekdayName} (${d.timing})`);
+    const availableWeekdays = new Set(doctorRoster.map((r) => r.weekday));
+
+    let nextAvailableDate: string | undefined;
+    for (let offset = 1; offset <= 14; offset++) {
+      const nextDate = new Date(dateObj.getTime() + offset * 86_400_000);
+      if (availableWeekdays.has(nextDate.getUTCDay())) {
+        nextAvailableDate = nextDate.toISOString().slice(0, 10);
+        break;
+      }
+    }
+
+    return {
+      slots: [],
+      slotMinutes: input.fallbackSlotMinutes,
+      maxSlots: 0,
+      doctorTimingLabel: `Not rostered on ${currentDayName}`,
+      unavailableReason: `Schedule not available on ${currentDayName}. Available days: ${rosterSummaries.join(", ")}.`,
+      rosteredDays,
+      nextAvailableDate,
+    };
   }
 
   if (windows.length === 0) {
@@ -183,8 +239,7 @@ export async function listBookableSlots(input: {
   const existingAppointments = await database.appointment.findMany({
     where: {
       tenantId: input.tenantId,
-      doctorId: input.doctorId,
-      branchId: input.branchId,
+      ...(input.doctorId ? { doctorId: input.doctorId } : { branchId: input.branchId }),
       status: { notIn: ["CANCELLED", "NO_SHOW"] },
       // The window covers one calendar day in `timezone`; padding a day
       // either side keeps appointments near midnight from being missed by
