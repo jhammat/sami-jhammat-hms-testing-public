@@ -300,7 +300,10 @@ export async function checkStartConsultationReadiness(
       code: "patient-not-checked-in",
       reason: `${patientName} has not checked in at reception yet.`,
       resolverRole: "reception",
-      resolutionHref: "/operations/queue",
+      // Check-in happens at the front desk. `/operations/queue` was never a
+      // route, so the one link a doctor follows to say "reception still has to
+      // check this patient in" opened a 404.
+      resolutionHref: "/operations/reception",
     });
   }
 
@@ -309,7 +312,10 @@ export async function checkStartConsultationReadiness(
       code: "payment-not-confirmed",
       reason: `${appointment.service.name} requires payment before the consultation. ${appointment.paymentStatus === "AWAITING_PAYMENT" ? "Confirm the uploaded payment proof" : "Ask the patient to complete payment"} on the payment confirmation screen.`,
       resolverRole: "billing",
-      resolutionHref: `/operations/billing/confirm-payment?appointmentId=${appointment.id}`,
+      // Payment proof is confirmed on the front desk workspace (`confirmPayment`
+      // in reception-desk-workspace), not on a `confirm-payment` screen under
+      // billing — that path does not exist and never has.
+      resolutionHref: `/operations/reception?appointmentId=${appointment.id}`,
     });
   }
 

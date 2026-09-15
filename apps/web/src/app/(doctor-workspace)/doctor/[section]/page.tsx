@@ -17,7 +17,6 @@ import {
   PracticeServiceCatalogueManagement,
 } from "@/components/services";
 
-import { DoctorAppointmentsPanel } from "@/components/doctor/doctor-portal-workflow";
 import { ClinicianCarePlanWorkspace } from "@/components/clinical/careplan";
 
 export default function DoctorSectionPage() {
@@ -48,10 +47,6 @@ export default function DoctorSectionPage() {
     return (
       <PracticeServiceCatalogueManagement />
     );
-  }
-
-  if (section === "appointments") {
-    return <DoctorAppointmentsPanel />;
   }
 
   if (section === "careplans") {
