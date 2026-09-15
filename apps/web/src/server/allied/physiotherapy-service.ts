@@ -11,6 +11,7 @@ import type {
 import { carePlanService } from "@/server/clinical/care-plan-service";
 import { referralService } from "@/server/clinical/referral-service";
 import { WonFlowApiError } from "@/server/http/route-handler";
+import { notifyCareTeamOfEntry } from "@/server/clinical/care-team-notifications";
 
 export interface PublishPrecautionOrdersInput {
   patientId: string;
@@ -78,7 +79,7 @@ export class PhysiotherapyService {
       throw new WonFlowApiError(404, "patient-not-found", "Patient not found.");
     }
 
-    return database.$transaction(async (tx) => {
+    const committed = await database.$transaction(async (tx) => {
       const assessment = await tx.therapyAssessment.create({
         data: {
           tenantId: context.tenantId,
@@ -131,6 +132,20 @@ export class PhysiotherapyService {
 
       return assessment;
     });
+
+    // After commit, and never able to fail the clinical write: the rest of
+    // the care team hears that this entry now exists.
+    await notifyCareTeamOfEntry({
+      tenantId: context.tenantId,
+      patientId: committed.patientId,
+      actorMembershipId: context.membershipId ?? null,
+      entryType: "THERAPY_ASSESSMENT",
+      recordId: committed.id,
+      title: "Physiotherapy assessment recorded",
+      discipline: "PHYSIOTHERAPY",
+    });
+
+    return committed;
   }
 
   async listAssessments(requestContext: WonFlowRequestContext, patientId: string) {
@@ -263,7 +278,7 @@ export class PhysiotherapyService {
       );
     }
 
-    return database.$transaction(async (tx) => {
+    const committed = await database.$transaction(async (tx) => {
       const session = await tx.therapySession.create({
         data: {
           tenantId: context.tenantId,
@@ -318,6 +333,20 @@ export class PhysiotherapyService {
 
       return session;
     });
+
+    // After commit, and never able to fail the clinical write: the rest of
+    // the care team hears that this entry now exists.
+    await notifyCareTeamOfEntry({
+      tenantId: context.tenantId,
+      patientId: committed.patientId,
+      actorMembershipId: context.membershipId ?? null,
+      entryType: "THERAPY_SESSION",
+      recordId: committed.id,
+      title: "Physiotherapy session logged",
+      discipline: "PHYSIOTHERAPY",
+    });
+
+    return committed;
   }
 
   async listSessions(requestContext: WonFlowRequestContext, patientId: string) {

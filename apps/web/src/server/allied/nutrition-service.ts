@@ -9,6 +9,7 @@ import type {
 } from "@wonflow/contracts";
 import { referralService } from "@/server/clinical/referral-service";
 import { WonFlowApiError } from "@/server/http/route-handler";
+import { notifyCareTeamOfEntry } from "@/server/clinical/care-team-notifications";
 
 export class NutritionService {
   async createAssessment(
@@ -65,7 +66,7 @@ export class NutritionService {
       bmi = Number((input.weightKg / (heightM * heightM)).toFixed(2));
     }
 
-    return database.$transaction(async (tx) => {
+    const committed = await database.$transaction(async (tx) => {
       const assessment = await tx.nutritionAssessment.create({
         data: {
           tenantId: context.tenantId,
@@ -123,6 +124,20 @@ export class NutritionService {
 
       return assessment;
     });
+
+    // After commit, and never able to fail the clinical write: the rest of
+    // the care team hears that this entry now exists.
+    await notifyCareTeamOfEntry({
+      tenantId: context.tenantId,
+      patientId: committed.patientId,
+      actorMembershipId: context.membershipId ?? null,
+      entryType: "NUTRITION_ASSESSMENT",
+      recordId: committed.id,
+      title: "Nutrition assessment recorded",
+      discipline: "NUTRITION",
+    });
+
+    return committed;
   }
 
   async listAssessments(requestContext: WonFlowRequestContext, patientId: string) {
@@ -250,7 +265,7 @@ export class NutritionService {
       });
     }
 
-    return database.$transaction(async (tx) => {
+    const committed = await database.$transaction(async (tx) => {
       const plan = await tx.nutritionPlan.create({
         data: {
           tenantId: context.tenantId,
@@ -386,6 +401,24 @@ export class NutritionService {
         },
       };
     });
+
+    // After commit, and never able to fail the clinical write: the rest of
+    // the care team hears that this entry now exists.
+    // `created` is re-read with findUnique, so its fields are optional to the
+    // type system; the plan id is the one thing a notification cannot do without.
+    if (committed.id) {
+      await notifyCareTeamOfEntry({
+        tenantId: context.tenantId,
+        patientId: patient.id,
+        actorMembershipId: context.membershipId ?? null,
+        entryType: "NUTRITION_PLAN",
+        recordId: committed.id,
+        title: `Nutrition plan: ${committed.title ?? input.title.trim()}`,
+        discipline: "NUTRITION",
+      });
+    }
+
+    return committed;
   }
 
   async getNutritionPlan(requestContext: WonFlowRequestContext, patientId: string) {

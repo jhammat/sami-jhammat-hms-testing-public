@@ -1211,6 +1211,15 @@ export function NutritionWorkspace() {
             </StatusPill>
           ) : null}
 
+          {/* The shared record: the doctor's, the other discipline's and the patient's entries on this patient. */}
+          <GlassButton
+            size="sm"
+            icon={<Users size={13} />}
+            onClick={() => router.push(`/operations/nutrition/care-team?patientId=${encodeURIComponent(selectedReferral.patientId)}`)}
+          >
+            Care team record
+          </GlassButton>
+
           <GlassButton size="sm" icon={<Search size={13} />} onClick={() => setActiveTab("caseload")}>
             Change patient
           </GlassButton>

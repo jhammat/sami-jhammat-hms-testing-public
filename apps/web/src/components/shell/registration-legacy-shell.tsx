@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 
+import { CareTeamInboxBell } from "@/components/clinical/care-team/care-team-inbox-bell";
+
 import {
   useEffect,
   useMemo,
@@ -35,6 +37,7 @@ import {
   FileClock,
   FileText,
   FlaskConical,
+  HeartHandshake,
   HeartPulse,
   History,
   Landmark,
@@ -640,6 +643,13 @@ const doctorNavigationGroups:
          * API.
          */
         {
+          label: "Care Team Record",
+          href: "/doctor/care-team",
+          icon: HeartHandshake,
+          description:
+            "Shared record of doctor, physiotherapy, nutrition and patient entries",
+        },
+        {
           label: "Care Plans",
           href: "/doctor/careplans",
           icon: ListOrdered,
@@ -1125,6 +1135,13 @@ const physiotherapyNavigationGroups:
          * physiotherapy workspace — no redirect to the doctor portal needed.
          */
         {
+          label: "Care Team Record",
+          href: "/operations/physiotherapy/care-team",
+          icon: HeartHandshake,
+          description:
+            "Shared record with the doctor and dietitian — see and acknowledge their entries",
+        },
+        {
           label: "Surgical Care Plans",
           href: "/operations/physiotherapy?view=careplans",
           icon: HeartPulse,
@@ -1224,6 +1241,13 @@ const nutritionNavigationGroups:
       items: [
         // Same as physiotherapy above: the surgical care plan is read on the
         // Nutrition Deck, and the physiotherapy workspace is its own portal.
+        {
+          label: "Care Team Record",
+          href: "/operations/nutrition/care-team",
+          icon: HeartHandshake,
+          description:
+            "Shared record with the doctor and physiotherapist — see and acknowledge their entries",
+        },
         {
           label: "Clinical Alerts",
           href: "/operations/nutrition?view=alerts",
@@ -2691,7 +2715,19 @@ export function PremiumApplicationShell({
       </aside>
 
       {mobileNavigationOpen ? (
-        <div className="fixed inset-0 z-[80] lg:hidden">
+        /*
+         * Above every layer the page itself uses.
+         *
+         * The drawer sat at z-[80] — the same layer the reception desk gives
+         * its patient search bar — so the two tied and DOM order decided it.
+         * The search bar won, and opening the menu on a phone or tablet drew
+         * the search field straight across the open navigation.
+         *
+         * The scale, highest last: page content and the reception search bar
+         * at 80, the doctor portal's live-call banner at 90, this drawer at
+         * 95, the command palette at 100.
+         */
+        <div className="fixed inset-0 z-[95] lg:hidden">
           <button
             aria-label="Close mobile navigation"
             className="absolute inset-0 bg-slate-950/35 backdrop-blur-[2px]"
@@ -2744,9 +2780,20 @@ export function PremiumApplicationShell({
       >
         <header className="wfg-topbar sticky top-0 z-40">
           <div className="flex min-h-[76px] items-center gap-3 px-4 sm:px-6 xl:px-8">
+            {/*
+              * Navigation owns the screen edge below `lg`, back sits after it.
+              *
+              * Above `lg` the sidebar occupies the first 264px and the back
+              * arrow lands beside the content. Below it the sidebar collapses
+              * into the drawer, the arrow slid to the very left edge, and the
+              * hamburger — the primary control on a touch device — ended up
+              * second. `order` swaps the two for small screens without moving
+              * either in the DOM, so the tab order still reaches back first on
+              * desktop where it is the leading control.
+              */}
             <button
               aria-label="Go back"
-              className="wfg-control flex h-10 w-10 shrink-0 items-center justify-center text-slate-600"
+              className="wfg-control order-[-1] flex h-10 w-10 shrink-0 items-center justify-center text-slate-600 lg:order-none"
               onClick={() => {
                 router.back();
               }}
@@ -2758,7 +2805,7 @@ export function PremiumApplicationShell({
 
             <button
               aria-label="Open navigation"
-              className="wfg-control flex h-10 w-10 shrink-0 items-center justify-center text-slate-600 lg:hidden"
+              className="wfg-control order-[-2] flex h-10 w-10 shrink-0 items-center justify-center text-slate-600 lg:order-none lg:hidden"
               onClick={() => {
                 setMobileNavigationOpen(
                   true,
@@ -2846,6 +2893,10 @@ export function PremiumApplicationShell({
                 size={18}
               />
             </button>
+
+            {session?.role === "doctor" || session?.role === "physiotherapist" || session?.role === "nutritionist" ? (
+              <CareTeamInboxBell role={session.role} />
+            ) : null}
 
             {session?.membershipId ? <BranchSwitcherDropdown /> : null}
 

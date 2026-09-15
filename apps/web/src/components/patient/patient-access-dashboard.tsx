@@ -17,6 +17,7 @@ import {
   ReceiptText,
   RefreshCw,
   ShieldAlert,
+  Printer,
   ShieldCheck,
   Sparkles,
   Stethoscope,
@@ -28,6 +29,8 @@ import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { DonutChart, StackedBar, type DonutSlice } from "@/components/charts";
+import { useWonFlowSession } from "@/app/_providers";
+import { printPrescriptionSlip } from "@/lib/printing/prescription-slip";
 
 import { WONFLOW_AVATAR_CHANGED_EVENT } from "@/components/shell";
 import { OfflineStatusBar } from "./offline-status-bar";
@@ -395,6 +398,9 @@ function DashboardSkeleton() {
 }
 
 export function PatientAccessDashboard({ section }: { section: Section }) {
+  // The hospital name for the printed slip; the patient home payload carries
+  // the patient but not the organisation issuing the prescription.
+  const session = useWonFlowSession();
   const [home, setHome] = useState<PatientHome | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -425,6 +431,45 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
       void load();
     });
   }, [load]);
+
+  /**
+   * Renders one prescription as a printable sheet.
+   *
+   * `autoPrint` opens the print dialog straight away (the Print button); the
+   * PDF button opens the same sheet and leaves the dialog to the patient, so
+   * they can pick "Save as PDF" as the destination without a dialog appearing
+   * over the page first.
+   */
+  const printPrescription = useCallback(
+    (prescription: PatientHome["prescriptions"][number], autoPrint: boolean) => {
+      if (!home) return;
+      printPrescriptionSlip(
+        {
+          hospitalName: session?.orgLabel ?? "Hospital",
+          prescriptionId: prescription.id,
+          prescribedAt: formatDate(prescription.prescribedAt ?? prescription.createdAt),
+          status: prescription.status,
+          doctorName: prescription.doctor?.staffProfile?.membership?.displayName ?? null,
+          patientName: `${home.patient.givenName} ${home.patient.familyName}`.trim(),
+          patientNumber: home.patient.patientNumber,
+          instructions: prescription.instructions,
+          items: prescription.items.map((item) => ({
+            name: item.medication.brandName ?? item.medication.genericName,
+            genericName: item.medication.genericName,
+            strength: item.medication.strength,
+            dose: item.dose ?? item.dosage ?? null,
+            frequency: item.frequency,
+            duration: item.duration ?? null,
+            route: item.route ?? null,
+            quantity: item.quantity === null || item.quantity === undefined ? null : String(item.quantity),
+            instructions: item.instructions ?? null,
+          })),
+        },
+        autoPrint,
+      );
+    },
+    [home, session?.orgLabel],
+  );
 
   const upcoming = useMemo(() => {
     if (!home) return [];
@@ -1063,7 +1108,37 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
                             {doctorName ? `Prescribed by ${doctorName}` : "Hospital Clinical Team"} · {rxDate}
                           </div>
                         </div>
-                        <StatusPill status={prescription.status} />
+                        <div className="flex items-center gap-2">
+                          <StatusPill status={prescription.status} />
+                          {/*
+                            * A copy the patient can keep.
+                            *
+                            * The prescription could be read here and nowhere
+                            * else — nothing to hand the pharmacy counter, file,
+                            * or show a clinician elsewhere. Both buttons open
+                            * the same printable sheet; the browser's print
+                            * dialog is what turns it into a PDF, which is how
+                            * every other printable in this app works.
+                            */}
+                          <button
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-purple-200 bg-white px-2.5 py-1.5 text-[11px] font-black text-purple-700 transition hover:bg-purple-50 dark:border-purple-900 dark:bg-slate-900 dark:text-purple-300 dark:hover:bg-purple-950/50"
+                            onClick={() => printPrescription(prescription, true)}
+                            title="Print this prescription"
+                            type="button"
+                          >
+                            <Printer className="size-3.5" />
+                            <span className="hidden sm:inline">Print</span>
+                          </button>
+                          <button
+                            className="inline-flex items-center gap-1.5 rounded-xl border border-purple-200 bg-white px-2.5 py-1.5 text-[11px] font-black text-purple-700 transition hover:bg-purple-50 dark:border-purple-900 dark:bg-slate-900 dark:text-purple-300 dark:hover:bg-purple-950/50"
+                            onClick={() => printPrescription(prescription, false)}
+                            title="Open a printable copy to save as PDF"
+                            type="button"
+                          >
+                            <Download className="size-3.5" />
+                            <span className="hidden sm:inline">PDF</span>
+                          </button>
+                        </div>
                       </div>
 
                       <ul className="mt-3.5 space-y-3.5">

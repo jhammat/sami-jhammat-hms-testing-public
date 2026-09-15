@@ -87,6 +87,7 @@ model Tenant {
   storedObjects          StoredObject[]
   suppliers              Supplier[]
   supportAccess          SupportAccessGrant[]
+  ClinicalAcknowledgement ClinicalAcknowledgement[]
   SymptomLog             SymptomLog[]
   TherapyAssessment      TherapyAssessment[]
   ExerciseDefinition     ExerciseDefinition[]
@@ -301,6 +302,7 @@ model TenantMembership {
   sessions            AuthSession[]
   CarePlanAlert       CarePlanAlert[]
   CarePlanTemplate    CarePlanTemplate[]
+  ClinicalAcknowledgement ClinicalAcknowledgement[]
   EducationAssignment EducationAssignment[]
   directGrants        MembershipPermissionGrant[]
   roles               MembershipRole[]
@@ -559,6 +561,7 @@ model Patient {
   pharmacyReturns      PharmacyReturn[]
   prescriptions        Prescription[]
   queueEntries         QueueEntry[]
+  ClinicalAcknowledgement ClinicalAcknowledgement[]
   SymptomLog           SymptomLog[]
   TherapyAssessment    TherapyAssessment[]
   TherapySession       TherapySession[]
@@ -3109,4 +3112,35 @@ enum DoctorFeeRequestStatus {
   PENDING
   APPROVED
   DECLINED
+}
+
+/// One clinician confirming they have seen another discipline's entry on a
+/// patient's record.
+///
+/// Deliberately generic — `entryType` + `entryId` point at any row in the care
+/// timeline (a nutrition plan, a therapy session, a diagnosis) rather than a
+/// column per feature, so acknowledging works the same way for every kind of
+/// entry and a new entry type needs no migration.
+///
+/// The unique constraint makes acknowledging idempotent: pressing the button
+/// twice, or two tabs racing, leaves one row rather than a duplicate audit
+/// trail.
+model ClinicalAcknowledgement {
+  id             String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenantId       String   @db.Uuid
+  patientId      String   @db.Uuid
+  entryType      String   @db.VarChar(60)
+  entryId        String   @db.VarChar(200)
+  membershipId   String   @db.Uuid
+  note           String?  @db.VarChar(1000)
+  acknowledgedAt DateTime @default(now()) @db.Timestamptz(6)
+
+  membership TenantMembership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  patient    Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  tenant     Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entryType, entryId, membershipId])
+  @@index([tenantId, patientId, acknowledgedAt])
+  @@index([membershipId])
+  @@index([patientId])
 }

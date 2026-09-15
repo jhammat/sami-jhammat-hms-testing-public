@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   Activity,
   AlertCircle,
@@ -599,6 +600,13 @@ export function ClinicianCarePlanDetail({
                 </button>
               </>
             )}
+            {/* The whole team's entries on this patient — physio, dietitian, patient — in one place. */}
+            <Link
+              href={`/doctor/care-team?patientId=${encodeURIComponent(plan.patientId)}`}
+              className="px-3.5 py-2 text-xs font-semibold text-indigo-700 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 rounded-xl shadow-xs transition flex items-center gap-1.5 dark:bg-indigo-950/50 dark:text-indigo-300 dark:border-indigo-900"
+            >
+              Care team record
+            </Link>
             <button
               onClick={() => setIsReferralModalOpen(true)}
               className="px-3.5 py-2 text-xs font-semibold text-white bg-teal-600 hover:bg-teal-500 rounded-xl shadow-xs transition flex items-center gap-1.5"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useTenantPicklist } from "@/lib/picklists/use-tenant-picklist";
 import {
@@ -342,7 +342,12 @@ function DynamicSearchCombobox({
 }) {
   const [internalQuery, setInternalQuery] = useState(value ?? "");
   const [open, setOpen] = useState(false);
+  /** Keyboard highlight within the suggestion list; -1 means nothing highlighted. */
+  const [activeIndex, setActiveIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  /** Stable id so the input can point at the list and its highlighted option. */
+  const listId = useId();
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {
@@ -379,18 +384,35 @@ function DynamicSearchCombobox({
     }
     onChange?.(val);
     setOpen(true);
+    // The old highlight points into a list that no longer exists.
+    setActiveIndex(-1);
   };
 
+  /*
+   * A selection reports through `onSelect` only.
+   *
+   * This used to call `onChange(item.label)` straight after `onSelect`, and
+   * callers cannot tell those apart: the diagnosis form's `onChange` reads
+   * "the clinician typed something, so this is a custom entry" and reset the
+   * ICD code to CUSTOM — using the code from the render *before* `onSelect`
+   * set it. So picking "Essential (Primary) Hypertension" out of the list
+   * recorded it with code CUSTOM instead of I10, and the same happened to lab
+   * and radiology codes, which were overwritten with a generated ORD- code.
+   *
+   * Every caller's `onSelect` already sets the text it wants displayed, so
+   * there is nothing for the extra `onChange` to do. Clearing still reports,
+   * because an empty box genuinely is a change and cannot clobber a code.
+   */
   const handleSelectItem = (item: DynamicComboboxItem) => {
     onSelect(item);
     if (clearOnSelect) {
       if (value === undefined) setInternalQuery("");
       onChange?.("");
-    } else {
-      if (value === undefined) setInternalQuery(item.label);
-      onChange?.(item.label);
+    } else if (value === undefined) {
+      setInternalQuery(item.label);
     }
     setOpen(false);
+    setActiveIndex(-1);
   };
 
   const handleAddNew = (customText: string) => {
@@ -400,11 +422,11 @@ function DynamicSearchCombobox({
     if (clearOnSelect) {
       if (value === undefined) setInternalQuery("");
       onChange?.("");
-    } else {
-      if (value === undefined) setInternalQuery(trimmed);
-      onChange?.(trimmed);
+    } else if (value === undefined) {
+      setInternalQuery(trimmed);
     }
     setOpen(false);
+    setActiveIndex(-1);
   };
 
   const handleClear = () => {
@@ -447,10 +469,56 @@ function DynamicSearchCombobox({
           value={displayQuery}
           onChange={(e) => handleInputChange(e.target.value)}
           onFocus={() => setOpen(true)}
+          role="combobox"
+          aria-expanded={open}
+          aria-autocomplete="list"
+          aria-controls={open ? listId : undefined}
+          aria-activedescendant={open && activeIndex >= 0 ? `${listId}-opt-${activeIndex}` : undefined}
           onKeyDown={(e) => {
+            /*
+             * Tab leaves the field.
+             *
+             * Every suggestion is a real <button>, so with the list open they
+             * all sat in the tab order between this input and the next control:
+             * tabbing out of the diagnosis box walked the clear button, the
+             * chevron and up to twenty conditions before reaching "Certainty
+             * Level". Closing on Tab and taking the options out of the tab
+             * order (tabIndex -1 below) makes the list keyboard-navigable the
+             * way a combobox should be — arrows to move, Enter to choose —
+             * instead of a queue to tab through.
+             */
+            if (e.key === "Tab") {
+              setOpen(false);
+              setActiveIndex(-1);
+              return;
+            }
+
+            if (e.key === "ArrowDown") {
+              e.preventDefault();
+              if (!open) {
+                setOpen(true);
+                return;
+              }
+              setActiveIndex((current) => (filteredItems.length === 0 ? -1 : (current + 1) % filteredItems.length));
+              return;
+            }
+
+            if (e.key === "ArrowUp") {
+              e.preventDefault();
+              if (!open) return;
+              setActiveIndex((current) =>
+                filteredItems.length === 0 ? -1 : (current <= 0 ? filteredItems.length : current) - 1,
+              );
+              return;
+            }
+
             if (e.key === "Enter") {
               e.preventDefault();
-              if (filteredItems.length > 0 && !exactMatch) {
+              // The highlighted row wins; otherwise fall back to the old
+              // behaviour of taking the first match, then offering the custom entry.
+              if (open && activeIndex >= 0 && filteredItems[activeIndex]) {
+                handleSelectItem(filteredItems[activeIndex]);
+              } else if (filteredItems.length > 0 && !exactMatch) {
                 handleSelectItem(filteredItems[0]);
               } else if (onAddNew && displayQuery.trim()) {
                 handleAddNew(displayQuery.trim());
@@ -459,6 +527,7 @@ function DynamicSearchCombobox({
               }
             } else if (e.key === "Escape") {
               setOpen(false);
+              setActiveIndex(-1);
             }
           }}
           placeholder={placeholder}
@@ -468,6 +537,7 @@ function DynamicSearchCombobox({
           {displayQuery ? (
             <button
               type="button"
+              tabIndex={-1}
               onMouseDown={(e) => e.preventDefault()}
               onClick={handleClear}
               className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:hover:bg-slate-700"
@@ -478,6 +548,7 @@ function DynamicSearchCombobox({
           ) : null}
           <button
             type="button"
+            tabIndex={-1}
             onMouseDown={(e) => e.preventDefault()}
             onClick={() => setOpen(!open)}
             className="rounded-lg p-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
@@ -489,10 +560,16 @@ function DynamicSearchCombobox({
       </div>
 
       {open && (
-        <div className="absolute z-50 mt-1.5 max-h-72 w-full overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/98 p-1.5 shadow-2xl backdrop-blur-2xl dark:border-slate-700 dark:bg-slate-900/98">
+        <div
+          ref={listRef}
+          id={listId}
+          role="listbox"
+          className="absolute z-50 mt-1.5 max-h-72 w-full overflow-y-auto rounded-2xl border border-slate-200/90 bg-white/98 p-1.5 shadow-2xl backdrop-blur-2xl dark:border-slate-700 dark:bg-slate-900/98"
+        >
           {displayQuery.trim() && !exactMatch && onAddNew ? (
             <button
               type="button"
+              tabIndex={-1}
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => handleAddNew(displayQuery.trim())}
               className={`mb-1 flex w-full items-center gap-2 rounded-xl p-2.5 text-left text-xs font-black transition ${buttonAccentClass}`}
@@ -521,10 +598,19 @@ function DynamicSearchCombobox({
                 return (
                   <button
                     key={`${item.label}-${idx}`}
+                    id={`${listId}-opt-${idx}`}
+                    role="option"
+                    aria-selected={idx === activeIndex}
                     type="button"
+                    tabIndex={-1}
+                    onMouseEnter={() => setActiveIndex(idx)}
                     onMouseDown={(e) => e.preventDefault()}
                     onClick={() => handleSelectItem(item)}
-                    className="flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs transition hover:bg-slate-100 dark:hover:bg-slate-800"
+                    className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-left text-xs transition ${
+                      idx === activeIndex
+                        ? "bg-slate-100 dark:bg-slate-800"
+                        : "hover:bg-slate-100 dark:hover:bg-slate-800"
+                    }`}
                   >
                     <div className="min-w-0 pr-2">
                       <div className="truncate font-bold text-slate-900 dark:text-white">
@@ -1493,7 +1579,7 @@ function ConsultationNotePanel({
 
   return (
     <div className="space-y-6">
-      <section className="overflow-hidden rounded-3xl border border-white/60 bg-white/80 p-6 shadow-xl backdrop-blur-2xl dark:border-slate-800/80 dark:bg-slate-900/80">
+      <section className="relative z-20 rounded-3xl border border-white/60 bg-white/80 p-6 shadow-xl backdrop-blur-2xl dark:border-slate-800/80 dark:bg-slate-900/80">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3 dark:border-slate-800">
           <div>
             <div className="inline-flex items-center gap-2 rounded-xl bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-700 dark:bg-blue-500/20 dark:text-blue-300">
@@ -1838,7 +1924,7 @@ function GlassmorphicPrescriptionPanel({
     <div className="space-y-6">
       {/* Search & Composer Glassmorphic Card */}
       {isEditable ? (
-        <section className="relative overflow-hidden rounded-3xl border border-white/60 bg-gradient-to-br from-white/90 via-indigo-50/30 to-violet-50/20 p-6 shadow-2xl shadow-indigo-950/5 backdrop-blur-2xl dark:border-slate-800/80 dark:bg-slate-900/80">
+        <section className="relative z-20 rounded-3xl border border-white/60 bg-gradient-to-br from-white/90 via-indigo-50/30 to-violet-50/20 p-6 shadow-2xl shadow-indigo-950/5 backdrop-blur-2xl dark:border-slate-800/80 dark:bg-slate-900/80">
           <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="inline-flex items-center gap-2 rounded-xl bg-indigo-500/10 px-3 py-1 text-xs font-black text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-300">
@@ -2809,7 +2895,7 @@ function DiagnosesPanel({
   return (
     <div className="space-y-6">
       {isEditable ? (
-        <section className="overflow-hidden rounded-3xl border border-white/60 bg-white/80 p-6 shadow-xl backdrop-blur-2xl dark:border-slate-800/80 dark:bg-slate-900/80">
+        <section className="relative z-20 rounded-3xl border border-white/60 bg-white/80 p-6 shadow-xl backdrop-blur-2xl dark:border-slate-800/80 dark:bg-slate-900/80">
           <div className="mb-4">
             <div className="inline-flex items-center gap-2 rounded-xl bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-700 dark:bg-amber-500/20 dark:text-amber-300">
               <Stethoscope className="h-3.5 w-3.5" />
@@ -3047,7 +3133,7 @@ function OrdersPanel({
   return (
     <div className="space-y-6">
       {isEditable ? (
-        <section className="overflow-hidden rounded-3xl border border-white/60 bg-white/80 p-6 shadow-xl backdrop-blur-2xl dark:border-slate-800/80 dark:bg-slate-900/80">
+        <section className="relative z-20 rounded-3xl border border-white/60 bg-white/80 p-6 shadow-xl backdrop-blur-2xl dark:border-slate-800/80 dark:bg-slate-900/80">
           <div className="mb-4">
             <div className="inline-flex items-center gap-2 rounded-xl bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300">
               <FlaskConical className="h-3.5 w-3.5" />

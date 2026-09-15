@@ -1447,9 +1447,20 @@ function PatientCard({
             Return to Queue
           </button>
         ) : null}
+        {/*
+          * "Open Patient" opens the patient.
+          *
+          * It pointed at `/doctor/consultations?queueEntryId=…`, which is the
+          * doctor's own consultation list. The hub does highlight a requested
+          * queue entry, but only once it is visible — and it is not visible
+          * until a sitting is running, so the usual result of pressing this
+          * was a list reading Active 0 / Draft 0 / Ready 0 with the patient
+          * nowhere on it. The same target the consultation hub uses for this
+          * label: the patient record, anchored to them.
+          */}
         <Link
           className={`${buttonClass} border border-slate-200 bg-white text-slate-700 hover:bg-slate-50`}
-          href={`/doctor/consultations?queueEntryId=${entry.id}`}
+          href={`/doctor/patients#${encodeURIComponent(`doctor-patient-${entry.patientId}`)}`}
         >
           Open Patient
         </Link>
