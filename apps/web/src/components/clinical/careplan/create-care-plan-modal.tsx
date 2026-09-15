@@ -332,6 +332,7 @@ export function CreateCarePlanModal({
         onClose={finish}
         patientId={createdPlan.patientId}
         patientName={createdPlan.patientName}
+        carePlanId={createdPlan.carePlanId}
         prefill={{
           physiotherapist: createdPlan.therapist
             ? { id: createdPlan.therapist.id, displayName: createdPlan.therapist.displayName, title: createdPlan.therapist.title }

@@ -191,8 +191,6 @@ function LoginFlow() {
   const [showPassword, setShowPassword] = useState(false);
 
   const [error, setError] = useState<string>();
-  /** Set when the password was right but typed on the other side of the platform. */
-  const [wrongAudience, setWrongAudience] = useState<PortalAudience>();
   const [busy, setBusy] = useState(false);
 
   const [contexts, setContexts] = useState<LoginContext[]>([]);
@@ -219,7 +217,6 @@ function LoginFlow() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(undefined);
-    setWrongAudience(undefined);
 
     const cleanInput = email.trim();
     if (!cleanInput) {
@@ -287,7 +284,6 @@ function LoginFlow() {
 
       if (!response.ok || !data.homePath) {
         setError(data.error ?? "Invalid email or password.");
-        setWrongAudience(data.code === "wrong-audience" ? data.audience : undefined);
         setBusy(false);
         return;
       }
@@ -364,7 +360,6 @@ function LoginFlow() {
               onClick={() => {
                 setAudience(option.id);
                 setError(undefined);
-                setWrongAudience(undefined);
                 setStep("credentials");
               }}
               className="group flex h-full flex-col items-start gap-2 rounded-2xl border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:border-transparent hover:shadow-[0_18px_40px_rgba(30,64,175,0.16)] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-blue-100 dark:border-slate-800 dark:bg-slate-950/50 dark:hover:shadow-[0_18px_40px_rgba(0,0,0,0.6)]"
@@ -441,7 +436,6 @@ function LoginFlow() {
               setStep("credentials");
               setContexts([]);
               setError(undefined);
-              setWrongAudience(undefined);
             }}
           />
         }
@@ -490,7 +484,6 @@ function LoginFlow() {
             label="Change"
             onClick={() => {
               setError(undefined);
-              setWrongAudience(undefined);
               setStep("audience");
             }}
           />
@@ -603,30 +596,13 @@ function LoginFlow() {
             <p>{error}</p>
 
             {/*
-              The password was accepted — this is the wrong door, not a bad
-              credential. Sending them back to step one to type it all again
-              would be punishing them for the screen's old habit of accepting
-              either door, so the right one is one click away.
+              Deliberately says nothing about whether the account exists or
+              which side it belongs to - only where staff sign in.
             */}
-            {wrongAudience ? (
-              <button
-                className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-rose-800 underline underline-offset-2 transition hover:text-rose-950 disabled:opacity-60 dark:text-rose-200 dark:hover:text-white"
-                disabled={busy}
-                onClick={() => {
-                  const target = wrongAudience;
-                  setAudience(target);
-                  setError(undefined);
-                  setWrongAudience(undefined);
-                  void signIn(target);
-                }}
-                type="button"
-              >
-                Sign in on the{" "}
-                {AUDIENCES.find((option) => option.id === wrongAudience)?.title.toLowerCase() ??
-                  wrongAudience}{" "}
-                side instead
-                <ArrowRight aria-hidden size={13} />
-              </button>
+            {audience === "patient" ? (
+              <p className="mt-2 text-xs text-rose-800/80 dark:text-rose-200/80">
+                Hospital staff sign in from the Hospital staff option, not the patient sign-in.
+              </p>
             ) : null}
           </div>
         ) : null}

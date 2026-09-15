@@ -1468,19 +1468,47 @@ export function ReceptionDeskWorkspace() {
       .trim()
       .toLocaleLowerCase();
 
+  /*
+   * The branch this desk books at.
+   *
+   * The appointment is created without a branch, so the server books it at the
+   * receptionist's session branch — and refuses any service tied to another
+   * branch. The list here used the selected doctor's *primary* branch instead
+   * (and no branch at all before a doctor was picked), so it offered services
+   * the booking would then reject, and hid this branch's own services whenever
+   * the doctor's home branch was elsewhere.
+   */
+  const deskBranchId = session?.branchId ?? selectedDoctor?.primaryBranchId ?? null;
+
   const availableServices = useMemo(() => {
     const services = directories.data?.services ?? [];
-    if (selectedDoctor === null) return services.filter((service) => service.doctorId == null);
+    const atThisBranch = (service: AdditionalService) =>
+      service.branchId == null || deskBranchId === null || service.branchId === deskBranchId;
+    if (selectedDoctor === null) return services.filter((service) => service.doctorId == null && atThisBranch(service));
     return services.filter(
       (service) =>
-        (service.doctorId == null || service.doctorId === selectedDoctor.id) &&
-        (service.branchId == null || service.branchId === selectedDoctor.primaryBranchId),
+        (service.doctorId == null || service.doctorId === selectedDoctor.id) && atThisBranch(service),
     );
-  }, [directories.data?.services, selectedDoctor]);
+  }, [directories.data?.services, selectedDoctor, deskBranchId]);
+  /*
+   * A consultation the selected doctor can be booked for.
+   *
+   * Only services tied to this exact doctor used to qualify, so a hospital
+   * consultation handled by "Doctor on duty" or by the Reception desk — set up
+   * with no specific doctor — appeared in neither this dropdown nor the Tests
+   * catalogue (which leaves consultations out), and reception saw "No services
+   * configured" for a doctor the hospital had priced. The server already
+   * accepts such a service for any doctor; only another doctor's own service
+   * is refused.
+   */
+  const isBookableConsultation = (service: AdditionalService, doctorId: string) =>
+    service.doctorId === doctorId ||
+    (service.doctorId == null && service.category.trim().toLocaleUpperCase().replace(/[^A-Z0-9]+/g, "_") === "CONSULTATION");
+
   const doctorServices = availableServices.filter(
     (service) =>
       selectedDoctor !== null &&
-      service.doctorId === selectedDoctor.id &&
+      isBookableConsultation(service, selectedDoctor.id) &&
       // Services without recorded modes predate this field and are treated
       // as in-person-only rather than silently matching either choice.
       (service.consultationModes ?? ["IN_PERSON"]).includes(consultationMode),
@@ -1540,7 +1568,7 @@ export function ReceptionDeskWorkspace() {
       [availableServices, selectedServiceIds],
     );
   const selectedConsultationService = selectedServices.find(
-    (service) => selectedDoctor !== null && service.doctorId === selectedDoctor.id,
+    (service) => selectedDoctor !== null && isBookableConsultation(service, selectedDoctor.id),
   );
 
   const billingItems =
@@ -1578,12 +1606,13 @@ export function ReceptionDeskWorkspace() {
   const tomorrowDateString = useMemo(() => localDateOffsetByDays(1), []);
 
   const slotsData = useWonFlowAsyncData<ReceptionSlotsResult>({
-    key: `slots:${selectedDoctorId}:${appointmentDate}:${selectedConsultationService?.durationMinutes ?? 20}:${selectedDoctor?.primaryBranchId ?? ""}`,
+    key: `slots:${selectedDoctorId}:${appointmentDate}:${selectedConsultationService?.durationMinutes ?? 20}:${deskBranchId ?? ""}`,
     enabled: Boolean(selectedDoctorId && appointmentDate),
     loader: () =>
       getReceptionAppointmentSlots({
         doctorId: selectedDoctorId,
-        branchId: selectedDoctor?.primaryBranchId || undefined,
+        // The branch the appointment will actually be booked at — see deskBranchId.
+        branchId: deskBranchId || undefined,
         date: appointmentDate,
         durationMinutes: selectedConsultationService?.durationMinutes ?? 20,
       }),
@@ -2700,6 +2729,8 @@ export function ReceptionDeskWorkspace() {
 
     setSelectedSpecialty("");
     setSelectedDoctorId("");
+    setConsultationMode("IN_PERSON");
+    setSelectedSlot(null);
     setVisitPurpose(
       "OPD Walk-in",
     );
@@ -3692,7 +3723,7 @@ export function ReceptionDeskWorkspace() {
                   {requiresDoctorRouting &&
                   visitPurpose !==
                     "OPD Walk-in" ? (
-                    <div className="mt-3 grid gap-2.5 lg:grid-cols-2">
+                    <div className="mt-3 grid gap-2.5 lg:grid-cols-3">
                       <Field
                         label="Specialty / Department"
                         required
@@ -3792,6 +3823,34 @@ export function ReceptionDeskWorkspace() {
                               </option>
                             ),
                           )}
+                        </select>
+                      </Field>
+
+                      {/*
+                        Scheduled appointments and follow-ups need a doctor
+                        service exactly like walk-ins do - the visit cannot be
+                        prepared without one - but this form never offered the
+                        field, so neither visit type could ever be created.
+                      */}
+                      <Field label="Doctor service" required>
+                        <select
+                          className={CONTROL_CLASS_NAME}
+                          disabled={selectedDoctor === null}
+                          onChange={(event) => {
+                            setSelectedServiceIds(event.target.value ? [event.target.value] : []);
+                            setPaymentConfirmed(false);
+                            setAppointmentPrepared(false);
+                          }}
+                          value={selectedConsultationService?.id ?? ""}
+                        >
+                          <option value="">
+                            {selectedDoctor === null ? "Select doctor first" : doctorServices.length ? "Select service" : "No services configured"}
+                          </option>
+                          {doctorServices.map((service) => (
+                            <option key={service.id} value={service.id}>
+                              {service.name} - {formatMoney(service.price)}
+                            </option>
+                          ))}
                         </select>
                       </Field>
                     </div>
@@ -5553,7 +5612,12 @@ export function ReceptionDeskWorkspace() {
                 <button
                   className="flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white text-[9px] font-black text-slate-700 hover:bg-slate-50"
                   onClick={() => {
+                    // The visit is booked and its slip can be printed from
+                    // this dialog; once it is closed the desk is cleared for
+                    // the next patient instead of keeping the last one's
+                    // details, services and payment on screen.
                     setConfirmationOpen(false);
+                    resetDesk();
                   }}
                   type="button"
                 >

@@ -199,6 +199,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
   const [blockers, setBlockers] = useState<Blocker[]>([]);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [ruleId, setRuleId] = useState("");
+  const [clinicId, setClinicId] = useState("");
   const [slotId, setSlotId] = useState("");
   const [chosenMode, setChosenMode] = useState<"IN_PERSON" | "ONLINE" | "">("");
   const [error, setError] = useState("");
@@ -250,8 +251,42 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
     });
   }, [load]);
 
-  const availableSlots = useMemo(() => slots.filter((slot) => slot.ruleId === ruleId), [ruleId, slots]);
-  const selectedOption = options.find((option) => option.ruleId === ruleId);
+  /*
+   * The clinic comes first. Patients choose where they can travel to before
+   * they choose who to see, and a doctor's sessions at two branches are two
+   * different trips. The clinic used to be tucked into the end of the doctor
+   * dropdown label, which a phone truncates, so on mobile no clinic was
+   * visible anywhere on the screen.
+   */
+  const clinics = useMemo(() => {
+    const byId = new Map<string, { id: string; name: string; doctors: Set<string> }>();
+    for (const option of options) {
+      const clinic = byId.get(option.branchId) ?? { id: option.branchId, name: option.branchName, doctors: new Set<string>() };
+      clinic.doctors.add(option.doctorId);
+      byId.set(option.branchId, clinic);
+    }
+    return [...byId.values()].sort((first, second) => first.name.localeCompare(second.name));
+  }, [options]);
+  const activeClinicId = clinics.some((clinic) => clinic.id === clinicId) ? clinicId : (clinics[0]?.id ?? "");
+  const activeClinic = clinics.find((clinic) => clinic.id === activeClinicId) ?? null;
+  const clinicOptions = useMemo(() => options.filter((option) => option.branchId === activeClinicId), [options, activeClinicId]);
+  const activeRuleId = clinicOptions.some((option) => option.ruleId === ruleId) ? ruleId : (clinicOptions[0]?.ruleId ?? "");
+
+  /** A doctor can hold several sessions of one service in a day; the hours tell them apart. */
+  const sessionHours = useMemo(() => {
+    const hours = new Map<string, string>();
+    for (const option of clinicOptions) {
+      const ruleSlots = slots.filter((slot) => slot.ruleId === option.ruleId);
+      if (!ruleSlots.length) continue;
+      const format = (value: string) =>
+        new Intl.DateTimeFormat("en-PK", { timeStyle: "short", timeZone: ruleSlots[0].timezone }).format(new Date(value));
+      hours.set(option.ruleId, `${format(ruleSlots[0].startsAt)} – ${format(ruleSlots[ruleSlots.length - 1].endsAt)}`);
+    }
+    return hours;
+  }, [clinicOptions, slots]);
+
+  const availableSlots = useMemo(() => slots.filter((slot) => slot.ruleId === activeRuleId), [activeRuleId, slots]);
+  const selectedOption = options.find((option) => option.ruleId === activeRuleId);
   const mode = chosenMode || (selectedOption?.consultationModes[0] ?? "");
   const modeRequiresChoice = (selectedOption?.consultationModes.length ?? 0) > 1;
   const requiresPrepayment = mode === "ONLINE" && selectedOption?.requiresPrepayment === true;
@@ -423,7 +458,38 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
           </label>
 
           <label className="block">
-            <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">2. Select Doctor & Specialty</span>
+            <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">2. Select Clinic</span>
+            <select
+              aria-label="Select clinic"
+              className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-3 focus:ring-blue-100 disabled:opacity-60 dark:border-slate-800 dark:bg-slate-800 dark:text-white dark:focus:ring-blue-900/50"
+              disabled={loading || clinics.length === 0}
+              onChange={(event) => {
+                setClinicId(event.target.value);
+                setRuleId("");
+                setSlotId("");
+                setChosenMode("");
+              }}
+              value={activeClinicId}
+            >
+              {clinics.length === 0 ? (
+                <option value="">{loading ? "Loading clinics…" : "No clinic is open for booking on this date"}</option>
+              ) : null}
+              {clinics.map((clinic) => (
+                <option key={clinic.id} value={clinic.id}>
+                  {clinic.name} · {clinic.doctors.size} {clinic.doctors.size === 1 ? "doctor" : "doctors"}
+                </option>
+              ))}
+            </select>
+            {activeClinic ? (
+              <p className="mt-1.5 flex items-center gap-1.5 text-xs font-bold text-indigo-600 dark:text-indigo-400">
+                <MapPin aria-hidden className="size-3.5" />
+                <span className="truncate">{activeClinic.name}</span>
+              </p>
+            ) : null}
+          </label>
+
+          <label className="block md:col-span-2">
+            <span className="text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">3. Select Doctor & Specialty</span>
             <select
               className="mt-2 w-full rounded-2xl border border-slate-200 bg-slate-50/50 px-4 py-3 text-sm font-bold text-slate-900 outline-none transition focus:border-blue-500 focus:bg-white focus:ring-3 focus:ring-blue-100 dark:border-slate-800 dark:bg-slate-800 dark:text-white dark:focus:ring-blue-900/50"
               onChange={(event) => {
@@ -431,12 +497,16 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
                 setSlotId("");
                 setChosenMode("");
               }}
-              value={ruleId}
+              disabled={loading || clinicOptions.length === 0}
+              value={activeRuleId}
             >
-              <option value="">{loading ? "Loading clinics…" : options.length ? "Select a doctor" : "No clinics available on this date"}</option>
-              {options.map((option) => (
+              {clinicOptions.length === 0 ? (
+                <option value="">{loading ? "Loading doctors…" : "Select a clinic first"}</option>
+              ) : null}
+              {clinicOptions.map((option) => (
                 <option key={option.ruleId} value={option.ruleId}>
-                  {option.specialty ?? "Clinical Care"} · {option.doctorName} · {option.serviceName} ({option.branchName})
+                  {option.doctorName} · {option.serviceName}
+                  {sessionHours.get(option.ruleId) ? ` · ${sessionHours.get(option.ruleId)}` : ""}
                 </option>
               ))}
             </select>
@@ -495,6 +565,19 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
                 <Stethoscope aria-hidden className="size-4 text-blue-600" />
                 {selectedOption.doctorName}
               </span>
+              {selectedOption.specialty ? (
+                <span className="inline-flex items-center gap-1.5 font-semibold">{selectedOption.specialty}</span>
+              ) : null}
+              <span className="inline-flex items-center gap-1.5 font-semibold">
+                <MapPin aria-hidden className="size-4 text-indigo-600" />
+                {mode === "ONLINE" ? `Online · booked through ${selectedOption.branchName}` : selectedOption.branchName}
+              </span>
+              {sessionHours.get(selectedOption.ruleId) ? (
+                <span className="inline-flex items-center gap-1.5 font-semibold">
+                  <CalendarDays aria-hidden className="size-4 text-indigo-600" />
+                  Session {sessionHours.get(selectedOption.ruleId)}
+                </span>
+              ) : null}
               <span className="inline-flex items-center gap-1.5 font-semibold">
                 <Clock aria-hidden className="size-4 text-indigo-600" />
                 {selectedOption.durationMinutes} minutes consultation
@@ -506,7 +589,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
 
             {modeRequiresChoice ? (
               <fieldset className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
-                <legend className="px-2 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">3. Select Consultation Format</legend>
+                <legend className="px-2 text-xs font-black uppercase tracking-wider text-slate-500 dark:text-slate-400">4. Select Consultation Format</legend>
                 <div className="mt-2 flex flex-wrap gap-3">
                   <button
                     aria-pressed={mode === "IN_PERSON"}
@@ -585,7 +668,7 @@ export function PatientBookingWorkspace({ booking }: { booking: boolean }) {
               <p>
                 {loading
                   ? "Loading available consultation slots…"
-                  : ruleId
+                  : activeRuleId
                     ? "No consultation times remain for this doctor on this date. Please select another date."
                     : options.length
                       ? "Select a doctor and date to view bookable consultation slots."

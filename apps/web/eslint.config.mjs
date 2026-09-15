@@ -40,11 +40,12 @@ const clientStorageRestrictions = [
   },
 ];
 
-// The only two files allowed to touch client storage, and only because they
+// The only files allowed to touch client storage, and only because they
 // hold interface preference, not user data.
 const clientStorageAllowList = [
   "src/components/doctor/sidebar-collapsed-storage.ts",
   "src/components/shell/theme-toggle.tsx",
+  "src/lib/doctor/display-preferences.ts",
 ];
 
 const eslintConfig = defineConfig([

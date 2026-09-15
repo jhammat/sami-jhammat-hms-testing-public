@@ -252,8 +252,6 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
         body: JSON.stringify({
           displayName: displayName.trim(),
           title: title.trim() || null,
-          staffType,
-          primaryBranchId: primaryBranchId || null,
           preferredLocale,
           clinicalFocus: selectedFocus,
           dailyStepGoal: dailyStepGoal.trim(),
@@ -349,9 +347,6 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
     return (
       displayName !== profile.membership.displayName ||
       title !== (profile.staff.title ?? "") ||
-      staffType !== profile.staff.staffType ||
-      primaryBranchId !==
-        (profile.membership.primaryBranchId ?? profile.staff.branchId ?? "") ||
       preferredLocale !== (profile.membership.preferredLocale || "en") ||
       focusChanged ||
       stepGoalChanged ||
@@ -361,8 +356,6 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
     profile,
     displayName,
     title,
-    staffType,
-    primaryBranchId,
     preferredLocale,
     selectedFocus,
     initialFocus,
@@ -684,38 +677,48 @@ export function AlliedProfileWorkspace({ specialty }: { specialty: AlliedSpecial
                         />
                       </PhaseOneField>
 
+                      {/*
+                        Discipline and location are assigned by the hospital
+                        administrator (they decide whose referrals and which
+                        branch this clinician can open), so they are shown
+                        here for reference and cannot be changed by the
+                        clinician. The server refuses a changed value too.
+                      */}
                       <PhaseOneField
                         label="Specialty Discipline"
                         htmlFor="allied-staff-type"
-                        hint="Select your clinical allied health role"
+                        hint="Assigned by your hospital administrator"
                       >
-                        <PhaseOneSelect
+                        <PhaseOneInput
                           id="allied-staff-type"
-                          value={staffType}
-                          onChange={(event) => setStaffType(event.target.value)}
-                        >
-                          <option value="PHYSIOTHERAPIST">Physiotherapist & Mobility Specialist</option>
-                          <option value="NUTRITIONIST">Clinical Dietitian & Nutritionist</option>
-                        </PhaseOneSelect>
+                          readOnly
+                          aria-readonly="true"
+                          className="cursor-not-allowed opacity-75"
+                          value={
+                            staffType === "NUTRITIONIST"
+                              ? "Clinical Dietitian & Nutritionist"
+                              : staffType === "PHYSIOTHERAPIST"
+                                ? "Physiotherapist & Mobility Specialist"
+                                : staffType
+                          }
+                        />
                       </PhaseOneField>
 
                       <PhaseOneField
                         label="Primary Location"
                         htmlFor="allied-branch"
-                        hint="Primary facility where you conduct consultations"
+                        hint="To change your location, contact your hospital administrator"
                       >
-                        <PhaseOneSelect
+                        <PhaseOneInput
                           id="allied-branch"
-                          value={primaryBranchId}
-                          onChange={(event) => setPrimaryBranchId(event.target.value)}
-                        >
-                          <option value="">All Hospital Locations</option>
-                          {profile.branches.map((branch) => (
-                            <option key={branch.id} value={branch.id}>
-                              {branch.name}
-                            </option>
-                          ))}
-                        </PhaseOneSelect>
+                          readOnly
+                          aria-readonly="true"
+                          className="cursor-not-allowed opacity-75"
+                          value={
+                            profile.branches.find((branch) => branch.id === primaryBranchId)?.name ??
+                            (primaryBranchId ? "Assigned location" : "All Hospital Locations")
+                          }
+                        />
                       </PhaseOneField>
 
                       <PhaseOneField

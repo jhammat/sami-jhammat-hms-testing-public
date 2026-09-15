@@ -672,44 +672,63 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ActionResultState>({ status: "idle" });
 
-  const activeRosterRule = useMemo(() => {
-    if (selectedRosterId) {
-      const matched = todayRosterRules.find((item) => item.id === selectedRosterId);
-      if (matched) return matched;
-    }
-    if (selectedBranchId) {
-      const branchMatched = todayRosterRules.find((item) => item.branch.id === selectedBranchId);
-      if (branchMatched) return branchMatched;
-    }
-    return todayRosterRules[0] ?? null;
-  }, [todayRosterRules, selectedRosterId, selectedBranchId]);
+  /*
+   * The branch decides everything else.
+   *
+   * The Hospital Branch dropdown used to change only its own value: the shift,
+   * its hours and the branch printed on the sitting card all kept coming from
+   * the first roster rule of the day, and whenever a sitting record already
+   * existed the sync effect below re-ran on the change and put the old branch
+   * straight back. Now the chosen branch (explicit choice, else today's
+   * sitting, else the first rostered branch, else the default) filters the
+   * shifts, and the card, the hours and the saved sitting all follow it.
+   */
+  const activeBranchId =
+    selectedBranchId || model.sitting?.branchId || todayRosterRules[0]?.branch.id || sittingBranchId;
+
+  const branchRosterRules = useMemo(
+    () => todayRosterRules.filter((item) => item.branch.id === activeBranchId),
+    [todayRosterRules, activeBranchId],
+  );
+
+  const activeRosterRule = useMemo(
+    () => branchRosterRules.find((item) => item.id === selectedRosterId) ?? branchRosterRules[0] ?? null,
+    [branchRosterRules, selectedRosterId],
+  );
+
+  const sittingRoomLabel = model.sitting?.roomLabel;
+  const sittingStart = model.sitting?.sittingStartTime;
+  const sittingEnd = model.sitting?.sittingEndTime;
+  const sittingMinutes = model.sitting?.averageConsultationMinutes;
+  const hasSitting = model.sitting !== undefined;
+
+  // Keyed on the sitting's values, not the object: a refreshed model with the
+  // same sitting must not wipe what the doctor is in the middle of choosing.
+  useEffect(() => {
+    if (!hasSitting) return;
+    queueMicrotask(() => {
+      setRoomLabel(sittingRoomLabel ?? "");
+      setStartTime(sittingStart ?? "09:00");
+      setEndTime(sittingEnd ?? "13:00");
+      setMinutes(String(sittingMinutes ?? 15));
+    });
+  }, [hasSitting, sittingRoomLabel, sittingStart, sittingEnd, sittingMinutes]);
+
+  const rosterStartsMinute = activeRosterRule?.startsMinute;
+  const rosterEndsMinute = activeRosterRule?.endsMinute;
+  const rosterCapacity = activeRosterRule?.capacity;
 
   useEffect(() => {
+    if (hasSitting || rosterStartsMinute === undefined || rosterEndsMinute === undefined) return;
     queueMicrotask(() => {
-      if (model.sitting) {
-        setRoomLabel(model.sitting.roomLabel ?? "");
-        setStartTime(model.sitting.sittingStartTime ?? "09:00");
-        setEndTime(model.sitting.sittingEndTime ?? "13:00");
-        setMinutes(String(model.sitting.averageConsultationMinutes ?? 15));
-        if (model.sitting.branchId) {
-          setSelectedBranchId(model.sitting.branchId);
-        }
-      } else if (activeRosterRule) {
-        setStartTime(formatMinuteOfDay(activeRosterRule.startsMinute));
-        setEndTime(formatMinuteOfDay(activeRosterRule.endsMinute));
-        const calculatedMinutes =
-          activeRosterRule.capacity > 0
-            ? Math.max(5, Math.min(120, Math.floor((activeRosterRule.endsMinute - activeRosterRule.startsMinute) / activeRosterRule.capacity)))
-            : 15;
-        setMinutes(String(calculatedMinutes));
-        if (activeRosterRule.branch?.id && !selectedBranchId) {
-          setSelectedBranchId(activeRosterRule.branch.id);
-        }
-      }
+      setStartTime(formatMinuteOfDay(rosterStartsMinute));
+      setEndTime(formatMinuteOfDay(rosterEndsMinute));
+      const capacity = rosterCapacity ?? 0;
+      setMinutes(
+        String(capacity > 0 ? Math.max(5, Math.min(120, Math.floor((rosterEndsMinute - rosterStartsMinute) / capacity))) : 15),
+      );
     });
-  }, [model.sitting, activeRosterRule, selectedBranchId]);
-
-  const activeBranchId = selectedBranchId || activeRosterRule?.branch.id || sittingBranchId;
+  }, [hasSitting, rosterStartsMinute, rosterEndsMinute, rosterCapacity]);
   const isNotStarted = model.sitting === undefined || model.sitting.status === "not-started" || model.sitting.status === "finished";
 
   const { blockers: startBlockers, loading: readinessLoading } = useStartSittingReadiness(
@@ -989,12 +1008,12 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
                         </button>
                       </div>
 
-                      {/* Shift Switcher if multiple shifts exist today */}
-                      {todayRosterRules.length > 1 ? (
+                      {/* Shift Switcher if the chosen branch has several shifts today */}
+                      {branchRosterRules.length > 1 ? (
                         <div>
                           <span className="text-[10px] font-bold uppercase text-slate-400">Select Shift</span>
                           <div className="mt-1 space-y-1">
-                            {todayRosterRules.map((rule, idx) => (
+                            {branchRosterRules.map((rule, idx) => (
                               <button
                                 className={`w-full rounded-lg p-1.5 text-left text-xs font-semibold ${activeRosterRule?.id === rule.id
                                     ? "bg-indigo-50 font-bold text-indigo-700"
@@ -1020,7 +1039,16 @@ function SittingControls({ model }: { model: DoctorWorkflowModel }) {
                           <label className="text-[10px] font-bold uppercase text-slate-400">Hospital Branch</label>
                           <select
                             className={`${fieldClass} mt-1 h-8 text-xs`}
-                            onChange={(e) => setSelectedBranchId(e.target.value)}
+                            onChange={(e) => {
+                              const branchId = e.target.value;
+                              setSelectedBranchId(branchId);
+                              setSelectedRosterId("");
+                              const firstShift = todayRosterRules.find((item) => item.branch.id === branchId);
+                              if (firstShift) handleSelectRoster(firstShift);
+                              // A room belongs to a building; the one picked for
+                              // the other branch is not a room here.
+                              setRoomLabel("");
+                            }}
                             value={activeBranchId ?? ""}
                           >
                             {branches.map((b) => (

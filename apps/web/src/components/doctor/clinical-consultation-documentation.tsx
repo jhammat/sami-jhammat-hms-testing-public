@@ -1780,6 +1780,13 @@ function GlassmorphicPrescriptionPanel({
   const [quantity, setQuantity] = useState<string>("");
   const [instructions, setInstructions] = useState("");
   const [overallInstructions, setOverallInstructions] = useState("");
+  /*
+   * Set when Add is pressed with a required field missing. Until then the
+   * form stays quiet; after it, every missing field says so in red and the
+   * message clears the moment the field is filled. Add used to do nothing at
+   * all when frequency was blank, with no sign of why.
+   */
+  const [composerAttempted, setComposerAttempted] = useState(false);
 
   const { mutate: issuePrescription, saveState: issueState, error: issueError } = useCreatePrescription(encounter.id);
 
@@ -1842,7 +1849,12 @@ function GlassmorphicPrescriptionPanel({
         : selectedMedication.genericName
       : customMedName.trim();
 
-    if (!medName || !dose.trim() || !frequency.trim()) return;
+    if (!medName || !dose.trim() || !frequency.trim()) {
+      setComposerAttempted(true);
+      const firstMissing = !medName ? null : !dose.trim() ? "rx-composer-dose" : "rx-composer-frequency";
+      if (firstMissing) document.getElementById(firstMissing)?.focus();
+      return;
+    }
 
     const newItem: StagedMedication = {
       medicationId: selectedMedication?.id ?? medName,
@@ -1870,6 +1882,7 @@ function GlassmorphicPrescriptionPanel({
     setIsCustomDuration(false);
     setQuantity("");
     setInstructions("");
+    setComposerAttempted(false);
   }
 
   function handleRemoveStagedItem(index: number) {
@@ -2010,28 +2023,44 @@ function GlassmorphicPrescriptionPanel({
             {/* Dosage, Route, Frequency, Duration Composer Form */}
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Dose / Strength</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300" htmlFor="rx-composer-dose">
+                  Dose / Strength <span className="text-rose-500">*</span>
+                </label>
                 <input
+                  id="rx-composer-dose"
                   type="text"
                   value={dose}
                   onChange={(e) => setDose(e.target.value)}
                   placeholder="e.g. 500mg, 1 tablet, 5ml"
-                  className="mt-1.5 h-11 w-full rounded-2xl border border-slate-200/80 bg-white/80 px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  aria-invalid={composerAttempted && !dose.trim()}
+                  aria-describedby={composerAttempted && !dose.trim() ? "rx-composer-dose-error" : undefined}
+                  className={`mt-1.5 h-11 w-full rounded-2xl border ${composerAttempted && !dose.trim() ? "border-rose-400 ring-2 ring-rose-100" : "border-slate-200/80"} bg-white/80 px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white`}
                 />
+                {composerAttempted && !dose.trim() ? (
+                  <p className="mt-1 text-[11px] font-bold text-rose-600" id="rx-composer-dose-error">Enter the dose.</p>
+                ) : null}
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">Frequency</label>
+                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300" htmlFor="rx-composer-frequency">
+                  Frequency <span className="text-rose-500">*</span>
+                </label>
                 <select
+                  id="rx-composer-frequency"
                   value={frequency}
                   onChange={(e) => setFrequency(e.target.value)}
-                  className="mt-1.5 h-11 w-full rounded-2xl border border-slate-200/80 bg-white/80 px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                  aria-invalid={composerAttempted && !frequency.trim()}
+                  aria-describedby={composerAttempted && !frequency.trim() ? "rx-composer-frequency-error" : undefined}
+                  className={`mt-1.5 h-11 w-full rounded-2xl border ${composerAttempted && !frequency.trim() ? "border-rose-400 ring-2 ring-rose-100" : "border-slate-200/80"} bg-white/80 px-3.5 text-xs font-bold text-slate-900 shadow-inner outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800 dark:text-white`}
                 >
                   <option value="">Choose a frequency</option>
                   {FREQUENCY_OPTIONS.map((f) => (
                     <option key={f.value} value={f.value}>{f.label}</option>
                   ))}
                 </select>
+                {composerAttempted && !frequency.trim() ? (
+                  <p className="mt-1 text-[11px] font-bold text-rose-600" id="rx-composer-frequency-error">Select how often it is taken.</p>
+                ) : null}
               </div>
 
               <div>
@@ -2195,15 +2224,23 @@ function GlassmorphicPrescriptionPanel({
                 ))}
               </div>
 
-              <button
-                type="button"
-                onClick={handleAddMedicationToTray}
-                disabled={!activeSelectedName || !dose.trim()}
-                className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-6 py-2.5 text-xs font-black text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <Plus className="h-4 w-4" />
-                <span>Add to Prescription</span>
-              </button>
+              <div className="flex flex-col items-end gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleAddMedicationToTray}
+                  disabled={!activeSelectedName}
+                  title={activeSelectedName ? undefined : "Search and select a medicine first"}
+                  className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-6 py-2.5 text-xs font-black text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Plus className="h-4 w-4" />
+                  <span>Add to Prescription</span>
+                </button>
+                {composerAttempted && activeSelectedName && (!dose.trim() || !frequency.trim()) ? (
+                  <p className="text-right text-[11px] font-bold text-rose-600" role="alert">
+                    Required before adding: {[!dose.trim() ? "dose" : "", !frequency.trim() ? "frequency" : ""].filter(Boolean).join(" and ")}.
+                  </p>
+                ) : null}
+              </div>
             </div>
           </div>
         </section>

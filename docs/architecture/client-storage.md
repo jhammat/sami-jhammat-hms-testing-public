@@ -19,9 +19,11 @@ This boundary is enforced three ways:
 
 1. **ESLint** (`apps/web/eslint.config.mjs`) bans `localStorage`,
    `sessionStorage` and `document.cookie` as an error, everywhere under
-   `apps/web/src`, except for exactly two files:
+   `apps/web/src`, except for exactly these files:
    - `apps/web/src/components/doctor/sidebar-collapsed-storage.ts`
    - `apps/web/src/components/shell/theme-toggle.tsx`
+   - `apps/web/src/lib/doctor/display-preferences.ts` (Doctor Portal display
+     density and similar presentation settings)
 
    Any other use fails `pnpm lint`.
 

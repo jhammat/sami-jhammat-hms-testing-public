@@ -34,9 +34,16 @@ import { printPrescriptionSlip } from "@/lib/printing/prescription-slip";
 
 import { WONFLOW_AVATAR_CHANGED_EVENT } from "@/components/shell";
 import { OfflineStatusBar } from "./offline-status-bar";
+import {
+  PatientHealthRecord,
+  type HealthRecordDiagnosis,
+  type HealthRecordEncounter,
+  type HealthRecordNote,
+  type HealthRecordObservation,
+} from "./patient-health-record";
 
 
-type Section = "home" | "care" | "reports" | "billing";
+type Section = "home" | "care" | "record" | "reports" | "billing";
 
 interface PatientHome {
   patient: {
@@ -90,10 +97,15 @@ interface PatientHome {
     code: string;
     name: string;
     status: string;
+    createdAt?: string;
     results: Array<{ id: string; reportText: string | null; resultData: unknown; critical: boolean; releasedAt: string | null }>;
     attachments: Array<{ id: string; title: string; contentType: string; sizeBytes: string; objectStatus: string; uploadedByPatient: boolean; createdAt: string }>;
   }>;
   documents: Array<{ id: string; category: string; title: string; status: string; createdAt: string }>;
+  observations: HealthRecordObservation[];
+  diagnoses: HealthRecordDiagnosis[];
+  clinicalNotes: HealthRecordNote[];
+  encounters: HealthRecordEncounter[];
   invoices: Array<{
     id: string;
     invoiceNumber: string;
@@ -642,6 +654,8 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
                   ? `Welcome, ${home.patient.givenName} ${home.patient.familyName}`
                   : section === "care"
                     ? "My Prescriptions & Care Plan"
+                    : section === "record"
+                      ? "My Health Record"
                     : section === "reports"
                       ? "Diagnostic Reports & Tests"
                       : "Billing & Hospital Invoices"}
@@ -1216,6 +1230,17 @@ export function PatientAccessDashboard({ section }: { section: Section }) {
             )}
           </SectionCard>
         </div>
+      ) : null}
+
+      {/* ── Health Record Tab ──────────────────────────────────────────── */}
+      {section === "record" ? (
+        <PatientHealthRecord
+          clinicalNotes={home.clinicalNotes ?? []}
+          diagnoses={home.diagnoses ?? []}
+          diagnosticOrders={home.diagnosticOrders}
+          encounters={home.encounters ?? []}
+          observations={home.observations ?? []}
+        />
       ) : null}
 
       {/* ── Reports Tab ────────────────────────────────────────────────── */}

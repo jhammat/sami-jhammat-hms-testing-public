@@ -353,6 +353,31 @@ const fullNavigationGroups:
     },
   ];
 
+/**
+ * Where "View profile" on the header avatar goes, for the portals that have a
+ * profile screen. It used to cover only platform and doctor and sent every
+ * other role - reception, patients, physiotherapists, dietitians, all of whom
+ * have (or now have) a profile page - to "#".
+ */
+function profilePathForRole(role: string | undefined): string | null {
+  switch (role) {
+    case "platform":
+      return "/platform/profile";
+    case "doctor":
+      return "/doctor/profile";
+    case "patient":
+      return "/patient/profile";
+    case "physiotherapist":
+      return "/operations/physiotherapy/profile";
+    case "nutritionist":
+      return "/operations/nutrition/profile";
+    case "reception":
+      return "/operations/reception/profile";
+    default:
+      return null;
+  }
+}
+
 const receptionNavigationGroups:
   readonly NavigationGroup[] = [
     {
@@ -379,6 +404,19 @@ const receptionNavigationGroups:
           icon: Users,
           description:
             "Search and open existing patient records",
+        },
+      ],
+    },
+    {
+      label: "Account",
+
+      items: [
+        {
+          label: "My Profile",
+          href: "/operations/reception/profile",
+          icon: UserRound,
+          description:
+            "Your account, roles, branches and password",
         },
       ],
     },
@@ -757,6 +795,13 @@ const patientNavigationGroups:
           icon: Pill,
           description:
             "Doctor prescriptions, medicines, instructions and orders",
+        },
+        {
+          label: "Health Record",
+          href: "/patient/record",
+          icon: Activity,
+          description:
+            "Vitals, diagnoses, diagnostic orders and clinical notes from your visits",
         },
         {
           label: "Reports",
@@ -2910,7 +2955,8 @@ export function PremiumApplicationShell({
             <div className="wfg-control flex items-center gap-2 py-1.5 pl-1.5 pr-2">
               <Link
                 className="flex items-center gap-2 transition hover:opacity-85"
-                href={session?.role === "platform" ? "/platform/profile" : session?.role === "doctor" ? "/doctor/profile" : "#"}
+                href={profilePathForRole(session?.role) ?? "#"}
+                aria-disabled={profilePathForRole(session?.role) ? undefined : true}
                 suppressHydrationWarning
                 title="View profile"
               >

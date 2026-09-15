@@ -629,6 +629,7 @@ export function ClinicianCarePlanDetail({
         onClose={() => setIsReferralModalOpen(false)}
         patientId={plan.patientId}
         patientName={plan.patientName ?? (plan.patientNumber ? `MR ${plan.patientNumber}` : "This patient")}
+        carePlanId={plan.id}
         onReferralCreated={() => void loadPlan()}
       />
 

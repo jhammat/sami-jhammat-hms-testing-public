@@ -1884,6 +1884,7 @@ model CarePlan {
   assignedNutritionist StaffProfile?     @relation("CarePlanAssignedNutritionist", fields: [assignedNutritionistId], references: [id])
   tasks                CarePlanTask[]
   alerts               CarePlanAlert[]
+  referrals            ClinicalReferral[]
 
   @@index([tenantId, managingDoctorId, status])
   @@index([tenantId, patientId, status])
@@ -2014,9 +2015,13 @@ model ClinicalReferral {
   validUntil          DateTime?             @db.Timestamptz(6)
   acceptedAt          DateTime?             @db.Timestamptz(6)
   completedAt         DateTime?             @db.Timestamptz(6)
+  /// The care plan this referral was raised from, when it was a hand-off from
+  /// a plan. Stopping or deleting the plan closes the referrals it raised.
+  carePlanId          String?               @db.Uuid
   createdAt           DateTime              @default(now()) @db.Timestamptz(6)
   updatedAt           DateTime              @updatedAt @db.Timestamptz(6)
 
+  CarePlan            CarePlan?             @relation(fields: [carePlanId], references: [id], onDelete: SetNull)
   StaffProfile        StaffProfile?         @relation(fields: [assignedToId], references: [id])
   Patient             Patient               @relation(fields: [patientId], references: [id])
   DoctorProfile       DoctorProfile         @relation(fields: [referringDoctorId], references: [id])
@@ -2030,6 +2035,7 @@ model ClinicalReferral {
   @@index([tenantId, patientId])
   @@index([tenantId, specialty, status])
   @@index([tenantId, discipline, status])
+  @@index([tenantId, carePlanId])
 }
 
 

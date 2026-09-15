@@ -114,6 +114,8 @@ export interface CreateReferralInput {
   surgicalSummary?: string;
   precautions?: string;
   validDays?: number;
+  /** The care plan this referral hands the patient off from, if any. */
+  carePlanId?: string | null;
 }
 
 export interface AcceptReferralInput {

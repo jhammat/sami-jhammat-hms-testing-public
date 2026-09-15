@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useId,
   useMemo,
   useRef,
   useState,
@@ -839,22 +840,11 @@ export default function DoctorDocumentsPage() {
 
             <form className="mt-4 space-y-4" onSubmit={(e) => void upload(e)}>
               {/* Patient Selection */}
-              <label className="block text-xs font-bold text-slate-700">
-                Target Patient
-                <select
-                  className="mt-1.5 w-full rounded-xl border border-slate-200 bg-slate-50/50 px-3.5 py-2 text-sm font-bold text-slate-900 outline-none focus:border-indigo-500"
-                  onChange={(e) => setSelectedPatientId(e.target.value)}
-                  required
-                  value={selectedPatientId}
-                >
-                  <option value="">Select patient</option>
-                  {patients.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {[item.givenName, item.middleName, item.familyName].filter(Boolean).join(" ")} · {item.patientNumber}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <ModalPatientPicker
+                onChange={setSelectedPatientId}
+                patients={patients}
+                value={selectedPatientId}
+              />
 
               {/* Title & Category */}
               <div className="grid gap-3 sm:grid-cols-2">
@@ -1330,6 +1320,148 @@ export default function DoctorDocumentsPage() {
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+const patientFullName = (patient: Patient) =>
+  [patient.givenName, patient.middleName, patient.familyName].filter(Boolean).join(" ");
+
+/**
+ * Target patient for an upload, found by typing.
+ *
+ * This was a plain select holding every patient the doctor can see, which
+ * meant scrolling a long unsorted list to release a report - and picking the
+ * wrong neighbour in it is how a report lands in another patient's record.
+ * Search matches the name, MRN or phone number, and the chosen patient stays
+ * on screen with their MRN until it is deliberately changed.
+ */
+function ModalPatientPicker({
+  patients,
+  value,
+  onChange,
+}: {
+  patients: Patient[];
+  value: string;
+  onChange: (patientId: string) => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const selected = patients.find((patient) => patient.id === value) ?? null;
+
+  const matches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const digits = q.replace(/D/g, "");
+    const list = q
+      ? patients.filter((patient) => {
+          const name = patientFullName(patient).toLowerCase();
+          const phone = (patient.phoneNumber ?? "").replace(/D/g, "");
+          return (
+            name.includes(q) ||
+            patient.patientNumber.toLowerCase().includes(q) ||
+            (digits.length >= 3 && phone.includes(digits))
+          );
+        })
+      : patients;
+    return list.slice(0, 50);
+  }, [patients, query]);
+
+  function choose(patient: Patient) {
+    onChange(patient.id);
+    setQuery("");
+    setOpen(false);
+  }
+
+  return (
+    <div className="block text-xs font-bold text-slate-700">
+      <span>
+        Target Patient <span className="text-rose-500">*</span>
+      </span>
+
+      {selected ? (
+        <div className="mt-1.5 flex items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3.5 py-2">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-black text-slate-900">{patientFullName(selected)}</p>
+            <p className="text-[11px] font-semibold text-slate-500">
+              MRN {selected.patientNumber}
+              {selected.phoneNumber ? ` · ${selected.phoneNumber}` : ""}
+            </p>
+          </div>
+          <button
+            className="shrink-0 rounded-lg border border-indigo-200 bg-white px-2.5 py-1 text-[11px] font-black text-indigo-700 hover:bg-indigo-50"
+            onClick={() => {
+              onChange("");
+              setOpen(true);
+            }}
+            type="button"
+          >
+            Change
+          </button>
+        </div>
+      ) : (
+        <div className="relative mt-1.5">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <input
+            aria-autocomplete="list"
+            aria-controls={listId}
+            aria-expanded={open}
+            aria-label="Search patient by name, MRN or phone"
+            autoComplete="off"
+            className="w-full rounded-xl border border-slate-200 bg-slate-50/50 py-2 pl-9 pr-3.5 text-sm font-semibold text-slate-900 outline-none focus:border-indigo-500"
+            onBlur={() => window.setTimeout(() => setOpen(false), 150)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                if (matches[0]) choose(matches[0]);
+              } else if (event.key === "Escape") {
+                setOpen(false);
+              }
+            }}
+            placeholder="Search by name, MRN or phone"
+            role="combobox"
+            value={query}
+          />
+          {open ? (
+            <ul
+              id={listId}
+              className="absolute left-0 right-0 top-full z-20 mt-1 max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1 shadow-xl"
+              role="listbox"
+            >
+              {matches.length === 0 ? (
+                <li className="px-3 py-3 text-center text-xs font-semibold text-slate-400">
+                  {patients.length === 0 ? "No patients available." : `No patient matches “${query.trim()}”.`}
+                </li>
+              ) : (
+                matches.map((patient) => (
+                  <li key={patient.id} role="option" aria-selected={false}>
+                    <button
+                      className="flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2 text-left hover:bg-indigo-50"
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => choose(patient)}
+                      type="button"
+                    >
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-bold text-slate-900">{patientFullName(patient)}</span>
+                        <span className="block text-[11px] font-semibold text-slate-500">
+                          MRN {patient.patientNumber}
+                          {patient.phoneNumber ? ` · ${patient.phoneNumber}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                  </li>
+                ))
+              )}
+            </ul>
+          ) : null}
+          {!open ? <p className="mt-1 text-[11px] font-semibold text-slate-400">Select the patient this document belongs to.</p> : null}
+        </div>
+      )}
     </div>
   );
 }

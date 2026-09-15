@@ -36,6 +36,7 @@ import type {
 import {
   completeDoctorEncounter,
   createDoctorEncounter,
+  patchDoctorQueue,
   pauseDoctorEncounter,
   resumeDoctorEncounter,
 } from "@/lib/api/doctor-api";
@@ -105,13 +106,21 @@ function useStartConsultationReadiness(
         );
         if (!response.ok) return;
         const body = await response.json() as {
-          blockers: Array<{ code: string; reason: string; resolverRole: string; resolutionHref: string }>;
+          blockers: Array<{ code: string; reason: string; resolverRole: string; resolutionHref?: string }>;
         };
         setBlockers(
           body.blockers.map((blocker) => ({
             code: blocker.code,
             reason: blocker.reason,
             resolverLabel: RESOLVER_LABELS[blocker.resolverRole] ?? blocker.resolverRole,
+            // Only link what the doctor can fix themselves (such as an open
+            // consultation to finish); other roles' screens are not theirs.
+            ...(blocker.resolverRole === "self" && blocker.resolutionHref
+              ? {
+                  resolutionHref: blocker.resolutionHref,
+                  resolutionLabel: blocker.code === "another-encounter-open" ? "Open that consultation" : undefined,
+                }
+              : {}),
           })),
         );
       } catch (caught: unknown) {
@@ -397,11 +406,20 @@ export function DoctorConsultationHub({
       );
     });
 
+  /*
+   * Waiting patients belong here too.
+   *
+   * This list used to hold only patients already called, so a patient
+   * reception had sent to the doctor sat on the dashboard ("Next Patient",
+   * with Call and Start buttons) and appeared nowhere on this page until the
+   * doctor went back to the dashboard to call them. Called patients still
+   * sort first.
+   */
   const readyRecords: ReadyRecord[] =
     sortDemoQueueEntries(
       currentQueueEntries.filter(
         (entry) =>
-          entry.status === "called" &&
+          (entry.status === "called" || entry.status === "waiting") &&
           !encounterByQueueEntryId.has(
             entry.id,
           ),
@@ -497,6 +515,26 @@ export function DoctorConsultationHub({
    * Navigation only happens once the server has confirmed the encounter
    * exists; nothing here assumes success ahead of that response.
    */
+  async function callPatient(
+    queueEntry: DemoQueueEntry,
+  ): Promise<void> {
+    try {
+      await patchDoctorQueue(queueEntry.appointmentId, "call");
+      reload();
+      const room = portal.sitting?.roomLabel?.trim();
+      setMessage(
+        `${queueEntry.tokenNumber} called to ${room && room.toLowerCase() !== "not assigned" ? room : "the consultation room"}.`,
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof WonFlowApiError
+          ? error.message
+          : "The patient could not be called.",
+      );
+      reload();
+    }
+  }
+
   async function startConsultation(
     queueEntry: DemoQueueEntry,
   ): Promise<void> {
@@ -982,7 +1020,7 @@ export function DoctorConsultationHub({
 
         <SectionShell
           count={readyRecords.length}
-          description="Called patients eligible to begin."
+          description="Waiting and called patients for today."
           icon={<Play size={15} />}
           title="Ready to Start"
         >
@@ -1002,6 +1040,7 @@ export function DoctorConsultationHub({
                     initialQueueEntryId
                   }
                   key={record.queueEntry.id}
+                  onCall={callPatient}
                   onStart={startConsultation}
                   record={record}
                   sittingAvailable={sittingAvailable}
@@ -1256,6 +1295,7 @@ interface ReadyRecordCardProps {
   hasServingConflict: boolean;
   sittingRoomLabel?: string;
   onStart: (queueEntry: DemoQueueEntry) => void;
+  onCall: (queueEntry: DemoQueueEntry) => void;
 }
 
 /**
@@ -1272,7 +1312,9 @@ function ReadyRecordCard({
   hasServingConflict,
   sittingRoomLabel,
   onStart,
+  onCall,
 }: ReadyRecordCardProps) {
+  const waiting = record.queueEntry.status === "waiting";
   const { blockers, loading } = useStartConsultationReadiness(record.queueEntry.appointmentId);
 
   const localBlockReason = !sittingAvailable
@@ -1324,12 +1366,12 @@ function ReadyRecordCard({
           {record.queueEntry.roomLabel ?? sittingRoomLabel ?? "Room not assigned"}
         </span>
         <span className="rounded-lg bg-amber-50 px-2 py-1.5 font-bold text-amber-700">
-          Called {formatTime(record.queueEntry.calledAt)}
+          {waiting ? "Waiting - not called yet" : `Called ${formatTime(record.queueEntry.calledAt)}`}
         </span>
       </div>
 
       {blockers.length > 0 ? (
-        <ActionReadiness blockers={blockers} className="mt-2" hideLinks />
+        <ActionReadiness blockers={blockers} className="mt-2" />
       ) : null}
 
       <div className="mt-2.5 flex flex-wrap gap-2">
@@ -1345,6 +1387,19 @@ function ReadyRecordCard({
           <Play size={12} />
           Start Consultation
         </button>
+        {waiting ? (
+          <button
+            className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-violet-200 bg-white px-3 text-[10px] font-black text-violet-700 transition hover:bg-violet-50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={!sittingAvailable}
+            onClick={() => {
+              onCall(record.queueEntry);
+            }}
+            title={sittingAvailable ? undefined : "An available sitting is required."}
+            type="button"
+          >
+            Call Patient
+          </button>
+        ) : null}
         <PatientLink label="Open Patient" patient={record.patient} />
       </div>
     </article>

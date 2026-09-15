@@ -99,8 +99,31 @@ async function resolveReferredPatientScope(c: { tenantId: string; membershipId: 
   return referralService.getActiveReferredPatientIds(c.tenantId, specialty, staffProfileId);
 }
 
+/**
+ * Which services the catalogue offers the caller.
+ *
+ * Reception and billing book appointments and raise invoices at the branch their
+ * session is held at (`requireBranchId`), and `bookAppointment` rejects a service
+ * from any other branch with "The selected service is unavailable at this
+ * branch". The catalogue nevertheless listed every active branch's services, so
+ * a receptionist at one site was offered another site's tests and consultations
+ * and only found out when the booking failed. Front-desk callers now see what
+ * their own branch can actually deliver: hospital-wide services (no branch) and
+ * their branch's own.
+ *
+ * The doctor workspace keeps the full list: its registration screen lets the
+ * doctor choose the branch per visit, and the server validates the service
+ * against that chosen branch when the visit is booked.
+ */
+function catalogServiceBranchScope(c: { workspace: string | null; branchId: string | null; organizationId: string }) {
+  if (c.workspace?.toUpperCase() !== "DOCTOR" && c.branchId) {
+    return { OR: [{ branchId: null }, { branchId: c.branchId }] };
+  }
+  return { OR: [{ branchId: null }, { branch: { organizationId: c.organizationId, archivedAt: null, status: "ACTIVE" as const } }] };
+}
+
 export class ReceptionService{
-async getCatalog(rc:WonFlowRequestContext){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const[branches,doctors,services]=await Promise.all([database.branch.findMany({where:{tenantId:c.tenantId,organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"},orderBy:[{isMainBranch:"desc"},{name:"asc"}],select:{id:true,name:true,address:true,phone:true,timezone:true}}),database.doctorProfile.findMany({where:{tenantId:c.tenantId,staffProfile:{status:"ACTIVE",membership:{organizationId:c.organizationId,archivedAt:null,status:{in:["ACTIVE","INVITED"]}}}},include:{staffProfile:{include:{membership:true}},department:{select:{id:true,name:true}}},orderBy:{staffProfile:{membership:{displayName:"asc"}}}}),database.serviceDefinition.findMany({where:{tenantId:c.tenantId,isActive:true,OR:[{branchId:null},{branch:{organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"}}]},orderBy:[{category:"asc"},{name:"asc"}]})]);return{branches,practitioners:doctors.map(doctor=>{const doctorServices=services.filter(service=>service.doctorId===doctor.id&&service.priceMinorUnits!==null);const normalFee=doctorServices[0]?.priceMinorUnits??0;return{id:doctor.id,displayName:doctor.staffProfile.membership.displayName,specialtyName:doctor.specialty??"Clinical practitioner",primaryBranchId:doctor.staffProfile.branchId??branches[0]?.id??"",departmentName:doctor.department?.name??null,consultationFee:normalFee/100,urgentConsultationFee:normalFee?normalFee*1.5/100:0};}),services:services.map(service=>({id:service.id,name:service.name,category:service.category,price:service.priceMinorUnits===null?0:service.priceMinorUnits/100,doctorId:service.doctorId,branchId:service.branchId,publiclyBookable:service.publiclyBookable,consultationModes:service.consultationModes,requiresPrepayment:service.requiresPrepayment}))};}
+async getCatalog(rc:WonFlowRequestContext){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const[branches,doctors,services]=await Promise.all([database.branch.findMany({where:{tenantId:c.tenantId,organizationId:c.organizationId,archivedAt:null,status:"ACTIVE"},orderBy:[{isMainBranch:"desc"},{name:"asc"}],select:{id:true,name:true,address:true,phone:true,timezone:true}}),database.doctorProfile.findMany({where:{tenantId:c.tenantId,staffProfile:{status:"ACTIVE",membership:{organizationId:c.organizationId,archivedAt:null,status:{in:["ACTIVE","INVITED"]}}}},include:{staffProfile:{include:{membership:true}},department:{select:{id:true,name:true}}},orderBy:{staffProfile:{membership:{displayName:"asc"}}}}),database.serviceDefinition.findMany({where:{tenantId:c.tenantId,isActive:true,...catalogServiceBranchScope(c)},orderBy:[{category:"asc"},{name:"asc"}]})]);return{branches,practitioners:doctors.map(doctor=>{const doctorServices=services.filter(service=>service.doctorId===doctor.id&&service.priceMinorUnits!==null);const normalFee=doctorServices[0]?.priceMinorUnits??0;return{id:doctor.id,displayName:doctor.staffProfile.membership.displayName,specialtyName:doctor.specialty??"Clinical practitioner",primaryBranchId:doctor.staffProfile.branchId??branches[0]?.id??"",departmentName:doctor.department?.name??null,consultationFee:normalFee/100,urgentConsultationFee:normalFee?normalFee*1.5/100:0};}),services:services.map(service=>({id:service.id,name:service.name,category:service.category,price:service.priceMinorUnits===null?0:service.priceMinorUnits/100,doctorId:service.doctorId,branchId:service.branchId,publiclyBookable:service.publiclyBookable,consultationModes:service.consultationModes,requiresPrepayment:service.requiresPrepayment}))};}
 async getOverview(rc:WonFlowRequestContext,date:string){const c=requireTenantContext(rc);requirePermission(c,"appointments.read");const branchId=requireBranchId(c),{gte:start,lte:end}=dayFilterIn(date,c.timezone),queueDate=new Date(`${date}T00:00:00.000Z`);const[appointments,queue,patientsToday]=await Promise.all([database.appointment.findMany({where:{tenantId:c.tenantId,branchId,startsAt:{gte:start,lte:end}},orderBy:{startsAt:"asc"}}),database.queueEntry.findMany({where:{tenantId:c.tenantId,queue:{branchId,queueDate}},include:{patient:true,appointment:true},orderBy:[{priority:"desc"},{tokenNumber:"asc"}]}),database.patient.count({where:{tenantId:c.tenantId,createdAt:{gte:start,lte:end}}})]);return{patientsToday,appointmentsToday:appointments.length,waitingCount:queue.filter(x=>x.status==="WAITING").length,checkedInCount:appointments.filter(x=>x.checkedInAt).length,appointments,queue};}
 /** Duplicate-check lookup for the registration form: same name+DOB or same phone, called before the record is saved. */
 async findDuplicatePatients(rc:WonFlowRequestContext,lookup:DuplicatePatientLookup){const c=requireTenantContext(rc);requirePermission(c,"patients.read");return queryDuplicatePatients(c,lookup);}

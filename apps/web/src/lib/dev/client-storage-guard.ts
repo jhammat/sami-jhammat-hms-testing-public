@@ -13,12 +13,14 @@
 const ALLOW_LISTED_STORAGE_FILES = [
   "sidebar-collapsed-storage",
   "theme-toggle",
+  "display-preferences",
 ];
 
 const ALLOW_LISTED_STORAGE_KEYS = [
   "wonflow-color-theme",
   "wonflow-sidebar-collapsed",
   "wonflow-sidebar-state",
+  "wonflow-doctor-portal-preferences",
   "wonflow-data-cleanup-v1",
 ];
 

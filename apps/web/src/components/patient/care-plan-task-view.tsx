@@ -24,7 +24,7 @@ import {
   UserCheck,
   Video,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { DonutChart, RadialMeter, type DonutSlice } from "@/components/charts";
 
@@ -83,6 +83,8 @@ export function CarePlanTaskView() {
   const [completing, setCompleting] = useState(false);
   const [successCelebration, setSuccessCelebration] = useState<string | null>(null);
   const [clinicalAlertNotice, setClinicalAlertNotice] = useState<string | null>(null);
+  const [completeError, setCompleteError] = useState<string | null>(null);
+  const autoCloseTimer = useRef<number | null>(null);
 
   // Form states for active modal
   const [systolic, setSystolic] = useState("120");
@@ -111,9 +113,16 @@ export function CarePlanTaskView() {
 
   const [questionnaireAnswers, setQuestionnaireAnswers] = useState<Record<string, number>>({ q1: 0, q2: 0 });
 
-  const loadCarePlan = useCallback(async () => {
+  /**
+   * `background` refreshes the plan without the full-page loading state.
+   *
+   * Completing a task used to reload with the spinner, which unmounted the
+   * whole screen - task dialog, success message and all - so the patient saw
+   * the dialog freeze for a moment and then the page "refresh" under them.
+   */
+  const loadCarePlan = useCallback(async ({ background = false }: { background?: boolean } = {}) => {
     try {
-      setLoading(true);
+      if (!background) setLoading(true);
       setError(null);
       const res = await fetch("/api/v1/patient/careplan", { credentials: "include" });
       if (!res.ok) {
@@ -244,10 +253,29 @@ export function CarePlanTaskView() {
     }));
   }, [categorizedTasks.todayList, todayCompleted]);
 
+  const clearAutoClose = () => {
+    if (autoCloseTimer.current !== null) {
+      window.clearTimeout(autoCloseTimer.current);
+      autoCloseTimer.current = null;
+    }
+  };
+
+  useEffect(() => clearAutoClose, []);
+
+  const closeTask = () => {
+    clearAutoClose();
+    setSelectedTask(null);
+    setSuccessCelebration(null);
+    setClinicalAlertNotice(null);
+    setCompleteError(null);
+  };
+
   const handleOpenTask = (task: CarePlanTaskItem) => {
+    clearAutoClose();
     setSelectedTask(task);
     setClinicalAlertNotice(null);
     setSuccessCelebration(null);
+    setCompleteError(null);
 
     // Reset default form values
     if (task.taskType === "WOUND_PHOTO") {
@@ -261,9 +289,12 @@ export function CarePlanTaskView() {
 
   const handleCompleteTask = async () => {
     if (!selectedTask) return;
+    const task = selectedTask;
+    let flaggedForReview = false;
     try {
       setCompleting(true);
       setClinicalAlertNotice(null);
+      setCompleteError(null);
 
       let payloadObservation: { code: string; display: string; valueNumber?: number; unit?: string } | undefined;
       const resultData: Record<string, unknown> = {};
@@ -282,6 +313,7 @@ export function CarePlanTaskView() {
         resultData.oxygenSat = Number(oxygenSat);
 
         if (sysVal > 180) {
+          flaggedForReview = true;
           setClinicalAlertNotice(
             "Your blood pressure reading has been securely flagged for clinical review. Your care team has been notified.",
           );
@@ -324,20 +356,29 @@ export function CarePlanTaskView() {
       });
 
       if (!res.ok) {
-        throw new Error("Failed to submit task.");
+        const body = await res.json().catch(() => null) as { error?: string | { message?: string } } | null;
+        const message = typeof body?.error === "string" ? body.error : body?.error?.message;
+        throw new Error(message || "Your task could not be submitted. Please try again.");
       }
 
-      setSuccessCelebration(`Great job! "${selectedTask.title}" has been completed.`);
-      await loadCarePlan();
+      // Show the finished state in place - the dialog stays put, the button
+      // turns into a confirmation - and refresh the list quietly behind it.
+      setSelectedTask({ ...task, status: "COMPLETED" });
+      setSuccessCelebration(`Great job! "${task.title}" has been completed.`);
+      void loadCarePlan({ background: true });
 
-      // Auto close after brief pause if no clinical notice
-      setTimeout(() => {
-        if (!clinicalAlertNotice) {
-          setSelectedTask(null);
-        }
-      }, 1800);
+      // Close on its own unless a reading was flagged: that notice must be read.
+      if (!flaggedForReview) {
+        clearAutoClose();
+        autoCloseTimer.current = window.setTimeout(() => {
+          autoCloseTimer.current = null;
+          setSelectedTask((current) => (current?.id === task.id ? null : current));
+          setSuccessCelebration(null);
+        }, 1800);
+      }
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Error completing task");
+      setClinicalAlertNotice(null);
+      setCompleteError(err instanceof Error ? err.message : "Your task could not be submitted. Please try again.");
     } finally {
       setCompleting(false);
     }
@@ -587,7 +628,7 @@ export function CarePlanTaskView() {
                 </div>
               </div>
               <button
-                onClick={() => setSelectedTask(null)}
+                onClick={closeTask}
                 className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
               >
                 ✕
@@ -606,6 +647,13 @@ export function CarePlanTaskView() {
               <div className="my-4 rounded-xl bg-emerald-50 p-4 text-center text-emerald-800">
                 <Sparkles className="mx-auto h-8 w-8 text-emerald-600" />
                 <p className="mt-1 font-bold">{successCelebration}</p>
+              </div>
+            )}
+
+            {completeError && (
+              <div className="my-4 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-medium text-red-700" role="alert">
+                <AlertCircle className="mr-1.5 inline h-4 w-4 text-red-600" />
+                {completeError}
               </div>
             )}
 
@@ -882,7 +930,7 @@ export function CarePlanTaskView() {
             <div className="mt-6 flex justify-end space-x-3 border-t border-slate-100 pt-4">
               <button
                 type="button"
-                onClick={() => setSelectedTask(null)}
+                onClick={closeTask}
                 className="rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
               >
                 Close

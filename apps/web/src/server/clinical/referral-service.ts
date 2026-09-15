@@ -11,6 +11,42 @@ import type {
 } from "@wonflow/contracts";
 import { WonFlowApiError } from "@/server/http/route-handler";
 
+/**
+ * The relations every referral card needs: who the patient is, who referred
+ * them and who holds the referral. The status transitions return the same
+ * shape as the caseload list, because the workspaces swap the returned row
+ * straight into that list. Before this, accept/start/complete/cancel returned
+ * a bare row, so the card lost its patient and fell back to "Patient c1a2745c"
+ * and the patient workspace behind it read as "No patient selected".
+ */
+const REFERRAL_CARD_INCLUDE = {
+  Patient: {
+    select: {
+      id: true,
+      patientNumber: true,
+      givenName: true,
+      familyName: true,
+      dateOfBirth: true,
+      sex: true,
+      phone: true,
+    },
+  },
+  DoctorProfile: {
+    select: {
+      id: true,
+      specialty: true,
+      staffProfile: { select: { membership: { select: { displayName: true } } } },
+    },
+  },
+  StaffProfile: {
+    select: {
+      id: true,
+      title: true,
+      membership: { select: { displayName: true } },
+    },
+  },
+} satisfies Prisma.ClinicalReferralInclude;
+
 export class ReferralService {
   async createReferral(
     requestContext: WonFlowRequestContext,
@@ -163,6 +199,21 @@ export class ReferralService {
       );
     }
 
+    // A hand-off from a care plan remembers the plan, so stopping or deleting
+    // the plan can close the referrals it raised. The plan must be this
+    // patient's, in this tenant - never a link to someone else's record.
+    let carePlanId: string | null = null;
+    if (input.carePlanId?.trim()) {
+      const plan = await database.carePlan.findFirst({
+        where: { id: input.carePlanId.trim(), tenantId: context.tenantId, patientId: patient.id },
+        select: { id: true },
+      });
+      if (!plan) {
+        throw new WonFlowApiError(400, "invalid-care-plan", "That care plan does not belong to this patient.");
+      }
+      carePlanId = plan.id;
+    }
+
     const validDays = Math.max(1, Math.min(365, input.validDays ?? 30));
     const validFrom = new Date();
     const validUntil = new Date(validFrom.getTime() + validDays * 86_400_000);
@@ -183,6 +234,7 @@ export class ReferralService {
           clinicalSummary: input.clinicalSummary?.trim() || null,
           surgicalSummary: input.surgicalSummary?.trim() || null,
           precautions: input.precautions?.trim() || null,
+          carePlanId,
           validFrom,
           validUntil,
         },
@@ -304,6 +356,7 @@ export class ReferralService {
           acceptedAt: new Date(),
           assignedToId,
         },
+        include: REFERRAL_CARD_INCLUDE,
       });
 
       // Grant dynamic patient access for this referral
@@ -357,7 +410,7 @@ export class ReferralService {
         },
       });
 
-      return updated;
+      return this.toContractShape(updated);
     });
   }
 
@@ -389,6 +442,7 @@ export class ReferralService {
       const updated = await tx.clinicalReferral.update({
         where: { id: referral.id },
         data: { status: "IN_PROGRESS" },
+        include: REFERRAL_CARD_INCLUDE,
       });
 
       await tx.auditEvent.create({
@@ -406,7 +460,7 @@ export class ReferralService {
         },
       });
 
-      return updated;
+      return this.toContractShape(updated);
     });
   }
 
@@ -446,6 +500,7 @@ export class ReferralService {
           outcomeNotes: input.outcomeNotes?.trim() || null,
           completedAt: new Date(),
         },
+        include: REFERRAL_CARD_INCLUDE,
       });
 
       // Terminate dynamic patient access granted by this referral
@@ -477,7 +532,7 @@ export class ReferralService {
         },
       });
 
-      return updated;
+      return this.toContractShape(updated);
     });
   }
 
@@ -520,6 +575,7 @@ export class ReferralService {
           status: "CANCELLED",
           outcomeNotes: reason ? `Declined/Cancelled: ${reason}` : undefined,
         },
+        include: REFERRAL_CARD_INCLUDE,
       });
 
       // Terminate dynamic patient access
@@ -549,7 +605,7 @@ export class ReferralService {
         },
       });
 
-      return updated;
+      return this.toContractShape(updated);
     });
   }
 

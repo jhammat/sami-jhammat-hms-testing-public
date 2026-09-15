@@ -700,7 +700,75 @@ export class CarePlanService {
       where: { carePlanId: plan.id, status: { in: ["COMPLETED", "SKIPPED"] } },
     });
 
+    /*
+     * The referrals this plan handed the patient off with close with it.
+     *
+     * Stopping or deleting a plan used to leave its physiotherapy and dietetic
+     * referrals open, so the patient stayed on those clinicians' caseloads -
+     * and inside their access - for a plan that no longer existed. Referrals
+     * now record the plan they came from. Hand-offs raised before that link
+     * existed are matched the only safe way available: sent to a clinician
+     * named on this plan, for this patient, after the plan began, and only
+     * when no other active plan of this patient names that clinician.
+     */
+    const staffOnPlan = [plan.assignedTherapistId, plan.assignedNutritionistId].filter(
+      (id): id is string => Boolean(id),
+    );
+    const otherActivePlans = await database.carePlan.findMany({
+      where: { tenantId: context.tenantId, patientId: plan.patientId, status: "ACTIVE", id: { not: plan.id } },
+      select: { assignedTherapistId: true, assignedNutritionistId: true },
+    });
+    const staffOnOtherPlans = new Set(
+      otherActivePlans.flatMap((other) => [other.assignedTherapistId, other.assignedNutritionistId]).filter(Boolean),
+    );
+    const legacyStaff = staffOnPlan.filter((id) => !staffOnOtherPlans.has(id));
+    const planReferrals = await database.clinicalReferral.findMany({
+      where: {
+        tenantId: context.tenantId,
+        patientId: plan.patientId,
+        status: { in: ["PENDING", "ACCEPTED", "IN_PROGRESS"] },
+        OR: [
+          { carePlanId: plan.id },
+          ...(legacyStaff.length
+            ? [{ carePlanId: null, assignedToId: { in: legacyStaff }, createdAt: { gte: plan.createdAt } }]
+            : []),
+        ],
+      },
+      select: { id: true },
+    });
+    const planReferralIds = planReferrals.map((referral) => referral.id);
+
     const result = await database.$transaction(async (tx) => {
+      if (planReferralIds.length > 0) {
+        await tx.clinicalReferral.updateMany({
+          where: { id: { in: planReferralIds } },
+          data: {
+            status: "CANCELLED",
+            outcomeNotes: `Closed automatically: the care plan "${plan.title}" was ${recorded === 0 ? "deleted" : "stopped"}.`,
+          },
+        });
+        await tx.patientAccess.updateMany({
+          where: { referralId: { in: planReferralIds }, patientId: plan.patientId },
+          data: { isActive: false },
+        });
+        await tx.auditEvent.createMany({
+          data: planReferralIds.map((referralId) => ({
+            tenantId: context.tenantId,
+            branchId: toUuid(context.branchId),
+            actorMembershipId: toUuid(context.membershipId),
+            sessionId: toUuid(context.sessionId),
+            requestId: context.requestId,
+            action: "clinical.referral.cancelled",
+            entityType: "clinical-referral",
+            entityId: referralId,
+            severity: "INFORMATION" as const,
+            reason: `Care plan ${recorded === 0 ? "deleted" : "stopped"}`,
+            sourceApplication: context.sourceApplication,
+            metadata: { carePlanId: plan.id },
+          })),
+        });
+      }
+
       if (recorded === 0) {
         await tx.carePlanAlert.deleteMany({ where: { carePlanId: plan.id } });
         await tx.carePlanTask.deleteMany({ where: { carePlanId: plan.id } });

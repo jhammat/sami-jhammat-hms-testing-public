@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 import { authenticateAccount } from "@/lib/auth/account-service";
 import { setPendingLoginCookie } from "@/lib/auth/pending-login";
-import { AUDIENCE_LABELS, audienceOf, isPortalAudience, type PortalAudience } from "@/lib/auth/portal-directory";
+import { audienceOf, isPortalAudience, type PortalAudience } from "@/lib/auth/portal-directory";
 import { createSessionCookie } from "@/lib/auth/session-server";
 import { checkRateLimit, clearRateLimit, clientAddress, recordFailure, rateLimitResponse } from "@/lib/security/rate-limit";
 
@@ -74,6 +74,22 @@ async function handleLogin(request: Request): Promise<NextResponse | Response> {
     return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
   }
 
+  /*
+   * An account with nothing on the chosen side is answered exactly like a
+   * wrong password - same status, same message, same throttle.
+   *
+   * It used to answer "These credentials are for the hospital staff side"
+   * with a one-click link that finished the sign-in there. That turned the
+   * patient screen into a checker for staff passwords (a right password and
+   * a wrong one got different answers) and a side entrance into the clinical
+   * portals. Staff sign in from the Hospital staff tab, and the patient tab
+   * says so without confirming anything about the account.
+   */
+  if (account.contexts.length && !account.contexts.some((context) => audienceOf(context.role) === audience)) {
+    recordFailure(throttleKey, LOGIN_WINDOW_MS);
+    return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
+  }
+
   if (account.suspendedOrganizationLabel) return NextResponse.json({ error: `${account.suspendedOrganizationLabel}'s access has been suspended. Contact your platform administrator.`, code: "organization-suspended" }, { status: 403 });
   if (!account.contexts.length) return NextResponse.json({ error: "No active workspace is assigned to this account." }, { status: 403 });
   if (account.requiresMfa) return NextResponse.json({ error: "MFA verification is required.", requiresMfa: true }, { status: 403 });
@@ -81,23 +97,8 @@ async function handleLogin(request: Request): Promise<NextResponse | Response> {
   const contexts = account.contexts.filter((context) => audienceOf(context.role) === audience);
 
   if (!contexts.length) {
-    /*
-     * The password was right, so the person is who they say they are — they
-     * are simply at the wrong door. Saying which door is theirs leaks nothing
-     * they do not already know about their own account, and refusing without
-     * saying it is how you get someone typing a correct password five times
-     * until the account locks.
-     */
-    const otherAudience = audienceOf(account.contexts[0]!.role);
-
-    return NextResponse.json(
-      {
-        error: `These credentials are for the ${AUDIENCE_LABELS[otherAudience]} side of WonFlow, not the ${AUDIENCE_LABELS[audience]} side.`,
-        code: "wrong-audience",
-        audience: otherAudience,
-      },
-      { status: 403 },
-    );
+    recordFailure(throttleKey, LOGIN_WINDOW_MS);
+    return NextResponse.json({ error: "Invalid email or password." }, { status: 401 });
   }
 
   /*

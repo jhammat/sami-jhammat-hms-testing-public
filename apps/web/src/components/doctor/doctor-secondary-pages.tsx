@@ -105,6 +105,12 @@ import {
   useDoctorPortalContext,
 } from "./doctor-portal-shell";
 import { DoctorProfileAvatar } from "./doctor-profile-avatar";
+import {
+  DEFAULT_DOCTOR_PREFERENCES,
+  readDoctorPreferences,
+  writeDoctorPreferences,
+  type DoctorPortalPreferences,
+} from "@/lib/doctor/display-preferences";
 
 const SECONDARY_DATA_EVENTS = [
   "wonflow:demo-patients-changed",
@@ -3181,31 +3187,7 @@ export function DoctorAppointmentsPage() {
   );
 }
 
-type DisplayDensity = "compact" | "comfortable";
-
-interface DoctorPortalPreferences {
-  notificationsEnabled: boolean;
-  queueSoundEnabled: boolean;
-  defaultAppointmentDuration: string;
-  displayDensity: DisplayDensity;
-  mobileCompactActions: boolean;
-}
-
-const DEFAULT_PREFERENCES: DoctorPortalPreferences = {
-  notificationsEnabled: true,
-  queueSoundEnabled: true,
-  defaultAppointmentDuration: "15",
-  displayDensity: "compact",
-  mobileCompactActions: true,
-};
-
-// In-memory, session-lived: display preferences only (no clinical or
-// business data), so this never claims to persist across a reload.
-let doctorPreferences: DoctorPortalPreferences = DEFAULT_PREFERENCES;
-
-function readDoctorPreferences(): DoctorPortalPreferences {
-  return doctorPreferences;
-}
+const DEFAULT_PREFERENCES = DEFAULT_DOCTOR_PREFERENCES;
 
 export function DoctorSettingsPage() {
   const [preferences, setPreferences] = useState<DoctorPortalPreferences>(
@@ -3228,9 +3210,12 @@ export function DoctorSettingsPage() {
   }
 
   function savePreferences(): void {
-    doctorPreferences = preferences;
-    window.dispatchEvent(new Event("wonflow:doctor-portal-preferences-changed"));
-    setSavedMessage("Doctor Portal preferences saved for this session.");
+    const stored = writeDoctorPreferences(preferences);
+    setSavedMessage(
+      stored
+        ? "Doctor Portal preferences saved on this device."
+        : "Preferences applied, but this browser blocked saving them - they will reset when the page reloads.",
+    );
   }
 
   return (
@@ -3312,7 +3297,7 @@ export function DoctorSettingsPage() {
           </SettingsSection>
 
           <SettingsSection
-            description="Select the preferred information density for future shell integration."
+            description="Choose how tightly the Doctor Portal packs information. Applied across the portal when you save."
             icon={<SlidersHorizontal size={17} />}
             title="Display density"
           >
@@ -3335,7 +3320,7 @@ export function DoctorSettingsPage() {
               ))}
             </div>
             <p className="mt-3 text-[10px] leading-4 text-slate-400">
-              The preference is saved now; global density switching will be connected in a later milestone.
+              Comfortable enlarges text and spacing throughout the Doctor Portal on this device.
             </p>
           </SettingsSection>
 

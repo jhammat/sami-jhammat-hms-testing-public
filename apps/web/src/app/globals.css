@@ -1260,3 +1260,13 @@ html.dark input.physio-range:focus {
     transition: none;
   }
 }
+
+/*
+ * Doctor Portal "Comfortable" display density (Settings -> Display density).
+ * Spacing and type are rem-based, so raising the root size scales the whole
+ * portal evenly: the base html size is 14px, and comfortable is 16px (about
+ * one step larger). The attribute is only set while a doctor page is mounted.
+ */
+html[data-doctor-density="comfortable"] {
+  font-size: 16px;
+}

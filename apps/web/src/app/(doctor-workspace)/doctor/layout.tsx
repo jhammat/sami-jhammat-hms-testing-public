@@ -9,6 +9,7 @@ import {
 import {
   requirePortal,
 } from "@/lib/auth/portal-guard";
+import { DoctorDisplayDensity } from "@/components/doctor/doctor-display-density";
 
 interface DoctorWorkspaceLayoutProps {
   children: ReactNode;
@@ -28,6 +29,7 @@ export default async function DoctorWorkspaceLayout({
 
   return (
     <DoctorPortalShell>
+      <DoctorDisplayDensity />
       {children}
     </DoctorPortalShell>
   );

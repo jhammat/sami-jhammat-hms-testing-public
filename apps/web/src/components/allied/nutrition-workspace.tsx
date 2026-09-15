@@ -718,7 +718,13 @@ export function NutritionWorkspace() {
 
       if (referralResponse.ok) {
         const data = await referralResponse.json();
-        setReferrals(data.referrals ?? []);
+        // A cancelled or expired referral is not a patient on this caseload -
+        // the plan that raised it was stopped, or the referral lapsed.
+        setReferrals(
+          ((data.referrals ?? []) as ClinicalReferral[]).filter(
+            (referral) => referral.status !== "CANCELLED" && referral.status !== "EXPIRED",
+          ),
+        );
       } else {
         setFeedback({ tone: "critical", title: "Could not load the dietetics caseload." });
       }
@@ -779,6 +785,31 @@ export function NutritionWorkspace() {
   }, [loadPatientRecord, selectedReferral?.patientId]);
 
   /** Switching patient clears every draft, so nothing crosses between records. */
+  /**
+   * Every "Choose a patient" button lands here.
+   *
+   * They used to only switch to the caseload tab, so on the caseload itself -
+   * where the "No patient selected" strip also shows the button - a click
+   * changed nothing and the button looked broken. It now also brings the
+   * caseload search into view and puts the cursor in it.
+   */
+  function openCaseloadPicker() {
+    setActiveTab("caseload");
+    // Coming from another section the caseload mounts a moment later, so
+    // wait for the search field rather than guessing a delay.
+    let attempts = 0;
+    const focusSearch = () => {
+      const search = document.getElementById("nutrition-caseload-search");
+      if (!search) {
+        if (++attempts < 40) window.setTimeout(focusSearch, 50);
+        return;
+      }
+      search.scrollIntoView({ behavior: "smooth", block: "center" });
+      search.focus({ preventScroll: true });
+    };
+    window.setTimeout(focusSearch, 0);
+  }
+
   function choosePatient(referralId: string | null) {
     setSelectedReferralId(referralId);
     setIsLoadingPatient(referralId !== null);
@@ -827,10 +858,28 @@ export function NutritionWorkspace() {
 
       if (response.ok) {
         const data = await response.json();
+        // Keep what the card already knew (the patient, the referrer) if the
+        // response ever arrives without it, so a status change never turns a
+        // named patient back into an id.
         setReferrals((previous) =>
-          previous.map((referral) => (referral.id === referralId ? data.referral : referral)),
+          previous.map((referral) =>
+            referral.id === referralId
+              ? {
+                  ...referral,
+                  ...data.referral,
+                  patient: data.referral?.patient ?? referral.patient,
+                  referringDoctor: data.referral?.referringDoctor ?? referral.referringDoctor,
+                }
+              : referral,
+          ),
         );
         setFeedback({ tone: "good", title: successTitle });
+        // Starting care is the moment the clinician begins working with this
+        // patient, so open their workspace instead of leaving them on the list.
+        if (action === "start") {
+          choosePatient(referralId);
+          setActiveTab("overview");
+        }
       } else {
         const error = await response.json().catch(() => ({}));
         setFeedback({
@@ -1116,7 +1165,7 @@ export function NutritionWorkspace() {
               variant="solid"
               accent={ACCENT}
               icon={<Inbox size={14} />}
-              onClick={() => setActiveTab("caseload")}
+              onClick={openCaseloadPicker}
             >
               Open the caseload
             </GlassButton>
@@ -1151,7 +1200,7 @@ export function NutritionWorkspace() {
             variant="solid"
             accent={ACCENT}
             icon={<Search size={14} />}
-            onClick={() => setActiveTab("caseload")}
+            onClick={openCaseloadPicker}
           >
             Choose a patient
           </GlassButton>
@@ -1220,7 +1269,7 @@ export function NutritionWorkspace() {
             Care team record
           </GlassButton>
 
-          <GlassButton size="sm" icon={<Search size={13} />} onClick={() => setActiveTab("caseload")}>
+          <GlassButton size="sm" icon={<Search size={13} />} onClick={openCaseloadPicker}>
             Change patient
           </GlassButton>
 
@@ -1578,6 +1627,7 @@ export function NutritionWorkspace() {
             />
             <GlassInput
               aria-label="Search the caseload"
+              id="nutrition-caseload-search"
               className="pl-9"
               placeholder="Search by name, MRN or referral reason"
               value={caseloadSearch}
@@ -2667,6 +2717,16 @@ export function NutritionWorkspace() {
 
   function renderCalculators() {
     const applyPertToPlan = () => {
+      // A dietary plan belongs to a named patient. Without one there is no
+      // plan to apply to, so say so instead of reporting a success.
+      if (!selectedReferral) {
+        setFeedback({
+          tone: "critical",
+          title: "Choose a patient first",
+          detail: "Select the patient from your caseload, then apply this regimen to their dietary plan.",
+        });
+        return;
+      }
       if (!mealDose && !snackDose) return;
       const itemsToAdd: CreateNutritionPlanItemInput[] = [];
       const brandName = pertBrand || "Pancreatic Enzyme";
@@ -2740,6 +2800,16 @@ export function NutritionWorkspace() {
     };
 
     const applyEnteralToPlan = () => {
+      // A dietary plan belongs to a named patient. Without one there is no
+      // plan to apply to, so say so instead of reporting a success.
+      if (!selectedReferral) {
+        setFeedback({
+          tone: "critical",
+          title: "Choose a patient first",
+          detail: "Select the patient from your caseload, then apply this regimen to their dietary plan.",
+        });
+        return;
+      }
       if (!enteral || !enteralFormula) return;
       const newItem: CreateNutritionPlanItemInput = {
         itemType: "SUPPLEMENT",
@@ -3232,7 +3302,16 @@ export function NutritionWorkspace() {
                   {selectedReferral ? (
                     <span>Plan target: <strong>{patientName}</strong></span>
                   ) : (
-                    <span>Select patient to attach to record</span>
+                    <span className="inline-flex flex-wrap items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300">
+                      <AlertTriangle size={12} /> No patient selected - choose one before applying.
+                      <button
+                        type="button"
+                        onClick={openCaseloadPicker}
+                        className="font-bold text-emerald-700 underline underline-offset-2 dark:text-emerald-300"
+                      >
+                        Choose a patient
+                      </button>
+                    </span>
                   )}
                 </div>
 
@@ -3426,7 +3505,16 @@ export function NutritionWorkspace() {
                   {selectedReferral ? (
                     <span>Plan target: <strong>{patientName}</strong></span>
                   ) : (
-                    <span>Select patient to attach to record</span>
+                    <span className="inline-flex flex-wrap items-center gap-1.5 font-semibold text-amber-700 dark:text-amber-300">
+                      <AlertTriangle size={12} /> No patient selected - choose one before applying.
+                      <button
+                        type="button"
+                        onClick={openCaseloadPicker}
+                        className="font-bold text-emerald-700 underline underline-offset-2 dark:text-emerald-300"
+                      >
+                        Choose a patient
+                      </button>
+                    </span>
                   )}
                 </div>
 

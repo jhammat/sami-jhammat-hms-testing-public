@@ -10,7 +10,7 @@ import { PatientSymptomLogger } from "@/components/patient/patient-symptom-logge
 import { PatientLabResultsView } from "@/components/patient/patient-lab-results-view";
 import { PatientEducationLibraryView } from "@/components/patient/patient-education-library";
 
-const sections = ["care", "reports", "billing", "profile", "recovery", "caregivers", "vitals", "drains", "medications", "symptoms", "labs", "education"] as const;
+const sections = ["care", "record", "reports", "billing", "profile", "recovery", "caregivers", "vitals", "drains", "medications", "symptoms", "labs", "education"] as const;
 export default async function PatientSectionPage({ params }: { params: Promise<{ section: string }> }) {
   const { section } = await params;
   if (!sections.includes(section as (typeof sections)[number])) notFound();
@@ -23,5 +23,5 @@ export default async function PatientSectionPage({ params }: { params: Promise<{
   if (section === "symptoms") return <PatientSymptomLogger />;
   if (section === "labs") return <PatientLabResultsView />;
   if (section === "education") return <PatientEducationLibraryView />;
-  return <PatientAccessDashboard section={section as "care" | "reports" | "billing"} />;
+  return <PatientAccessDashboard section={section as "care" | "record" | "reports" | "billing"} />;
 }

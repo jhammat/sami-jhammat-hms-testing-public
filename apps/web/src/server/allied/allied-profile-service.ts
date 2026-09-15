@@ -346,21 +346,31 @@ export async function updateAlliedProfile(
     );
   }
 
-  // A branch must belong to this tenant. Without this check a caller could
-  // move themselves onto another organisation's branch by guessing an id.
-  if (input.primaryBranchId) {
-    const branch = await database.branch.findFirst({
-      where: { id: input.primaryBranchId, tenantId: context.tenantId },
-      select: { id: true },
-    });
-
-    if (!branch) {
-      throw new WonFlowApiError(
-        404,
-        "branch-not-found",
-        "That location does not exist in this organisation. Pick one from the list and try again.",
-      );
-    }
+  /*
+   * Where a clinician works and which discipline they practise are assigned
+   * by the hospital administrator, not chosen by the clinician.
+   *
+   * Both used to be editable here. The branch decides which patients and
+   * queues a clinician's session opens, and the staff type decides whose
+   * referrals they can read - so a physiotherapist could move themselves to
+   * another hospital, or re-label themselves a dietitian, from their own
+   * profile page. Resending the current value is accepted so older clients
+   * keep saving; a different value is refused.
+   */
+  const currentBranchId = membership.primaryBranchId ?? staff.branchId ?? null;
+  if (input.primaryBranchId !== undefined && (input.primaryBranchId || null) !== currentBranchId) {
+    throw new WonFlowApiError(
+      403,
+      "branch-assignment-admin-only",
+      "Your hospital location is assigned by the administrator. Contact your hospital administrator to change it.",
+    );
+  }
+  if (input.staffType !== undefined && input.staffType !== staff.staffType) {
+    throw new WonFlowApiError(
+      403,
+      "staff-type-admin-only",
+      "Your clinical role is assigned by the administrator. Contact your hospital administrator to change it.",
+    );
   }
 
   // Membership and staff profile are two tables, so they move together or
@@ -371,9 +381,6 @@ export async function updateAlliedProfile(
       where: { id: membership.id },
       data: {
         ...(displayName !== undefined ? { displayName } : {}),
-        ...(input.primaryBranchId !== undefined
-          ? { primaryBranchId: input.primaryBranchId }
-          : {}),
         ...(input.preferredLocale ? { preferredLocale: input.preferredLocale } : {}),
       },
     });
@@ -382,8 +389,6 @@ export async function updateAlliedProfile(
       where: { id: staff.id },
       data: {
         ...(title !== undefined ? { title: title || null } : {}),
-        ...(input.staffType !== undefined ? { staffType: input.staffType } : {}),
-        ...(input.primaryBranchId !== undefined ? { branchId: input.primaryBranchId } : {}),
       },
     });
 

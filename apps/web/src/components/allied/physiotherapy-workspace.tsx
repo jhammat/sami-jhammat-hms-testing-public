@@ -452,7 +452,13 @@ export function PhysiotherapyWorkspace() {
 
       if (referralResponse.ok) {
         const data = await referralResponse.json();
-        setReferrals(data.referrals ?? []);
+        // A cancelled or expired referral is not a patient on this caseload -
+        // the plan that raised it was stopped, or the referral lapsed.
+        setReferrals(
+          ((data.referrals ?? []) as ClinicalReferral[]).filter(
+            (referral) => referral.status !== "CANCELLED" && referral.status !== "EXPIRED",
+          ),
+        );
       } else {
         setFeedback({ tone: "critical", title: "Could not load the physiotherapy caseload." });
       }
@@ -533,6 +539,31 @@ export function PhysiotherapyWorkspace() {
    * or a set dose across a patient change is exactly the error this workspace
    * is built to prevent.
    */
+  /**
+   * Every "Choose a patient" button lands here.
+   *
+   * They used to only switch to the caseload tab, so on the caseload itself -
+   * where the "No patient selected" strip also shows the button - a click
+   * changed nothing and the button looked broken. It now also brings the
+   * caseload search into view and puts the cursor in it.
+   */
+  function openCaseloadPicker() {
+    setActiveTab("caseload");
+    // Coming from another section the caseload mounts a moment later, so
+    // wait for the search field rather than guessing a delay.
+    let attempts = 0;
+    const focusSearch = () => {
+      const search = document.getElementById("physio-caseload-search");
+      if (!search) {
+        if (++attempts < 40) window.setTimeout(focusSearch, 50);
+        return;
+      }
+      search.scrollIntoView({ behavior: "smooth", block: "center" });
+      search.focus({ preventScroll: true });
+    };
+    window.setTimeout(focusSearch, 0);
+  }
+
   function choosePatient(referralId: string | null) {
     setSelectedReferralId(referralId);
     setIsLoadingPatient(referralId !== null);
@@ -586,10 +617,28 @@ export function PhysiotherapyWorkspace() {
 
       if (response.ok) {
         const data = await response.json();
+        // Keep what the card already knew (the patient, the referrer) if the
+        // response ever arrives without it, so a status change never turns a
+        // named patient back into an id.
         setReferrals((previous) =>
-          previous.map((referral) => (referral.id === referralId ? data.referral : referral)),
+          previous.map((referral) =>
+            referral.id === referralId
+              ? {
+                  ...referral,
+                  ...data.referral,
+                  patient: data.referral?.patient ?? referral.patient,
+                  referringDoctor: data.referral?.referringDoctor ?? referral.referringDoctor,
+                }
+              : referral,
+          ),
         );
         setFeedback({ tone: "good", title: successTitle });
+        // Starting care is the moment the clinician begins working with this
+        // patient, so open their workspace instead of leaving them on the list.
+        if (action === "start") {
+          choosePatient(referralId);
+          setActiveTab("overview");
+        }
       } else {
         const error = await response.json().catch(() => ({}));
         setFeedback({
@@ -1243,7 +1292,7 @@ export function PhysiotherapyWorkspace() {
               variant="solid"
               accent={ACCENT}
               icon={<Inbox size={14} />}
-              onClick={() => setActiveTab("caseload")}
+              onClick={openCaseloadPicker}
             >
               Open the caseload
             </GlassButton>
@@ -1278,7 +1327,7 @@ export function PhysiotherapyWorkspace() {
             variant="solid"
             accent={ACCENT}
             icon={<Search size={14} />}
-            onClick={() => setActiveTab("caseload")}
+            onClick={openCaseloadPicker}
           >
             Choose a patient
           </GlassButton>
@@ -1361,7 +1410,7 @@ export function PhysiotherapyWorkspace() {
             Care team record
           </GlassButton>
 
-          <GlassButton size="sm" icon={<Search size={13} />} onClick={() => setActiveTab("caseload")}>
+          <GlassButton size="sm" icon={<Search size={13} />} onClick={openCaseloadPicker}>
             Change patient
           </GlassButton>
 
@@ -1729,6 +1778,7 @@ export function PhysiotherapyWorkspace() {
               />
               <GlassInput
                 aria-label="Search the caseload"
+                id="physio-caseload-search"
                 className="pl-9"
                 placeholder="Search by name, MRN or referral reason"
                 value={caseloadSearch}

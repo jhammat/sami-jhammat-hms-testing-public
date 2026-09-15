@@ -64,6 +64,8 @@ interface ReferralManagerModalProps {
     physiotherapist?: PrefilledClinician | null;
     nutritionist?: PrefilledClinician | null;
   };
+  /** Set when the referral is raised from a care plan, so ending the plan closes it. */
+  carePlanId?: string;
 }
 
 const TARGET_LABELS: Record<ReferralTarget, string> = {
@@ -102,6 +104,7 @@ export function ReferralManagerModal({
   introMessage,
   closeLabel = "Cancel",
   prefill,
+  carePlanId,
 }: ReferralManagerModalProps) {
   /**
    * The clinicians carried in from the care plan, in the order they are sent.
@@ -268,6 +271,7 @@ export function ReferralManagerModal({
             surgicalSummary: surgicalSummary.trim() || undefined,
             precautions: precautions.trim() || undefined,
             validDays,
+            carePlanId: carePlanId || undefined,
           }),
         });
 

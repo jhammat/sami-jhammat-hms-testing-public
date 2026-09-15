@@ -1374,7 +1374,8 @@ function DoctorEditModal({
 }) {
   const [displayName, setDisplayName] = useState(doctor.staffProfile.membership.displayName || "");
   const [title, setTitle] = useState(doctor.staffProfile.title || "");
-  const [email, setEmail] = useState(doctor.staffProfile.membership.identity?.email || "");
+  // Shown for reference only: the login email is fixed once the account exists.
+  const email = doctor.staffProfile.membership.identity?.email || "";
   const [phone, setPhone] = useState(doctor.contactPhone || doctor.staffProfile.membership.identity?.phone || "");
   const [primaryBranchId, setPrimaryBranchId] = useState(
     doctor.staffProfile.branch?.id || doctor.staffProfile.membership.primaryBranchId || doctor.branches?.[0]?.id || "",
@@ -1430,10 +1431,6 @@ function DoctorEditModal({
       setError("Doctor full name is required.");
       return;
     }
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError("Valid email address is required.");
-      return;
-    }
     if (durationMinutes < 5 || durationMinutes > 480) {
       setError("Duration must be between 5 and 480 minutes.");
       return;
@@ -1446,7 +1443,6 @@ function DoctorEditModal({
         body: JSON.stringify({
           displayName: displayName.trim(),
           title: title.trim() || null,
-          email: email.trim(),
           contactPhone: phone.trim() || null,
           primaryBranchId: primaryBranchId || null,
           branchIds,
@@ -1584,15 +1580,16 @@ function DoctorEditModal({
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-slate-600 dark:text-slate-400">Email (Login username) *</label>
+                  <label className="mb-1 block text-slate-600 dark:text-slate-400">Email (Login username)</label>
                   <input
-                    className={fieldClass}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="e.g. doctor@hospital.com"
-                    required
+                    aria-readonly="true"
+                    className={`${fieldClass} cursor-not-allowed bg-slate-100 text-slate-500 dark:bg-slate-800/60 dark:text-slate-400`}
+                    readOnly
+                    title="The login email cannot be changed"
                     type="email"
                     value={email}
                   />
+                  <p className="mt-1 text-[11px] text-slate-400">The login email cannot be changed.</p>
                 </div>
                 <div>
                   <label className="mb-1 block text-slate-600 dark:text-slate-400">Contact Phone</label>
@@ -2312,7 +2309,8 @@ function StaffEditModal({
 }) {
   const [displayName, setDisplayName] = useState(user.displayName || "");
   const [title, setTitle] = useState(user.staffProfile?.title || "");
-  const [email, setEmail] = useState(user.identity.email || "");
+  // Shown for reference only: the login email is fixed once the account exists.
+  const email = user.identity.email || "";
   const [phone, setPhone] = useState(user.identity.phone || "");
   const [branchIds, setBranchIds] = useState<string[]>(() => {
     const held = (user.branches ?? []).map((branch) => branch.id);
@@ -2331,10 +2329,6 @@ function StaffEditModal({
       setError("Name is required.");
       return;
     }
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
-      setError("Valid email address is required.");
-      return;
-    }
     setSaving(true);
     setError("");
     try {
@@ -2343,7 +2337,6 @@ function StaffEditModal({
         body: JSON.stringify({
           displayName: displayName.trim(),
           title: title.trim() || null,
-          email: email.trim(),
           phone: phone.trim() || null,
           primaryBranchId: primaryBranchId || null,
           branchIds,
@@ -2405,14 +2398,16 @@ function StaffEditModal({
               />
             </div>
             <div>
-              <label className="mb-1 block text-slate-600 dark:text-slate-400">Email (Login username) *</label>
+              <label className="mb-1 block text-slate-600 dark:text-slate-400">Email (Login username)</label>
               <input
-                className={fieldClass}
-                onChange={(e) => setEmail(e.target.value)}
-                required
+                aria-readonly="true"
+                className={`${fieldClass} cursor-not-allowed bg-slate-100 text-slate-500 dark:bg-slate-800/60 dark:text-slate-400`}
+                readOnly
+                title="The login email cannot be changed"
                 type="email"
                 value={email}
               />
+              <p className="mt-1 text-[11px] text-slate-400">The login email cannot be changed.</p>
             </div>
             <div>
               <label className="mb-1 block text-slate-600 dark:text-slate-400">Contact Phone</label>

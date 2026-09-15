@@ -61,6 +61,87 @@ async function resolveStaffBranchIds(
 
 const ADMIN_PERMISSION_CODES = ["organization.audit.read","organization.branches.manage","organization.profile.manage","organization.profile.read","organization.roles.manage","organization.roles.read","organization.schedules.manage","organization.schedules.read","organization.services.manage","organization.services.read","organization.users.manage","organization.users.read"] as const;
 
+const WEEKDAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+const formatRosterMinute = (minute: number) => {
+  const clamped = Math.min(minute, 1439);
+  const hours = Math.floor(clamped / 60);
+  const minutes = minute >= 1440 ? 59 : clamped % 60;
+  const suffix = hours < 12 ? "AM" : "PM";
+  return `${hours % 12 === 0 ? 12 : hours % 12}:${String(minutes).padStart(2, "0")} ${suffix}`;
+};
+
+/**
+ * Refuses rostered hours that overlap hours the same doctor already holds.
+ *
+ * Nothing checked this, so saving the same timings twice created a second
+ * identical rule: the doctor's slots were generated twice, patients saw the
+ * same session listed twice, and the same minute could be booked by two
+ * people. A doctor cannot sit in two places at once, so the check ignores the
+ * branch and the service and looks only at the doctor, the weekday, the
+ * minutes and the dates the rules are valid for. Overnight hours are checked
+ * as the two same-day pieces they are stored as.
+ */
+async function assertNoRosterOverlap(
+  tx: Prisma.TransactionClient,
+  input: {
+    tenantId: string;
+    doctorId: string;
+    segments: Array<{ weekday: number; startsMinute: number; endsMinute: number }>;
+    validFrom: Date;
+    validUntil: Date | null;
+    excludeIds?: string[];
+  },
+) {
+  const existing = await tx.availabilityRule.findMany({
+    where: {
+      tenantId: input.tenantId,
+      doctorId: input.doctorId,
+      isActive: true,
+      weekday: { in: [...new Set(input.segments.map((segment) => segment.weekday))] },
+      ...(input.excludeIds?.length ? { id: { notIn: input.excludeIds } } : {}),
+      // Validity windows overlap: theirs starts before ours ends, ours starts before theirs ends.
+      ...(input.validUntil ? { validFrom: { lte: input.validUntil } } : {}),
+      OR: [{ validUntil: null }, { validUntil: { gte: input.validFrom } }],
+    },
+    select: { weekday: true, startsMinute: true, endsMinute: true, branch: { select: { name: true } } },
+  });
+  for (const segment of input.segments) {
+    const clash = existing.find(
+      (rule) =>
+        rule.weekday === segment.weekday &&
+        rule.startsMinute < segment.endsMinute &&
+        segment.startsMinute < rule.endsMinute,
+    );
+    if (clash) {
+      throw new WonFlowApiError(
+        409,
+        "schedule-overlap",
+        `This doctor already has rostered hours on ${WEEKDAY_NAMES[clash.weekday]} from ${formatRosterMinute(clash.startsMinute)} to ${formatRosterMinute(clash.endsMinute)} at ${clash.branch.name}. Edit those hours or choose times that do not overlap.`,
+      );
+    }
+  }
+}
+
+/**
+ * The login email is the account's username and cannot be edited.
+ *
+ * The admin edit forms used to rewrite it in place, which silently moves a
+ * doctor's or staff member's sign-in to a new address - locking them out, or
+ * handing their account and its clinical history to whoever controls the new
+ * mailbox. Clients that still send the unchanged address are accepted; a
+ * different one is refused.
+ */
+function assertLoginEmailUnchanged(requested: string | undefined | null, current: string) {
+  if (requested === undefined || requested === null) return;
+  if (requested.trim().toLowerCase() === current.trim().toLowerCase()) return;
+  throw new WonFlowApiError(
+    400,
+    "login-email-locked",
+    "The login email cannot be changed. Create a new account for a different email address.",
+  );
+}
+
 export class HospitalAdministrationService {
   private context(c: WonFlowRequestContext) { return requireTenantContext(c); }
   async getConfiguration(rc: WonFlowRequestContext) { const c=this.context(rc); requirePermission(c,"organization.profile.read"); return database.organization.findFirst({ where:{id:c.organizationId,tenantId:c.tenantId},include:{branches:{where:{archivedAt:null},orderBy:[{isMainBranch:"desc"},{name:"asc"}]}}}); }
@@ -604,23 +685,10 @@ export class HospitalAdministrationService {
         })
       : null;
 
+    assertLoginEmailUnchanged(input.email, membership.identity.email);
+
     return database.$transaction(async tx=>{
-      if (input.email && input.email.trim().toLowerCase() !== membership.identity.email.toLowerCase()) {
-        const normalizedEmail = input.email.trim().toLowerCase();
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-          throw new WonFlowApiError(400, "invalid-email-address", "Enter a valid email address.");
-        }
-        const existing = await tx.identity.findFirst({
-          where: { normalizedEmail, id: { not: membership.identityId } },
-        });
-        if (existing) {
-          throw new WonFlowApiError(409, "email-in-use", `The email address ${input.email} is already in use.`);
-        }
-        await tx.identity.update({
-          where: { id: membership.identityId },
-          data: { email: input.email.trim(), normalizedEmail, ...(input.phone !== undefined ? { phone: input.phone?.trim() || null } : {}) },
-        });
-      } else if (input.phone !== undefined) {
+      if (input.phone !== undefined) {
         await tx.identity.update({
           where: { id: membership.identityId },
           data: { phone: input.phone?.trim() || null },
@@ -920,21 +988,7 @@ export class HospitalAdministrationService {
       throw new WonFlowApiError(400, "invalid-doctor-fee", "Enter a valid consultation fee.");
     }
 
-    if (input.email) {
-      const normalizedEmail = input.email.trim().toLowerCase();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
-        throw new WonFlowApiError(400, "invalid-email-address", "Enter a valid email address.");
-      }
-      const existing = await database.identity.findFirst({
-        where: {
-          normalizedEmail,
-          id: { not: doctor.staffProfile.membership.identity.id },
-        },
-      });
-      if (existing) {
-        throw new WonFlowApiError(409, "email-in-use", `The email address ${input.email.trim()} is already in use by another account.`);
-      }
-    }
+    assertLoginEmailUnchanged(input.email, doctor.staffProfile.membership.identity.email);
 
     let selectedDepartment: { id: string; name: string } | null = null;
     if (input.departmentId) {
@@ -998,11 +1052,7 @@ export class HospitalAdministrationService {
 
     return database.$transaction(async (tx) => {
       // 1. Update Identity
-      const identityData: { email?: string; normalizedEmail?: string; phone?: string | null } = {};
-      if (input.email) {
-        identityData.email = input.email.trim();
-        identityData.normalizedEmail = input.email.trim().toLowerCase();
-      }
+      const identityData: { phone?: string | null } = {};
       if (input.contactPhone !== undefined) {
         identityData.phone = input.contactPhone?.trim() || null;
       }
@@ -1221,6 +1271,20 @@ export class HospitalAdministrationService {
     if (!branch || !doctor) throw new WonFlowApiError(400, "invalid-schedule-assignment", "Doctor or branch is outside this hospital.");
     if (input.serviceId && !selectedService) throw new WonFlowApiError(400, "invalid-schedule-service", "Service is outside this hospital.");
     return database.$transaction(async (tx) => {
+      await assertNoRosterOverlap(tx, {
+        tenantId: c.tenantId,
+        doctorId: input.doctorId,
+        segments: weekdays.flatMap((wd) =>
+          isOvernight
+            ? [
+                { weekday: wd, startsMinute: input.startsMinute, endsMinute: 1440 },
+                { weekday: (wd + 1) % 7, startsMinute: 0, endsMinute },
+              ]
+            : [{ weekday: wd, startsMinute: input.startsMinute, endsMinute }],
+        ),
+        validFrom,
+        validUntil,
+      });
       const createdList = [];
       for (const wd of weekdays) {
         if (isOvernight) {
@@ -1307,6 +1371,21 @@ export class HospitalAdministrationService {
     if (input.serviceId && !await database.serviceDefinition.findFirst({ where: { id: input.serviceId, tenantId: c.tenantId } }))
       throw new WonFlowApiError(400, "invalid-schedule-service", "Service is outside this hospital.");
     return database.$transaction(async (tx) => {
+      if ((input.isActive ?? schedule.isActive) !== false) {
+        await assertNoRosterOverlap(tx, {
+          tenantId: c.tenantId,
+          doctorId: input.doctorId ?? schedule.doctorId,
+          segments: isOvernight
+            ? [
+                { weekday, startsMinute, endsMinute: 1440 },
+                { weekday: (weekday + 1) % 7, startsMinute: 0, endsMinute },
+              ]
+            : [{ weekday, startsMinute, endsMinute }],
+          validFrom: validFrom ?? schedule.validFrom,
+          validUntil: validUntil !== undefined ? validUntil : schedule.validUntil,
+          excludeIds: [schedule.id],
+        });
+      }
       const entity = await tx.availabilityRule.update({
         where: { id: schedule.id, tenantId: c.tenantId },
         data: {

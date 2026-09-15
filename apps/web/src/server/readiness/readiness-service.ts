@@ -329,7 +329,10 @@ export async function checkStartConsultationReadiness(
       code: "another-encounter-open",
       reason: `You already have a consultation in progress with ${openEncounter.patient.givenName} ${openEncounter.patient.familyName}. Complete or pause it before starting another.`,
       resolverRole: "self",
-      resolutionHref: "/doctor/consultations",
+      // Straight to that consultation. It may be from an earlier day, and the
+      // consultations list only shows today's queue, so "/doctor/consultations"
+      // sent the doctor to a page where the open consultation was not listed.
+      resolutionHref: `/doctor/encounters/${openEncounter.id}`,
     });
   }
 
