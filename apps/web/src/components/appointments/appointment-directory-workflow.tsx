@@ -895,7 +895,7 @@ function AppointmentDirectoryContent({
                                 : "border-emerald-200 bg-emerald-50 text-emerald-700",
                           ].join(" ")}
                           disabled={!slot.available}
-                          key={slot.start}
+                          key={slot.startsAt}
                           onClick={() => {
                             setRescheduleSlot(slot);
                           }}

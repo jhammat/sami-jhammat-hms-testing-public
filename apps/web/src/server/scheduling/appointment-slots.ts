@@ -266,6 +266,21 @@ export async function listBookableSlots(input: {
       end: localMinuteOfDay(appointment.endsAt, input.timezone),
     }));
 
+  /*
+   * A slot that has already started cannot be booked.
+   *
+   * The generator only ever asked whether a slot collided with an existing
+   * appointment, so on the current date every sitting hour that had already
+   * passed came back `available: true` — and the booking screens select the
+   * first available slot by default. At 09:00 the default selection on a
+   * midnight-to-midnight sitting was 12:00 AM, which the server then rejected
+   * with "Appointments cannot be booked in the past". The offer and the
+   * refusal disagreed, and the refusal was right.
+   */
+  const isToday = localDateFormatter.format(new Date()) === input.date;
+  const nowMinute = isToday ? localMinuteOfDay(new Date(), input.timezone) : -1;
+  const hasPassed = (slotStart: number) => isToday && slotStart < nowMinute;
+
   const slots: BookableSlot[] = [];
 
   for (const window of windows) {
@@ -294,13 +309,37 @@ export async function listBookableSlots(input: {
         start: formatMinute(slotStart),
         end: formatMinute(slotEnd),
         label: formatLabel(slotStart, slotEnd),
-        available: !windowAtCapacity && !overlapsBooking,
+        available: !windowAtCapacity && !overlapsBooking && !hasPassed(slotStart),
         startsAt: localWallTimeToInstant(input.date, slotStart, input.timezone).toISOString(),
         endsAt: localWallTimeToInstant(input.date, slotEnd, input.timezone).toISOString(),
         roomLabel: window.roomLabel,
       });
     }
   }
+
+  /*
+   * One button per clock time.
+   *
+   * Slots are generated per sitting window, and a doctor can legitimately have
+   * two windows covering the same hour — a sitting plus a standing availability
+   * rule, or two rooms. That pushed the same time into the list twice, which
+   * reached the booking screens as duplicate React keys ("Encountered two
+   * children with the same key") and, worse, as two identical buttons where
+   * only one could be clicked meaningfully.
+   *
+   * Collapsing keeps the bookable one: a time the doctor can be booked at is
+   * available, whichever window offered it.
+   */
+  const slotsByStart = new Map<string, BookableSlot>();
+  for (const slot of slots) {
+    const existing = slotsByStart.get(slot.startsAt);
+    if (!existing || (!existing.available && slot.available)) {
+      slotsByStart.set(slot.startsAt, slot);
+    }
+  }
+  const uniqueSlots = [...slotsByStart.values()].sort((left, right) =>
+    left.startsAt.localeCompare(right.startsAt),
+  );
 
   const primaryWindow = windows[0];
   const totalStayMinutes = primaryWindow ? Math.max(0, primaryWindow.endsMinute - primaryWindow.startsMinute) : 0;
@@ -311,15 +350,20 @@ export async function listBookableSlots(input: {
     : undefined;
 
   return {
-    slots,
+    slots: uniqueSlots,
     slotMinutes: effectiveSlotMinutes,
     maxSlots,
     doctorTimingLabel,
     unavailableReason:
-      slots.length === 0
+      uniqueSlots.length === 0
         ? "No appointment slots are available for this schedule."
-        : slots.every((slot) => !slot.available)
-          ? "All appointment slots are already reserved or the schedule has reached capacity."
+        : uniqueSlots.every((slot) => !slot.available)
+          ? // Every remaining slot being in the past is the ordinary end-of-day
+            // case, not a full clinic; saying "already reserved" would send
+            // reception looking for bookings that do not exist.
+            isToday && uniqueSlots.every((slot) => hasPassed(localMinuteOfDay(new Date(slot.startsAt), input.timezone)))
+            ? "The doctor's sitting hours for today have already passed. Choose a later date."
+            : "All appointment slots are already reserved or the schedule has reached capacity."
           : undefined,
   };
 }

@@ -113,14 +113,19 @@ export interface ExtraServiceItem {
 
 type BookingMode = "WALK_IN_QUEUE" | "SCHEDULED_SLOT" | "NO_BOOKING";
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+/**
+ * Whether a catalogue service is a consultation.
+ *
+ * Service categories are stored inconsistently — this hospital's data holds
+ * both "CONSULTATION" and "Consultation", and both "LABORATORY" and
+ * "Laboratory". Every comparison on this screen was an exact `=== "CONSULTATION"`,
+ * so the title-case half was invisible to the primary consultation picker while
+ * simultaneously being offered as an *extra procedure* by the add-on dropdown,
+ * which excluded only the upper-case spelling. Comparing case-insensitively
+ * makes both lists agree about what a consultation is.
+ */
+const isConsultationCategory = (category: string | null | undefined): boolean =>
+  (category ?? "").trim().toUpperCase() === "CONSULTATION";
 
 function formatDobInput(value: string): string {
   const digits = value.replace(/\D/g, "").slice(0, 8);
@@ -506,15 +511,19 @@ export function DoctorPatientRegistration() {
   // Load catalog for doctor consultation services
   useEffect(() => {
     let active = true;
+    /*
+     * The default service is no longer chosen here.
+     *
+     * It used to be `s.category === "CONSULTATION" || (!s.doctorId || s.doctorId === currentDoctorId)`,
+     * and `||` binds the whole thing loosely enough that the first service with
+     * no doctor on it won — a lab test or a dressing could be picked as the
+     * "primary consultation" and billed as one. Which service is valid depends
+     * on the doctor selected further down the form, so the choice belongs with
+     * that list rather than with whichever fetch happens to land first.
+     */
     apiGet<ReceptionCatalog>("/api/v1/reception/catalog")
       .then((result) => {
-        if (active) {
-          setCatalog(result);
-          const defaultService = result.services.find(
-            (s) => s.category === "CONSULTATION" || (!s.doctorId || s.doctorId === currentDoctorId),
-          );
-          if (defaultService) setSelectedServiceId(defaultService.id);
-        }
+        if (active) setCatalog(result);
       })
       .catch(() => {});
     return () => {
@@ -522,24 +531,27 @@ export function DoctorPatientRegistration() {
     };
   }, [currentDoctorId]);
 
-  // Also load doctor-specific configured services and pricing
+  /*
+   * The signed-in doctor's own configured services and prices.
+   *
+   * Fetched once. This effect used to depend on `selectedServiceId` and set it,
+   * so every change of the service dropdown re-requested the whole list from
+   * the server — a round trip per keystroke-equivalent, and a loop waiting for
+   * the response to differ.
+   */
   useEffect(() => {
     let active = true;
     apiGet<{ services?: { services?: DoctorServiceDefinition[] } }>("/api/v1/doctor/services")
       .then((res) => {
         if (active && res?.services?.services) {
-          const svcs = res.services.services.filter((s) => s.isActive);
-          setDoctorServices(svcs);
-          if (svcs.length > 0 && !selectedServiceId) {
-            setSelectedServiceId(svcs[0].id);
-          }
+          setDoctorServices(res.services.services.filter((s) => s.isActive));
         }
       })
       .catch(() => {});
     return () => {
       active = false;
     };
-  }, [selectedServiceId]);
+  }, []);
 
   // Live Patient Search (Auto-fill existing records)
   /* eslint-disable react-hooks/set-state-in-effect */
@@ -653,19 +665,199 @@ export function DoctorPatientRegistration() {
     };
   }, [urlPatientId]);
 
-  // Load slots when in SCHEDULED_SLOT mode
+  const estimatedAgeDisplay = useMemo(() => {
+    if (dateOfBirth) {
+      const age = calculatePatientAge(dateOfBirth);
+      return age !== undefined ? `${age} yrs` : "";
+    }
+    return estimatedAge ? `${estimatedAge} yrs (est)` : "";
+  }, [dateOfBirth, estimatedAge]);
+
+  /**
+   * The doctor this visit is for.
+   *
+   * `selectedDoctorId` is seeded from the portal context, which resolves after
+   * the first render, so it is "" until the dropdown is touched. Everything
+   * that needs "who is seeing this patient" reads this instead, so the form
+   * behaves the same whether or not the user opened that select.
+   */
+  const effectiveDoctorId = selectedDoctorId || currentDoctorId;
+
+  const selectedDoctorRecord = useMemo(() => {
+    return catalog?.practitioners.find((p) => p.id === effectiveDoctorId) ?? {
+      id: currentDoctorId,
+      displayName: doctor?.displayName ?? "Doctor",
+      specialtyName: doctor?.specialtyName ?? "Clinical Doctor",
+      primaryBranchId: defaultBranchId,
+      consultationFee: 3000,
+    };
+  }, [catalog, effectiveDoctorId, currentDoctorId, doctor, defaultBranchId]);
+
+  /**
+   * The consultation services that may be charged for the doctor actually seeing
+   * the patient.
+   *
+   * The dropdown listed the signed-in doctor's own services *and* every
+   * consultation service in the hospital, whoever it belonged to, and changing
+   * the consulting doctor never revisited the choice. So the form would happily
+   * sit on "Consultation — Dr Sami Tariq" with Dr Anas Anwar selected below it,
+   * and bill the patient one clinician's fee for another clinician's visit.
+   *
+   * A service belongs here when it is the selected doctor's own, or when it is
+   * a hospital consultation service tied to no doctor at all. Another doctor's
+   * priced service is theirs, and is left out.
+   */
+  const consultationOptions = useMemo(() => {
+    const options: Array<{
+      id: string;
+      name: string;
+      price: number;
+      durationMinutes: number;
+      category: string;
+    }> = [];
+
+    if (effectiveDoctorId === currentDoctorId) {
+      for (const svc of doctorServices) {
+        options.push({
+          id: svc.id,
+          name: svc.name,
+          price: svc.priceMinorUnits !== null ? svc.priceMinorUnits / 100 : 3000,
+          durationMinutes: svc.durationMinutes,
+          category: "CONSULTATION",
+        });
+      }
+    }
+
+    for (const svc of catalog?.services ?? []) {
+      if (!isConsultationCategory(svc.category)) continue;
+      if (svc.doctorId && svc.doctorId !== effectiveDoctorId) continue;
+      if (options.some((option) => option.id === svc.id)) continue;
+      options.push({
+        id: svc.id,
+        name: svc.name,
+        price: svc.price ?? (selectedDoctorRecord?.consultationFee || 3000),
+        durationMinutes: svc.durationMinutes || 20,
+        category: svc.category,
+      });
+    }
+
+    return options;
+  }, [doctorServices, catalog, effectiveDoctorId, currentDoctorId, selectedDoctorRecord]);
+
+  /*
+   * Keep the chosen service valid for the chosen doctor.
+   *
+   * Switching the consulting doctor can take the current service out of the
+   * list entirely; leaving it selected is how the mismatch above got billed.
+   * Any override typed against the old service's price goes with it, because a
+   * fee entered for a 4,500 consultation means nothing against a 2,000 one.
+   */
   useEffect(() => {
-    if (bookingMode !== "SCHEDULED_SLOT" || !selectedDoctorId || !branchId || !appointmentDate) {
+    if (consultationOptions.length === 0) return;
+    if (consultationOptions.some((option) => option.id === selectedServiceId)) return;
+    setSelectedServiceId(consultationOptions[0]!.id);
+    setConsultationFeeOverride("");
+  }, [consultationOptions, selectedServiceId]);
+
+  // Primary Consultation Service and Fee calculation
+  const effectiveConsultationService = useMemo(() => {
+    const option = consultationOptions.find((entry) => entry.id === selectedServiceId);
+    if (option) return option;
+
+    /*
+     * No consultation service exists for this doctor.
+     *
+     * The fallback used to invent "General Clinical Consultation — PKR 3,000",
+     * which put a price nobody had configured onto the patient's slip and into
+     * the estimate. The visit can still be booked — a doctor should not be
+     * blocked from seeing a patient because billing has not set their fee — but
+     * the amount is zero and the screen says why, so the counter prices it.
+     */
+    return {
+      id: "",
+      name: "Consultation (fee not configured)",
+      price: 0,
+      durationMinutes: 20,
+      category: "CONSULTATION",
+    };
+  }, [consultationOptions, selectedServiceId]);
+
+  const hasConfiguredConsultation = consultationOptions.length > 0;
+
+  /** The appointment length actually booked, taken from the service rather than assumed. */
+  const visitDurationMinutes = effectiveConsultationService.durationMinutes || 20;
+
+  const consultationFee = useMemo(() => {
+    if (consultationFeeOverride.trim() !== "") {
+      const parsed = Number(consultationFeeOverride);
+      return !Number.isNaN(parsed) && parsed >= 0 ? parsed : effectiveConsultationService.price;
+    }
+    return effectiveConsultationService.price;
+  }, [consultationFeeOverride, effectiveConsultationService]);
+
+  const totalExtraServicesFee = useMemo(() => {
+    return extraServices.reduce((sum, item) => sum + item.price, 0);
+  }, [extraServices]);
+
+  const totalCharges = useMemo(() => {
+    return consultationFee + totalExtraServicesFee;
+  }, [consultationFee, totalExtraServicesFee]);
+
+  /**
+   * Where the visit is booked.
+   *
+   * The list came from the doctor portal context, which knows only the branches
+   * the *signed-in* doctor works at. Booking a colleague at their own site was
+   * therefore impossible — and now that staff can hold several branches, the
+   * right list is the hospital's, with the doctor's own as the fallback for a
+   * context that has not loaded the catalogue yet.
+   */
+  const branchOptions = useMemo(() => {
+    const fromCatalog = (catalog?.branches ?? []).map((branch) => ({ id: branch.id, name: branch.name }));
+    if (fromCatalog.length > 0) return fromCatalog;
+    return doctorBranches.map((branch) => ({ id: branch.id, name: branch.name }));
+  }, [catalog, doctorBranches]);
+
+  const effectiveBranch = useMemo(
+    () => branchOptions.find((branch) => branch.id === (branchId || defaultBranchId)),
+    [branchOptions, branchId, defaultBranchId],
+  );
+
+  /** A visit that is not being booked has nothing to charge for. */
+  const isBookingVisit = bookingMode !== "NO_BOOKING";
+
+  /*
+   * Load the bookable slots for the chosen day.
+   *
+   * Sits below the service derivation because it books against the service's
+   * real duration; reading `visitDurationMinutes` from above it would evaluate
+   * the dependency array before the constant exists.
+   */
+  useEffect(() => {
+    /*
+     * `effectiveDoctorId`, not `selectedDoctorId`.
+     *
+     * `selectedDoctorId` is seeded from the portal context, which resolves
+     * after the first render, so it stayed "" for any doctor who never touched
+     * the dropdown — and this guard then returned early every time. Choosing
+     * "Schedule Slot" showed an empty slot list forever, and the only way to
+     * make slots appear was to open the doctor select and pick yourself.
+     */
+    if (bookingMode !== "SCHEDULED_SLOT" || !effectiveDoctorId || !branchId || !appointmentDate) {
+      setSlots([]);
+      setSelectedSlot(undefined);
       return;
     }
     let active = true;
     setSlotLoading(true);
     setSlotUnavailableReason(undefined);
     listAppointmentSlots({
-      doctorId: selectedDoctorId,
+      doctorId: effectiveDoctorId,
       branchId,
       date: appointmentDate,
-      durationMinutes: 20,
+      // The service's own length, not a flat 20 minutes — offering 20-minute
+      // slots for a 45-minute consultation books the doctor into a double.
+      durationMinutes: visitDurationMinutes,
     })
       .then((result) => {
         if (active) {
@@ -685,78 +877,13 @@ export function DoctorPatientRegistration() {
     return () => {
       active = false;
     };
-  }, [bookingMode, selectedDoctorId, branchId, appointmentDate]);
-
-  const estimatedAgeDisplay = useMemo(() => {
-    if (dateOfBirth) {
-      const age = calculatePatientAge(dateOfBirth);
-      return age !== undefined ? `${age} yrs` : "";
-    }
-    return estimatedAge ? `${estimatedAge} yrs (est)` : "";
-  }, [dateOfBirth, estimatedAge]);
-
-  const selectedDoctorRecord = useMemo(() => {
-    return catalog?.practitioners.find((p) => p.id === selectedDoctorId) ?? {
-      id: currentDoctorId,
-      displayName: doctor?.displayName ?? "Doctor",
-      specialtyName: doctor?.specialtyName ?? "Clinical Doctor",
-      primaryBranchId: defaultBranchId,
-      consultationFee: 3000,
-    };
-  }, [catalog, selectedDoctorId, currentDoctorId, doctor, defaultBranchId]);
-
-  // Primary Consultation Service and Fee calculation
-  const effectiveConsultationService = useMemo(() => {
-    const docSvc = doctorServices.find((s) => s.id === selectedServiceId);
-    if (docSvc) {
-      return {
-        id: docSvc.id,
-        name: docSvc.name,
-        price: docSvc.priceMinorUnits !== null ? docSvc.priceMinorUnits / 100 : 3000,
-        durationMinutes: docSvc.durationMinutes,
-        category: "CONSULTATION",
-      };
-    }
-    const catSvc = catalog?.services.find((s) => s.id === selectedServiceId);
-    if (catSvc) {
-      return {
-        id: catSvc.id,
-        name: catSvc.name,
-        price: catSvc.price ?? (selectedDoctorRecord?.consultationFee || 3000),
-        durationMinutes: catSvc.durationMinutes || 20,
-        category: catSvc.category,
-      };
-    }
-    return {
-      id: selectedServiceId || "default-consult",
-      name: "General Clinical Consultation",
-      price: selectedDoctorRecord?.consultationFee || 3000,
-      durationMinutes: 20,
-      category: "CONSULTATION",
-    };
-  }, [doctorServices, catalog, selectedServiceId, selectedDoctorRecord]);
-
-  const consultationFee = useMemo(() => {
-    if (consultationFeeOverride.trim() !== "") {
-      const parsed = Number(consultationFeeOverride);
-      return !Number.isNaN(parsed) && parsed >= 0 ? parsed : effectiveConsultationService.price;
-    }
-    return effectiveConsultationService.price;
-  }, [consultationFeeOverride, effectiveConsultationService]);
-
-  const totalExtraServicesFee = useMemo(() => {
-    return extraServices.reduce((sum, item) => sum + item.price, 0);
-  }, [extraServices]);
-
-  const totalCharges = useMemo(() => {
-    return consultationFee + totalExtraServicesFee;
-  }, [consultationFee, totalExtraServicesFee]);
+  }, [bookingMode, effectiveDoctorId, branchId, appointmentDate, visitDurationMinutes]);
 
   // Non-consultation hospital services available for extra add-on
   const otherHospitalServices = useMemo(() => {
     if (!catalog?.services) return [];
     return catalog.services.filter(
-      (s) => s.category !== "CONSULTATION" && s.id !== selectedServiceId,
+      (s) => !isConsultationCategory(s.category) && s.id !== selectedServiceId,
     );
   }, [catalog, selectedServiceId]);
 
@@ -957,21 +1084,17 @@ export function DoctorPatientRegistration() {
       let queueEntryId: string | undefined;
       const effectiveBranchId = branchId || defaultBranchId || undefined;
 
-      // Prepare comprehensive reason & charges breakdown for clinical & billing record
-      const extraItemsSummary = extraServices
-        .map((s) => `${s.name} (PKR ${s.price.toLocaleString()})`)
-        .join(", ");
       const finalReason = visitReason.trim() || effectiveConsultationService.name;
 
       // 2. Perform Booking
       if (bookingMode === "WALK_IN_QUEUE") {
         const now = new Date();
         const startIso = now.toISOString();
-        const endIso = new Date(now.getTime() + 20 * 60000).toISOString();
+        const endIso = new Date(now.getTime() + visitDurationMinutes * 60000).toISOString();
 
         const bookRes = await bookMutation.mutate({
           patientId,
-          doctorId: selectedDoctorId || currentDoctorId,
+          doctorId: effectiveDoctorId,
           branchId: effectiveBranchId,
           serviceId: selectedServiceId || undefined,
           startsAt: startIso,
@@ -1010,7 +1133,7 @@ export function DoctorPatientRegistration() {
         }
         const bookRes = await bookMutation.mutate({
           patientId,
-          doctorId: selectedDoctorId || currentDoctorId,
+          doctorId: effectiveDoctorId,
           branchId: effectiveBranchId,
           serviceId: selectedServiceId || undefined,
           startsAt: selectedSlot.startsAt,
@@ -1029,12 +1152,15 @@ export function DoctorPatientRegistration() {
         appointment: bookedAppointment,
         tokenNumber,
         queueEntryId,
-        consultationServiceName: effectiveConsultationService.name,
-        consultationFee,
-        extraServices,
-        totalCharges,
+        // Registering a patient without booking them a visit charges nothing,
+        // so the slip must not print a consultation fee for a visit that does
+        // not exist.
+        consultationServiceName: isBookingVisit ? effectiveConsultationService.name : "",
+        consultationFee: isBookingVisit ? consultationFee : 0,
+        extraServices: isBookingVisit ? extraServices : [],
+        totalCharges: isBookingVisit ? totalCharges : 0,
         priorityLabel: queuePriority === 2 ? "Urgent" : queuePriority === 1 ? "Priority" : "Normal",
-        branchName: doctorBranches.find((b) => b.id === (branchId || defaultBranchId))?.name ?? "Main Hospital",
+        branchName: effectiveBranch?.name ?? "Main Hospital",
         doctorName: selectedDoctorRecord?.displayName ?? doctor?.displayName ?? "Attending Clinician",
         doctorSpecialty: selectedDoctorRecord?.specialtyName ?? doctor?.specialtyName ?? "Clinical Specialist",
         scheduleTimeDisplay: bookedAppointment
@@ -1100,33 +1226,67 @@ export function DoctorPatientRegistration() {
                 </div>
               </div>
 
-              {/* Huge Live Queue Token Display */}
-              <div className="border-b-2 border-dashed border-slate-200 bg-slate-50/60 p-6 text-center dark:border-slate-800 dark:bg-slate-800/40">
-                <span className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
-                  Live Queue Token Number
-                </span>
-                <div className="my-1 font-mono text-5xl font-black text-indigo-600 sm:text-6xl dark:text-indigo-400">
-                  #{String(tokenNumber ?? "01").padStart(2, "0")}
-                </div>
-                <div className="flex items-center justify-center gap-2">
-                  <span
-                    className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-black uppercase tracking-wider ${
-                      registeredResult.priorityLabel === "Urgent"
-                        ? "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
-                        : registeredResult.priorityLabel === "Priority"
-                        ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
-                        : "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300"
-                    }`}
-                  >
-                    <Zap className="size-3" />
-                    {registeredResult.priorityLabel} Priority Order
+              {/*
+               * The queue token, for a walk-in.
+               *
+               * This block printed unconditionally: a scheduled appointment and
+               * a plain registration both showed "Live Queue Token Number #01",
+               * because `tokenNumber ?? "01"` invented one whenever there was
+               * none. A slot booking gets its time, and a registration with no
+               * visit gets neither.
+               */}
+              {registeredResult.bookingMode === "WALK_IN_QUEUE" && tokenNumber !== undefined ? (
+                <div className="border-b-2 border-dashed border-slate-200 bg-slate-50/60 p-6 text-center dark:border-slate-800 dark:bg-slate-800/40">
+                  <span className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                    Live Queue Token Number
                   </span>
-                  <span className="text-xs text-slate-400">·</span>
+                  <div className="my-1 font-mono text-5xl font-black text-indigo-600 sm:text-6xl dark:text-indigo-400">
+                    #{String(tokenNumber).padStart(2, "0")}
+                  </div>
+                  <div className="flex items-center justify-center gap-2">
+                    <span
+                      className={`inline-flex items-center gap-1 rounded-full px-3 py-0.5 text-xs font-black uppercase tracking-wider ${
+                        registeredResult.priorityLabel === "Urgent"
+                          ? "bg-rose-100 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300"
+                          : registeredResult.priorityLabel === "Priority"
+                          ? "bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300"
+                          : "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300"
+                      }`}
+                    >
+                      <Zap className="size-3" />
+                      {registeredResult.priorityLabel} Priority Order
+                    </span>
+                    <span className="text-xs text-slate-400">·</span>
+                    <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                      Walk-in Queue
+                    </span>
+                  </div>
+                </div>
+              ) : registeredResult.bookingMode === "SCHEDULED_SLOT" ? (
+                <div className="border-b-2 border-dashed border-slate-200 bg-slate-50/60 p-6 text-center dark:border-slate-800 dark:bg-slate-800/40">
+                  <span className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                    Scheduled Appointment
+                  </span>
+                  <div className="my-1 text-2xl font-black text-indigo-600 sm:text-3xl dark:text-indigo-400">
+                    {registeredResult.scheduleTimeDisplay}
+                  </div>
                   <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                    {registeredResult.bookingMode === "WALK_IN_QUEUE" ? "Walk-in Queue" : "Scheduled Slot"}
+                    Booked slot — no queue token is issued until check-in.
                   </span>
                 </div>
-              </div>
+              ) : (
+                <div className="border-b-2 border-dashed border-slate-200 bg-slate-50/60 p-6 text-center dark:border-slate-800 dark:bg-slate-800/40">
+                  <span className="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                    Patient Record Created
+                  </span>
+                  <div className="my-1 font-mono text-3xl font-black text-indigo-600 sm:text-4xl dark:text-indigo-400">
+                    {patient.patientNumber}
+                  </div>
+                  <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                    No visit booked — book an appointment when the patient is ready.
+                  </span>
+                </div>
+              )}
 
               {/* Patient & Clinical Details Grid */}
               <div className="grid gap-3 p-5 sm:grid-cols-2 text-xs border-b border-slate-100 dark:border-slate-800">
@@ -1146,7 +1306,8 @@ export function DoctorPatientRegistration() {
                 </div>
               </div>
 
-              {/* Itemized Services & Charges Receipt Section */}
+              {/* Charges, only where a visit was actually booked. */}
+              {registeredResult.totalCharges > 0 ? (
               <div className="p-5 bg-slate-50/40 dark:bg-slate-900/60">
                 <div className="flex items-center gap-2 mb-3">
                   <Banknote className="size-4 text-emerald-600 dark:text-emerald-400" />
@@ -1176,6 +1337,9 @@ export function DoctorPatientRegistration() {
                       PKR {registeredResult.totalCharges.toLocaleString()}
                     </span>
                   </div>
+                  <p className="pt-1 text-[10px] leading-4 text-slate-500 dark:text-slate-400">
+                    Present this slip at the billing counter to settle payment.
+                  </p>
                 </div>
 
                 {visitReason ? (
@@ -1184,6 +1348,7 @@ export function DoctorPatientRegistration() {
                   </div>
                 ) : null}
               </div>
+              ) : null}
 
               {/* Action Buttons */}
               <div className="flex flex-wrap items-center gap-3 p-5 bg-white border-t border-slate-100 dark:bg-slate-900 dark:border-slate-800">
@@ -1433,7 +1598,305 @@ export function DoctorPatientRegistration() {
       <form className="relative z-10" onSubmit={(event) => void submit(event)}>
         <div className="grid gap-6 xl:grid-cols-[1.3fr_0.7fr]">
           <div className="space-y-5">
-            {/* 1. PATIENT INFORMATION SECTION (Auto-filled if existing patient, no questions asked) */}
+            {/* 1. VISIT BOOKING MODE — chosen first, because it decides whether the
+                charges section below applies at all */}
+            <SectionCard
+              badge={existingPatient ? "Booking Details" : "Visit Action"}
+              description="Choose how this patient's consultation is scheduled or queued."
+              icon={<Zap className="size-5" />}
+              title={existingPatient ? "Appointment & Live Queue" : "Visit Booking Mode"}
+            >
+              <div className={`grid gap-3 ${existingPatient ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
+                <button
+                  className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
+                    bookingMode === "WALK_IN_QUEUE"
+                      ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
+                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
+                  }`}
+                  onClick={() => setBookingMode("WALK_IN_QUEUE")}
+                  type="button"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="grid size-7 place-items-center rounded-xl bg-indigo-600 text-white">
+                      <Zap className="size-3.5" />
+                    </span>
+                    {bookingMode === "WALK_IN_QUEUE" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
+                  </div>
+                  <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
+                    ⚡ Walk-in &amp; Live Queue
+                  </strong>
+                  <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    Assigns live queue token for today.
+                  </span>
+                </button>
+
+                <button
+                  className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
+                    bookingMode === "SCHEDULED_SLOT"
+                      ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
+                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
+                  }`}
+                  onClick={() => setBookingMode("SCHEDULED_SLOT")}
+                  type="button"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="grid size-7 place-items-center rounded-xl bg-violet-600 text-white">
+                      <CalendarDays className="size-3.5" />
+                    </span>
+                    {bookingMode === "SCHEDULED_SLOT" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
+                  </div>
+                  <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
+                    📅 Schedule Slot
+                  </strong>
+                  <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    Pick specific date and sitting time.
+                  </span>
+                </button>
+
+                {!existingPatient ? (
+                  <button
+                    className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
+                      bookingMode === "NO_BOOKING"
+                        ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
+                        : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
+                    }`}
+                    onClick={() => setBookingMode("NO_BOOKING")}
+                    type="button"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="grid size-7 place-items-center rounded-xl bg-slate-600 text-white">
+                        <User className="size-3.5" />
+                      </span>
+                      {bookingMode === "NO_BOOKING" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
+                    </div>
+                    <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
+                      📝 Register Only
+                    </strong>
+                    <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      Save record without visit booking.
+                    </span>
+                  </button>
+                ) : null}
+              </div>
+
+              {/* Live Queue Priority (if Walk-in Queue) */}
+              {bookingMode === "WALK_IN_QUEUE" ? (
+                <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3.5 dark:border-indigo-900/40 dark:bg-indigo-950/30">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Queue Priority:
+                    </span>
+                    <span className="text-[10px] font-bold text-slate-500">
+                      {queuePriority === 0 ? "Normal order" : queuePriority === 1 ? "Priority care" : "Urgent / Emergency"}
+                    </span>
+                  </div>
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    {[
+                      { label: "Normal (0)", val: 0 },
+                      { label: "Priority (1)", val: 1 },
+                      { label: "Urgent (2)", val: 2 },
+                    ].map((item) => (
+                      <button
+                        className={`rounded-xl border py-2 text-xs font-bold transition ${
+                          queuePriority === item.val
+                            ? "border-indigo-600 bg-indigo-600 text-white shadow-xs"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                        key={item.val}
+                        onClick={() => setQueuePriority(item.val)}
+                        type="button"
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* Slot and Date picker if SCHEDULED_SLOT */}
+              {bookingMode === "SCHEDULED_SLOT" ? (
+                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3 dark:border-slate-800 dark:bg-slate-800/40">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Field label="Appointment Date">
+                      <input
+                        className={INPUT_CLASS_NAME}
+                        min={todayDateInputValue()}
+                        onChange={(e) => setAppointmentDate(e.target.value)}
+                        type="date"
+                        value={appointmentDate}
+                      />
+                    </Field>
+
+                    <Field label="Consultation Delivery Mode">
+                      <div className="grid grid-cols-2 gap-2">
+                        <button
+                          className={`rounded-xl border py-2.5 text-xs font-bold transition ${
+                            consultationMode === "IN_PERSON"
+                              ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                              : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          }`}
+                          onClick={() => setConsultationMode("IN_PERSON")}
+                          type="button"
+                        >
+                          In-Person Clinic
+                        </button>
+                        <button
+                          className={`rounded-xl border py-2.5 text-xs font-bold transition ${
+                            consultationMode === "ONLINE"
+                              ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                              : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          }`}
+                          onClick={() => setConsultationMode("ONLINE")}
+                          type="button"
+                        >
+                          Online Video
+                        </button>
+                      </div>
+                    </Field>
+                  </div>
+
+                  {/* Slots list */}
+                  <div className="pt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                        Available Sitting Slots on {appointmentDate}:
+                      </span>
+                      {slotLoading ? (
+                        <span className="flex items-center gap-1 text-[11px] text-indigo-600">
+                          <RefreshCw className="size-3 animate-spin" /> Loading…
+                        </span>
+                      ) : null}
+                    </div>
+
+                    {slotUnavailableReason ? (
+                      <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{slotUnavailableReason}</p>
+                    ) : (
+                      <div className="mt-2.5 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+                        {slots.map((slot) => {
+                          const isSelected = selectedSlot?.start === slot.start;
+                          return (
+                            <button
+                              className={`rounded-xl border p-2 text-center transition ${
+                                isSelected
+                                  ? "border-indigo-600 bg-indigo-600 text-white shadow-xs"
+                                  : slot.available
+                                  ? "border-slate-200 bg-white text-slate-800 hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                                  : "cursor-not-allowed border-slate-100 bg-slate-100/50 text-slate-400 dark:border-slate-800 dark:bg-slate-800/30"
+                              }`}
+                              disabled={!slot.available}
+                              key={slot.startsAt}
+                              onClick={() => setSelectedSlot(slot)}
+                              type="button"
+                            >
+                              <span className="text-xs font-black">{slot.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null}
+
+              {/* CLINICIAN & BRANCH DETAILS */}
+              <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 dark:border-slate-800">
+                <Field label="Consulting Doctor">
+                  <select
+                    className={SELECT_CLASS_NAME}
+                    onChange={(e) => {
+                      setSelectedDoctorId(e.target.value);
+                      // A fee typed for one clinician is not a fee for another.
+                      setConsultationFeeOverride("");
+                    }}
+                    value={effectiveDoctorId}
+                  >
+                    {catalog?.practitioners.map((doc) => (
+                      <option key={doc.id} value={doc.id}>
+                        {doc.displayName} ({doc.specialtyName}) {doc.id === currentDoctorId ? "— You" : ""}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                <Field label="Hospital Branch / Location">
+                  <select
+                    className={SELECT_CLASS_NAME}
+                    onChange={(e) => setBranchId(e.target.value)}
+                    value={branchId || defaultBranchId}
+                  >
+                    {branchOptions.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+
+                {/* Delivery Mode if in Walk-in */}
+                {bookingMode === "WALK_IN_QUEUE" ? (
+                  <Field label="Delivery Mode">
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        className={`rounded-xl border py-2.5 text-xs font-bold transition ${
+                          consultationMode === "IN_PERSON"
+                            ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                        onClick={() => setConsultationMode("IN_PERSON")}
+                        type="button"
+                      >
+                        In-Person
+                      </button>
+                      <button
+                        className={`rounded-xl border py-2.5 text-xs font-bold transition ${
+                          consultationMode === "ONLINE"
+                            ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
+                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                        onClick={() => setConsultationMode("ONLINE")}
+                        type="button"
+                      >
+                        Online Video
+                      </button>
+                    </div>
+                  </Field>
+                ) : null}
+              </div>
+
+              {/* Chief complaint / Visit reason */}
+              {bookingMode !== "NO_BOOKING" ? (
+                <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">
+                  <Field label="Chief Complaint / Reason for Visit">
+                    <input
+                      className={INPUT_CLASS_NAME}
+                      onChange={(e) => setVisitReason(e.target.value)}
+                      placeholder="e.g. Follow-up consultation, fever, abdominal discomfort"
+                      value={visitReason}
+                    />
+                  </Field>
+
+                  {/* Quick complaint tags */}
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {CHIEF_COMPLAINT_TAGS.map((tag) => (
+                      <button
+                        className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
+                          visitReason === tag
+                            ? "bg-indigo-600 text-white shadow-xs"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                        key={tag}
+                        onClick={() => setVisitReason(tag)}
+                        type="button"
+                      >
+                        {tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </SectionCard>
+
+            {/* 2. PATIENT INFORMATION SECTION (Auto-filled if existing patient, no questions asked) */}
             <SectionCard
               badge={existingPatient ? "Record Auto-filled" : "New Patient Record"}
               description={
@@ -1681,513 +2144,234 @@ export function DoctorPatientRegistration() {
               </div>
             </SectionCard>
 
-            {/* 2. DOCTOR SERVICES, CHARGES & CLINICAL ADD-ONS (Requirement 4) */}
-            <SectionCard
-              badge="Pricing & Billing"
-              description="Configure primary consultation service, fee, and any extra clinical procedures."
-              icon={<Banknote className="size-5" />}
-              title="Doctor Services &amp; Charges"
-            >
-              {/* Primary Consultation Service Selection */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                    Primary Consultation Service:
-                  </span>
-                  <span className="font-mono text-xs font-black text-indigo-700 dark:text-indigo-400">
-                    Base Fee: PKR {consultationFee.toLocaleString()}
-                  </span>
-                </div>
+            {/* 3. DOCTOR SERVICES, CHARGES & CLINICAL ADD-ONS
+                Hidden when no visit is being booked: "Register Only" creates no
+                appointment, so there is nothing for a consultation fee or a
+                procedure charge to attach to. */}
+            {isBookingVisit ? (
+              <SectionCard
+                badge="Pricing & Billing"
+                description="Configure primary consultation service, fee, and any extra clinical procedures."
+                icon={<Banknote className="size-5" />}
+                title="Doctor Services &amp; Charges"
+              >
+                {/* Primary Consultation Service Selection */}
+                <div className="space-y-3">
+                  {!hasConfiguredConsultation ? (
+                    <div className="flex items-start gap-2 rounded-2xl border border-amber-200 bg-amber-50/70 p-3 text-[11px] font-semibold text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-300">
+                      <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                      <span>
+                        No consultation service is configured for this doctor, so this visit carries no fee
+                        yet. The visit can still be booked — the billing counter will price it. Add a service
+                        under Fees &amp; Services to charge it here.
+                      </span>
+                    </div>
+                  ) : null}
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
+                      Primary Consultation Service:
+                    </span>
+                    <span className="font-mono text-xs font-black text-indigo-700 dark:text-indigo-400">
+                      Base Fee: PKR {consultationFee.toLocaleString()}
+                    </span>
+                  </div>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div>
-                    <select
-                      className={SELECT_CLASS_NAME}
-                      onChange={(e) => setSelectedServiceId(e.target.value)}
-                      value={selectedServiceId}
-                    >
-                      {/* Doctor-specific consultation services */}
-                      {doctorServices.map((svc) => (
-                        <option key={svc.id} value={svc.id}>
-                          {svc.name} — PKR {svc.priceMinorUnits ? (svc.priceMinorUnits / 100).toLocaleString() : "3,000"} ({svc.durationMinutes} min)
-                        </option>
-                      ))}
-                      {/* Catalog services */}
-                      {catalog?.services
-                        ?.filter((s) => s.category === "CONSULTATION" && !doctorServices.some((d) => d.id === s.id))
-                        .map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name} — PKR {s.price ? s.price.toLocaleString() : "3,000"} ({s.durationMinutes || 20} min)
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <select
+                        className={SELECT_CLASS_NAME}
+                        onChange={(e) => {
+                          setSelectedServiceId(e.target.value);
+                          // A fee typed against the previous service is not a
+                          // fee for this one.
+                          setConsultationFeeOverride("");
+                        }}
+                        value={selectedServiceId}
+                      >
+                        {consultationOptions.length === 0 ? (
+                          <option value="">No consultation service configured for this doctor</option>
+                        ) : null}
+                        {consultationOptions.map((svc) => (
+                          <option key={svc.id} value={svc.id}>
+                            {svc.name} — PKR {svc.price.toLocaleString()} ({svc.durationMinutes} min)
                           </option>
                         ))}
-                    </select>
-                  </div>
+                      </select>
+                    </div>
 
-                  <div>
-                    <div className="relative flex items-center">
-                      <span className="absolute left-3 text-xs font-bold text-slate-400">PKR</span>
-                      <input
-                        className={`${INPUT_CLASS_NAME} pl-12`}
-                        min="0"
-                        onChange={(e) => setConsultationFeeOverride(e.target.value)}
-                        placeholder={`Fee override (Default: ${effectiveConsultationService.price})`}
-                        type="number"
-                        value={consultationFeeOverride}
-                      />
+                    <div>
+                      <div className="relative flex items-center">
+                        <span className="absolute left-3 text-xs font-bold text-slate-400">PKR</span>
+                        <input
+                          className={`${INPUT_CLASS_NAME} pl-12`}
+                          min="0"
+                          onChange={(e) => setConsultationFeeOverride(e.target.value)}
+                          placeholder={`Fee override (Default: ${effectiveConsultationService.price})`}
+                          type="number"
+                          value={consultationFeeOverride}
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              {/* Extra Services & Clinical Procedures Section */}
-              <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
-                      Extra Services &amp; Clinical Procedures
-                    </h3>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                      Add extra clinical procedures, dressing, ECG, or lab orders to this visit.
-                    </p>
-                  </div>
-                  <button
-                    className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
-                    onClick={() => setShowCustomExtraInput(!showCustomExtraInput)}
-                    type="button"
-                  >
-                    <Plus className="size-3.5" />
-                    <span>Add Custom Service</span>
-                  </button>
-                </div>
-
-                {/* Quick Add-on Preset Chips */}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {CLINICAL_ADDON_PRESETS.map((preset) => {
-                    const isAdded = extraServices.some((s) => s.name.toLowerCase() === preset.name.toLowerCase());
-                    return (
-                      <button
-                        className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
-                          isAdded
-                            ? "border-indigo-600 bg-indigo-50 text-indigo-700 shadow-xs dark:bg-indigo-950/60 dark:text-indigo-300"
-                            : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                        }`}
-                        key={preset.id}
-                        onClick={() => togglePresetService(preset)}
-                        type="button"
-                      >
-                        {isAdded ? <Check className="size-3.5 text-indigo-600" /> : <Plus className="size-3.5 text-slate-400" />}
-                        <span>{preset.name}</span>
-                        <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-                          +PKR {preset.price.toLocaleString()}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {/* Additional Catalog Services Dropdown */}
-                {otherHospitalServices.length > 0 ? (
-                  <div className="mt-3 flex items-center gap-2">
-                    <select
-                      className={`${SELECT_CLASS_NAME} h-9 text-xs`}
-                      onChange={(e) => {
-                        setSelectedCatalogExtraId(e.target.value);
-                        addCatalogServiceAsExtra(e.target.value);
-                      }}
-                      value={selectedCatalogExtraId}
-                    >
-                      <option value="">+ Add other Hospital Diagnostic / Service…</option>
-                      {otherHospitalServices.map((svc) => (
-                        <option key={svc.id} value={svc.id}>
-                          {svc.name} ({svc.category}) — PKR {svc.price?.toLocaleString() || "1,000"}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                ) : null}
-
-                {/* Custom Extra Service Form */}
-                {showCustomExtraInput ? (
-                  <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3 sm:flex-row dark:border-indigo-900/40 dark:bg-indigo-950/30">
-                    <input
-                      className={`${INPUT_CLASS_NAME} h-9 text-xs flex-1`}
-                      onChange={(e) => setCustomExtraName(e.target.value)}
-                      placeholder="Procedure / service name (e.g. Suture Removal)"
-                      value={customExtraName}
-                    />
-                    <div className="relative flex items-center sm:w-36">
-                      <span className="absolute left-3 text-xs font-bold text-slate-400">PKR</span>
-                      <input
-                        className={`${INPUT_CLASS_NAME} h-9 pl-11 text-xs`}
-                        min="0"
-                        onChange={(e) => setCustomExtraPrice(e.target.value)}
-                        placeholder="Price"
-                        type="number"
-                        value={customExtraPrice}
-                      />
+                {/* Extra Services & Clinical Procedures Section */}
+                <div className="mt-5 border-t border-slate-100 pt-4 dark:border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-xs font-black uppercase tracking-wider text-slate-700 dark:text-slate-300">
+                        Extra Services &amp; Clinical Procedures
+                      </h3>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Add extra clinical procedures, dressing, ECG, or lab orders to this visit.
+                      </p>
                     </div>
                     <button
-                      className="inline-flex h-9 items-center justify-center gap-1 rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white shadow-xs hover:bg-indigo-700"
-                      onClick={addCustomExtraService}
+                      className="inline-flex items-center gap-1 text-xs font-bold text-indigo-600 hover:text-indigo-700 dark:text-indigo-400"
+                      onClick={() => setShowCustomExtraInput(!showCustomExtraInput)}
                       type="button"
                     >
                       <Plus className="size-3.5" />
-                      Add
+                      <span>Add Custom Service</span>
                     </button>
                   </div>
-                ) : null}
 
-                {/* Active Added Extra Services List */}
-                {extraServices.length > 0 ? (
-                  <div className="mt-4 space-y-2">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      Selected Extra Services ({extraServices.length}):
-                    </span>
-                    <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
-                      {extraServices.map((svc) => (
-                        <div className="flex items-center justify-between px-3.5 py-2.5 text-xs" key={svc.id}>
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-slate-900 dark:text-white">{svc.name}</span>
-                            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-400">
-                              {svc.category}
-                            </span>
-                          </div>
-                          <div className="flex items-center gap-3">
-                            <span className="font-mono font-bold text-slate-900 dark:text-white">
-                              PKR {svc.price.toLocaleString()}
-                            </span>
-                            <button
-                              className="text-slate-400 hover:text-rose-600"
-                              onClick={() => removeExtraService(svc.id)}
-                              type="button"
-                            >
-                              <Trash2 className="size-3.5" />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
-                {/* Total Itemized Charges Summary Box */}
-                <div className="mt-4 flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-800 dark:bg-emerald-950/40">
-                  <div className="flex items-center gap-2.5">
-                    <span className="grid size-9 place-items-center rounded-xl bg-emerald-600 text-white shadow-xs">
-                      <CreditCard className="size-4" />
-                    </span>
-                    <div>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                        Total Visit Charges
-                      </span>
-                      <p className="text-xs text-slate-600 dark:text-slate-300">
-                        Consultation (PKR {consultationFee.toLocaleString()})
-                        {extraServices.length > 0 ? ` + ${extraServices.length} extra service${extraServices.length === 1 ? "" : "s"} (PKR ${totalExtraServicesFee.toLocaleString()})` : ""}
-                      </p>
-                    </div>
+                  {/* Quick Add-on Preset Chips */}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {CLINICAL_ADDON_PRESETS.map((preset) => {
+                      const isAdded = extraServices.some((s) => s.name.toLowerCase() === preset.name.toLowerCase());
+                      return (
+                        <button
+                          className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold transition ${
+                            isAdded
+                              ? "border-indigo-600 bg-indigo-50 text-indigo-700 shadow-xs dark:bg-indigo-950/60 dark:text-indigo-300"
+                              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          }`}
+                          key={preset.id}
+                          onClick={() => togglePresetService(preset)}
+                          type="button"
+                        >
+                          {isAdded ? <Check className="size-3.5 text-indigo-600" /> : <Plus className="size-3.5 text-slate-400" />}
+                          <span>{preset.name}</span>
+                          <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                            +PKR {preset.price.toLocaleString()}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
 
-                  <div className="text-right">
-                    <span className="font-mono text-xl font-black text-emerald-700 dark:text-emerald-300">
-                      PKR {totalCharges.toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </SectionCard>
-
-            {/* 3. APPOINTMENT & QUEUE BOOKING CONFIGURATION */}
-            <SectionCard
-              badge={existingPatient ? "Booking Details" : "Visit Action"}
-              description="Choose how this patient's consultation is scheduled or queued."
-              icon={<Zap className="size-5" />}
-              title={existingPatient ? "Appointment & Live Queue" : "Visit Booking Mode"}
-            >
-              <div className={`grid gap-3 ${existingPatient ? "sm:grid-cols-2" : "sm:grid-cols-3"}`}>
-                <button
-                  className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
-                    bookingMode === "WALK_IN_QUEUE"
-                      ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
-                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
-                  }`}
-                  onClick={() => setBookingMode("WALK_IN_QUEUE")}
-                  type="button"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="grid size-7 place-items-center rounded-xl bg-indigo-600 text-white">
-                      <Zap className="size-3.5" />
-                    </span>
-                    {bookingMode === "WALK_IN_QUEUE" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
-                  </div>
-                  <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
-                    ⚡ Walk-in &amp; Live Queue
-                  </strong>
-                  <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                    Assigns live queue token for today.
-                  </span>
-                </button>
-
-                <button
-                  className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
-                    bookingMode === "SCHEDULED_SLOT"
-                      ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
-                      : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
-                  }`}
-                  onClick={() => setBookingMode("SCHEDULED_SLOT")}
-                  type="button"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="grid size-7 place-items-center rounded-xl bg-violet-600 text-white">
-                      <CalendarDays className="size-3.5" />
-                    </span>
-                    {bookingMode === "SCHEDULED_SLOT" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
-                  </div>
-                  <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
-                    📅 Schedule Slot
-                  </strong>
-                  <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                    Pick specific date and sitting time.
-                  </span>
-                </button>
-
-                {!existingPatient ? (
-                  <button
-                    className={`flex flex-col rounded-2xl border-2 p-3.5 text-left transition ${
-                      bookingMode === "NO_BOOKING"
-                        ? "border-indigo-600 bg-indigo-50/80 shadow-sm dark:border-indigo-500 dark:bg-indigo-950/60"
-                        : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-900"
-                    }`}
-                    onClick={() => setBookingMode("NO_BOOKING")}
-                    type="button"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="grid size-7 place-items-center rounded-xl bg-slate-600 text-white">
-                        <User className="size-3.5" />
-                      </span>
-                      {bookingMode === "NO_BOOKING" ? <span className="size-2 rounded-full bg-indigo-600" /> : null}
-                    </div>
-                    <strong className="mt-2.5 block text-xs font-black text-slate-950 dark:text-white">
-                      📝 Register Only
-                    </strong>
-                    <span className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                      Save record without visit booking.
-                    </span>
-                  </button>
-                ) : null}
-              </div>
-
-              {/* Live Queue Priority (if Walk-in Queue) */}
-              {bookingMode === "WALK_IN_QUEUE" ? (
-                <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3.5 dark:border-indigo-900/40 dark:bg-indigo-950/30">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-                      Queue Priority:
-                    </span>
-                    <span className="text-[10px] font-bold text-slate-500">
-                      {queuePriority === 0 ? "Normal order" : queuePriority === 1 ? "Priority care" : "Urgent / Emergency"}
-                    </span>
-                  </div>
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    {[
-                      { label: "Normal (0)", val: 0 },
-                      { label: "Priority (1)", val: 1 },
-                      { label: "Urgent (2)", val: 2 },
-                    ].map((item) => (
-                      <button
-                        className={`rounded-xl border py-2 text-xs font-bold transition ${
-                          queuePriority === item.val
-                            ? "border-indigo-600 bg-indigo-600 text-white shadow-xs"
-                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                        }`}
-                        key={item.val}
-                        onClick={() => setQueuePriority(item.val)}
-                        type="button"
+                  {/* Additional Catalog Services Dropdown */}
+                  {otherHospitalServices.length > 0 ? (
+                    <div className="mt-3 flex items-center gap-2">
+                      <select
+                        className={`${SELECT_CLASS_NAME} h-9 text-xs`}
+                        onChange={(e) => {
+                          setSelectedCatalogExtraId(e.target.value);
+                          addCatalogServiceAsExtra(e.target.value);
+                        }}
+                        value={selectedCatalogExtraId}
                       >
-                        {item.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : null}
+                        <option value="">+ Add other Hospital Diagnostic / Service…</option>
+                        {otherHospitalServices.map((svc) => (
+                          <option key={svc.id} value={svc.id}>
+                            {svc.name} ({svc.category}) — PKR {svc.price?.toLocaleString() || "1,000"}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  ) : null}
 
-              {/* Slot and Date picker if SCHEDULED_SLOT */}
-              {bookingMode === "SCHEDULED_SLOT" ? (
-                <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3 dark:border-slate-800 dark:bg-slate-800/40">
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <Field label="Appointment Date">
+                  {/* Custom Extra Service Form */}
+                  {showCustomExtraInput ? (
+                    <div className="mt-3 flex flex-col gap-2 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-3 sm:flex-row dark:border-indigo-900/40 dark:bg-indigo-950/30">
                       <input
-                        className={INPUT_CLASS_NAME}
-                        min={todayDateInputValue()}
-                        onChange={(e) => setAppointmentDate(e.target.value)}
-                        type="date"
-                        value={appointmentDate}
+                        className={`${INPUT_CLASS_NAME} h-9 text-xs flex-1`}
+                        onChange={(e) => setCustomExtraName(e.target.value)}
+                        placeholder="Procedure / service name (e.g. Suture Removal)"
+                        value={customExtraName}
                       />
-                    </Field>
-
-                    <Field label="Consultation Delivery Mode">
-                      <div className="grid grid-cols-2 gap-2">
-                        <button
-                          className={`rounded-xl border py-2.5 text-xs font-bold transition ${
-                            consultationMode === "IN_PERSON"
-                              ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
-                              : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                          }`}
-                          onClick={() => setConsultationMode("IN_PERSON")}
-                          type="button"
-                        >
-                          In-Person Clinic
-                        </button>
-                        <button
-                          className={`rounded-xl border py-2.5 text-xs font-bold transition ${
-                            consultationMode === "ONLINE"
-                              ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
-                              : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                          }`}
-                          onClick={() => setConsultationMode("ONLINE")}
-                          type="button"
-                        >
-                          Online Video
-                        </button>
+                      <div className="relative flex items-center sm:w-36">
+                        <span className="absolute left-3 text-xs font-bold text-slate-400">PKR</span>
+                        <input
+                          className={`${INPUT_CLASS_NAME} h-9 pl-11 text-xs`}
+                          min="0"
+                          onChange={(e) => setCustomExtraPrice(e.target.value)}
+                          placeholder="Price"
+                          type="number"
+                          value={customExtraPrice}
+                        />
                       </div>
-                    </Field>
-                  </div>
+                      <button
+                        className="inline-flex h-9 items-center justify-center gap-1 rounded-xl bg-indigo-600 px-4 text-xs font-bold text-white shadow-xs hover:bg-indigo-700"
+                        onClick={addCustomExtraService}
+                        type="button"
+                      >
+                        <Plus className="size-3.5" />
+                        Add
+                      </button>
+                    </div>
+                  ) : null}
 
-                  {/* Slots list */}
-                  <div className="pt-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
-                        Available Sitting Slots on {appointmentDate}:
+                  {/* Active Added Extra Services List */}
+                  {extraServices.length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                        Selected Extra Services ({extraServices.length}):
                       </span>
-                      {slotLoading ? (
-                        <span className="flex items-center gap-1 text-[11px] text-indigo-600">
-                          <RefreshCw className="size-3 animate-spin" /> Loading…
-                        </span>
-                      ) : null}
-                    </div>
-
-                    {slotUnavailableReason ? (
-                      <p className="mt-2 text-xs text-amber-700 dark:text-amber-400">{slotUnavailableReason}</p>
-                    ) : (
-                      <div className="mt-2.5 grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
-                        {slots.map((slot) => {
-                          const isSelected = selectedSlot?.start === slot.start;
-                          return (
-                            <button
-                              className={`rounded-xl border p-2 text-center transition ${
-                                isSelected
-                                  ? "border-indigo-600 bg-indigo-600 text-white shadow-xs"
-                                  : slot.available
-                                  ? "border-slate-200 bg-white text-slate-800 hover:border-indigo-300 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
-                                  : "cursor-not-allowed border-slate-100 bg-slate-100/50 text-slate-400 dark:border-slate-800 dark:bg-slate-800/30"
-                              }`}
-                              disabled={!slot.available}
-                              key={slot.start}
-                              onClick={() => setSelectedSlot(slot)}
-                              type="button"
-                            >
-                              <span className="text-xs font-black">{slot.label}</span>
-                            </button>
-                          );
-                        })}
+                      <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+                        {extraServices.map((svc) => (
+                          <div className="flex items-center justify-between px-3.5 py-2.5 text-xs" key={svc.id}>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-900 dark:text-white">{svc.name}</span>
+                              <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                                {svc.category}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono font-bold text-slate-900 dark:text-white">
+                                PKR {svc.price.toLocaleString()}
+                              </span>
+                              <button
+                                className="text-slate-400 hover:text-rose-600"
+                                onClick={() => removeExtraService(svc.id)}
+                                type="button"
+                              >
+                                <Trash2 className="size-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
                       </div>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-
-              {/* CLINICIAN & BRANCH DETAILS */}
-              <div className="mt-4 grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-2 dark:border-slate-800">
-                <Field label="Consulting Doctor">
-                  <select
-                    className={SELECT_CLASS_NAME}
-                    onChange={(e) => setSelectedDoctorId(e.target.value)}
-                    value={selectedDoctorId || currentDoctorId}
-                  >
-                    {catalog?.practitioners.map((doc) => (
-                      <option key={doc.id} value={doc.id}>
-                        {doc.displayName} ({doc.specialtyName}) {doc.id === currentDoctorId ? "— You" : ""}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-
-                <Field label="Hospital Branch / Location">
-                  <select
-                    className={SELECT_CLASS_NAME}
-                    onChange={(e) => setBranchId(e.target.value)}
-                    value={branchId || defaultBranchId}
-                  >
-                    {doctorBranches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-
-                {/* Delivery Mode if in Walk-in */}
-                {bookingMode === "WALK_IN_QUEUE" ? (
-                  <Field label="Delivery Mode">
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        className={`rounded-xl border py-2.5 text-xs font-bold transition ${
-                          consultationMode === "IN_PERSON"
-                            ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
-                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                        }`}
-                        onClick={() => setConsultationMode("IN_PERSON")}
-                        type="button"
-                      >
-                        In-Person
-                      </button>
-                      <button
-                        className={`rounded-xl border py-2.5 text-xs font-bold transition ${
-                          consultationMode === "ONLINE"
-                            ? "border-indigo-600 bg-indigo-50 text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300"
-                            : "border-slate-200 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                        }`}
-                        onClick={() => setConsultationMode("ONLINE")}
-                        type="button"
-                      >
-                        Online Video
-                      </button>
                     </div>
-                  </Field>
-                ) : null}
-              </div>
+                  ) : null}
 
-              {/* Chief complaint / Visit reason */}
-              {bookingMode !== "NO_BOOKING" ? (
-                <div className="mt-4 border-t border-slate-100 pt-4 dark:border-slate-800">
-                  <Field label="Chief Complaint / Reason for Visit">
-                    <input
-                      className={INPUT_CLASS_NAME}
-                      onChange={(e) => setVisitReason(e.target.value)}
-                      placeholder="e.g. Follow-up consultation, fever, abdominal discomfort"
-                      value={visitReason}
-                    />
-                  </Field>
+                  {/* Total Itemized Charges Summary Box */}
+                  <div className="mt-4 flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 dark:border-emerald-800 dark:bg-emerald-950/40">
+                    <div className="flex items-center gap-2.5">
+                      <span className="grid size-9 place-items-center rounded-xl bg-emerald-600 text-white shadow-xs">
+                        <CreditCard className="size-4" />
+                      </span>
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                          Total Visit Charges
+                        </span>
+                        <p className="text-xs text-slate-600 dark:text-slate-300">
+                          Consultation (PKR {consultationFee.toLocaleString()})
+                          {extraServices.length > 0 ? ` + ${extraServices.length} extra service${extraServices.length === 1 ? "" : "s"} (PKR ${totalExtraServicesFee.toLocaleString()})` : ""}
+                        </p>
+                      </div>
+                    </div>
 
-                  {/* Quick complaint tags */}
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {CHIEF_COMPLAINT_TAGS.map((tag) => (
-                      <button
-                        className={`rounded-lg px-2.5 py-1 text-[11px] font-bold transition ${
-                          visitReason === tag
-                            ? "bg-indigo-600 text-white shadow-xs"
-                            : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300"
-                        }`}
-                        key={tag}
-                        onClick={() => setVisitReason(tag)}
-                        type="button"
-                      >
-                        {tag}
-                      </button>
-                    ))}
+                    <div className="text-right">
+                      <span className="font-mono text-xl font-black text-emerald-700 dark:text-emerald-300">
+                        PKR {totalCharges.toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                 </div>
-              ) : null}
-            </SectionCard>
+              </SectionCard>
+            ) : null}
 
             {/* Document attachment if existing patient */}
             {existingPatient ? (
@@ -2268,41 +2452,52 @@ export function DoctorPatientRegistration() {
                 <div className="flex justify-between">
                   <span className="text-slate-500">Branch:</span>
                   <span className="font-bold text-slate-900 dark:text-white">
-                    {doctorBranches.find((b) => b.id === (branchId || defaultBranchId))?.name ?? "Main Hospital"}
+                    {effectiveBranch?.name ?? "Main Hospital"}
                   </span>
                 </div>
               </div>
 
-              {/* Charges & Billing Summary Card in Live Preview */}
-              <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-2 dark:border-emerald-900/40 dark:bg-emerald-950/30">
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
-                    Charges &amp; Billing Summary
-                  </span>
-                  <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400">
-                    PKR {totalCharges.toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="space-y-1 text-xs text-slate-700 dark:text-slate-300">
-                  <div className="flex justify-between">
-                    <span className="truncate pr-2">{effectiveConsultationService.name}:</span>
-                    <span className="font-mono font-bold">PKR {consultationFee.toLocaleString()}</span>
-                  </div>
-                  {extraServices.map((svc) => (
-                    <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400" key={svc.id}>
-                      <span className="truncate pr-2">+ {svc.name}:</span>
-                      <span className="font-mono">PKR {svc.price.toLocaleString()}</span>
-                    </div>
-                  ))}
-                  <div className="pt-1.5 mt-1 border-t border-dashed border-emerald-200 dark:border-emerald-800 flex justify-between font-black text-slate-900 dark:text-white">
-                    <span>Total Estimated Bill:</span>
-                    <span className="font-mono text-emerald-700 dark:text-emerald-300">
+              {/* Charges estimate — only when a visit is actually being booked. */}
+              {isBookingVisit ? (
+                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-2 dark:border-emerald-900/40 dark:bg-emerald-950/30">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                      Estimated Charges
+                    </span>
+                    <span className="text-[10px] font-black text-emerald-700 dark:text-emerald-400">
                       PKR {totalCharges.toLocaleString()}
                     </span>
                   </div>
+
+                  <div className="space-y-1 text-xs text-slate-700 dark:text-slate-300">
+                    <div className="flex justify-between">
+                      <span className="truncate pr-2">{effectiveConsultationService.name}:</span>
+                      <span className="font-mono font-bold">PKR {consultationFee.toLocaleString()}</span>
+                    </div>
+                    {extraServices.map((svc) => (
+                      <div className="flex justify-between text-[11px] text-slate-500 dark:text-slate-400" key={svc.id}>
+                        <span className="truncate pr-2">+ {svc.name}:</span>
+                        <span className="font-mono">PKR {svc.price.toLocaleString()}</span>
+                      </div>
+                    ))}
+                    <div className="pt-1.5 mt-1 border-t border-dashed border-emerald-200 dark:border-emerald-800 flex justify-between font-black text-slate-900 dark:text-white">
+                      <span>Estimated Total:</span>
+                      <span className="font-mono text-emerald-700 dark:text-emerald-300">
+                        PKR {totalCharges.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                  {/*
+                   * Said plainly, because it is true: this screen books the
+                   * visit, it does not raise the invoice. Only billing holds
+                   * `billing.invoices.manage`, and the extra procedures picked
+                   * here are printed on the slip for the counter to charge.
+                   */}
+                  <p className="pt-1 text-[10px] leading-4 text-emerald-800/80 dark:text-emerald-300/70">
+                    Estimate only — the invoice is raised at the billing counter from this slip.
+                  </p>
                 </div>
-              </div>
+              ) : null}
 
               {/* Booking Target Summary */}
               <div className="mt-4 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 dark:border-indigo-900/40 dark:bg-indigo-950/30">
@@ -2344,15 +2539,21 @@ export function DoctorPatientRegistration() {
                   ) : (
                     <UserPlus className="size-4" />
                   )}
+                  {/*
+                   * The label follows the booking mode for a new patient too.
+                   * It was hardcoded to "Register & Book · PKR x", so choosing
+                   * "Register Only" left the button promising a booking and a
+                   * bill directly beneath a panel reading "No visit booked".
+                   */}
                   {isSubmitting
                     ? "Processing…"
+                    : bookingMode === "WALK_IN_QUEUE"
+                    ? `${existingPatient ? "Issue Token" : "Register & Issue Token"} · PKR ${totalCharges.toLocaleString()}`
+                    : bookingMode === "SCHEDULED_SLOT"
+                    ? `${existingPatient ? "Confirm Slot" : "Register & Book Slot"} · PKR ${totalCharges.toLocaleString()}`
                     : existingPatient
-                    ? bookingMode === "WALK_IN_QUEUE"
-                      ? `Issue Token · PKR ${totalCharges.toLocaleString()}`
-                      : bookingMode === "SCHEDULED_SLOT"
-                      ? `Confirm Slot · PKR ${totalCharges.toLocaleString()}`
-                      : `Save Record`
-                    : `Register & Book · PKR ${totalCharges.toLocaleString()}`}
+                    ? "Save Record"
+                    : "Register Patient"}
                 </button>
               </div>
             </div>
