@@ -42,6 +42,7 @@ import {
   ListOrdered,
   Loader2,
   LogOut,
+  MapPin,
   Menu,
   Network,
   Boxes,
@@ -2198,6 +2199,170 @@ const WORKSPACE_SWITCHER_MAP: Record<string, { label: string; icon: LucideIcon }
   NUTRITIONIST: { label: "Dietetics", icon: Utensils },
 };
 
+interface AccessibleBranch {
+  id: string;
+  name: string;
+  isMainBranch: boolean;
+}
+
+/**
+ * Moves the session between the branches this person works at.
+ *
+ * Staff could be assigned to several branches but only ever sign in at the one
+ * their membership called primary, so the queue, the day's appointments and
+ * the till all stayed pinned to it. This is the control that moves the
+ * session; the server re-checks the assignment on every switch.
+ *
+ * The list is fetched rather than carried on the session, because resolving it
+ * costs a roles-and-branches query that every other request would otherwise
+ * pay for. It renders nothing at all until it knows there is more than one
+ * branch to offer, so a single-site hospital never sees it.
+ */
+function BranchSwitcherDropdown() {
+  const [branches, setBranches] = useState<AccessibleBranch[]>([]);
+  const [currentBranchId, setCurrentBranchId] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [switching, setSwitching] = useState<string | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await fetch("/api/auth/branches", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (!response.ok) return;
+        const payload = (await response.json()) as {
+          branches?: AccessibleBranch[];
+          currentBranchId?: string | null;
+        };
+        if (cancelled) return;
+        setBranches(payload.branches ?? []);
+        setCurrentBranchId(payload.currentBranchId ?? null);
+      } catch {
+        // No switcher is the right failure: the session keeps the branch it has.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (branches.length < 2) return null;
+
+  const current = branches.find((branch) => branch.id === currentBranchId);
+
+  async function handleSwitch(branchId: string) {
+    if (branchId === currentBranchId || switching) return;
+    setSwitching(branchId);
+    setError("");
+    try {
+      const response = await fetch("/api/auth/switch-branch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ branchId }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.error ?? "The branch could not be changed.");
+      }
+      /*
+       * A full reload, not a router refresh.
+       *
+       * Every branch-scoped screen is server-rendered against the session's
+       * branch, and a good deal of the portal caches its data client-side.
+       * Reloading is the only way to be sure nothing on the page is still
+       * showing the branch the user just left.
+       */
+      window.location.reload();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The branch could not be changed.");
+      setSwitching(null);
+    }
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        className="wfg-control flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:text-indigo-600 dark:text-slate-200"
+        title="Switch branch"
+      >
+        <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-50 text-teal-600 dark:bg-teal-950/60 dark:text-teal-400">
+          <MapPin size={13} />
+        </span>
+        <span className="hidden sm:inline-block max-w-28 truncate">
+          {current?.name ?? "Choose branch"}
+        </span>
+        <ChevronDown size={14} className={`text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open ? (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1.5 z-50 w-60 rounded-2xl border border-slate-200 bg-white p-2 shadow-xl backdrop-blur-xl dark:border-slate-800 dark:bg-slate-900">
+            <div className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+              Switch branch ({branches.length})
+            </div>
+            <div className="space-y-1">
+              {branches.map((branch) => {
+                const isCurrent = branch.id === currentBranchId;
+                const isTarget = switching === branch.id;
+
+                return (
+                  <button
+                    key={branch.id}
+                    type="button"
+                    disabled={isCurrent || switching !== null}
+                    onClick={() => handleSwitch(branch.id)}
+                    className={`flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-semibold transition ${
+                      isCurrent
+                        ? "bg-teal-50 font-bold text-teal-900 dark:bg-teal-950/60 dark:text-teal-300"
+                        : "text-slate-700 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white"
+                    }`}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span
+                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-lg ${
+                          isCurrent
+                            ? "bg-teal-600 text-white"
+                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                        }`}
+                      >
+                        {isTarget ? <Loader2 size={13} className="animate-spin" /> : <MapPin size={13} />}
+                      </span>
+                      <span className="truncate">{branch.name}</span>
+                    </div>
+                    {isCurrent ? (
+                      <span className="rounded-full bg-teal-600/10 px-1.5 py-0.5 text-[9px] font-bold text-teal-700 dark:bg-teal-400/10 dark:text-teal-300">
+                        Active
+                      </span>
+                    ) : branch.isMainBranch ? (
+                      <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[9px] font-bold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                        Main
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="px-2.5 pb-1 pt-2 text-[10px] leading-4 text-slate-400">
+              Appointments, the queue and billing all follow the branch you are signed in at.
+            </p>
+            {error ? (
+              <p className="px-2.5 pb-1 text-[10px] font-bold leading-4 text-rose-600 dark:text-rose-400">{error}</p>
+            ) : null}
+          </div>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
 function WorkspaceSwitcherDropdown({
   currentWorkspace,
   availableWorkspaces,
@@ -2681,6 +2846,8 @@ export function PremiumApplicationShell({
                 size={18}
               />
             </button>
+
+            {session?.membershipId ? <BranchSwitcherDropdown /> : null}
 
             {session?.availableWorkspaces && session.availableWorkspaces.length > 1 ? (
               <WorkspaceSwitcherDropdown

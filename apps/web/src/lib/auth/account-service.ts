@@ -36,7 +36,28 @@ function findIdentityForLogin(where: Prisma.IdentityWhereUniqueInput) {
   return database.identity.findUnique({
     where,
     include: {
-      memberships: { where: { status: "ACTIVE" }, include: { organization: true, primaryBranch: true, tenant: true } },
+      memberships: {
+        where: { status: "ACTIVE" },
+        include: {
+          organization: true,
+          primaryBranch: true,
+          tenant: true,
+          /*
+           * Where else this person works.
+           *
+           * A membership can legitimately have no primary branch — an
+           * invitation that never set one, or an administrator clearing it —
+           * while its role assignments carry the branch they were created
+           * against. Signing such an account in with no branch at all leaves
+           * every branch-scoped screen throwing "a branch is required", so the
+           * session falls back to a branch they demonstrably hold a role at.
+           */
+          roles: {
+            where: { branchId: { not: null }, role: { isActive: true, archivedAt: null } },
+            select: { branch: { select: { id: true, name: true, isMainBranch: true, status: true, archivedAt: true } } },
+          },
+        },
+      },
       mfaCredentials: { where: { status: "ACTIVE" }, select: { id: true } },
     },
   });
@@ -120,11 +141,20 @@ async function buildAccount(identity: IdentityWithContext): Promise<Authenticate
       if (membership.tenant.status === "SUSPENDED") suspendedOrganizationLabel = membership.organization.displayName;
       continue;
     }
+    // The primary branch if there is one, otherwise a branch this membership
+    // actually holds a role at — main branch first, so a multi-site consultant
+    // lands somewhere predictable and can switch from the header afterwards.
+    const roleBranches = membership.roles
+      .flatMap((assignment) => (assignment.branch ? [assignment.branch] : []))
+      .filter((branch) => branch.status === "ACTIVE" && branch.archivedAt === null)
+      .sort((left, right) => Number(right.isMainBranch) - Number(left.isMainBranch) || left.name.localeCompare(right.name));
+    const fallbackBranch = membership.primaryBranch ?? roleBranches[0] ?? null;
+
     for (const workspace of membership.workspaceCodes) {
       const role = workspaceRoles[workspace];
       contexts.push({ membershipId: membership.id, tenantId: membership.tenantId, organizationId: membership.organizationId,
-        branchId: membership.primaryBranchId, workspace, role, organizationLabel: membership.organization.displayName,
-        branchLabel: membership.primaryBranch?.name ?? null, homePath: homePathForRole(role) });
+        branchId: fallbackBranch?.id ?? null, workspace, role, organizationLabel: membership.organization.displayName,
+        branchLabel: fallbackBranch?.name ?? null, homePath: homePathForRole(role) });
     }
   }
 

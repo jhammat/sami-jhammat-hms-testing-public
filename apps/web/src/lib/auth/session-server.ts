@@ -154,6 +154,27 @@ async function loadSession(): Promise<WonFlowSessionPayload | null> {
       permissions = access?.permissions ?? ["observations.write", "careplan.complete"];
     }
 
+    /*
+     * The branch this session is actually held at.
+     *
+     * The label was read off `membership.primaryBranch`, which is where the
+     * person's record sits rather than where they are working right now.
+     * Those were always the same value until a session could move between
+     * branches; now they can differ, and showing the primary would have the
+     * header naming one site while the queue below it listed another.
+     *
+     * The primary branch is already loaded, so the extra read only happens on
+     * a session that has actually been switched.
+     */
+    let sessionBranchName = session.membership?.primaryBranch?.name ?? null;
+    if (session.branchId && session.branchId !== session.membership?.primaryBranchId) {
+      const branch = await database.branch.findUnique({
+        where: { id: session.branchId },
+        select: { name: true },
+      });
+      sessionBranchName = branch?.name ?? sessionBranchName;
+    }
+
     return {
       sessionId: session.id, identityId: session.identityId, membershipId: session.membershipId,
       tenantId: session.tenantId, organizationId: session.organizationId, branchId: session.branchId, workspace: session.workspace,
@@ -161,7 +182,7 @@ async function loadSession(): Promise<WonFlowSessionPayload | null> {
       orgLabel: session.membership?.organization.displayName ?? "WonFlow Platform",
       branchLabel: session.actingRelationship && session.actingRelationship !== "self"
         ? `Caregiver (${session.actingRelationship})`
-        : session.membership?.primaryBranch?.name ?? null,
+        : sessionBranchName,
       portalLabel: labels[role],
       permissionCodes: permissions,
       passwordChangeRequired: session.identity.mustChangePassword,
