@@ -11,6 +11,7 @@ export async function PUT(r: Request, { params }: { params: Promise<{ membership
       workspaceCodes: WorkspaceCode[];
       departmentId?: string | null;
       primaryBranchId?: string | null;
+      branchIds?: string[] | null;
     };
     const updated = await s.updateUserWorkspaces(await requireRequestContext(), membershipId, body);
     return NextResponse.json({ user: updated });

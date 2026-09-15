@@ -6,7 +6,8 @@ import type { Prisma, ServiceBillingOwner, WorkspaceCode } from "@wonflow/databa
 import { requirePermission, requireTenantContext } from "@wonflow/contracts";
 import type { WonFlowRequestContext, WonFlowTenantRequestContext } from "@wonflow/contracts";
 import { hashPassword } from "@/lib/auth/password";
-import { ensureWorkspaceRoles } from "@/server/access/workspace-roles";
+import { ensureWorkspaceRoles, syncMembershipBranchRoles } from "@/server/access/workspace-roles";
+import { syncStaffProfile } from "@/server/access/staff-provisioning";
 import { getServiceCategory, isServiceCategoryCode, isServiceCategoryEntitled } from "@/lib/services/service-categories";
 import { nextSequentialCode, nextServiceCode, normalizeServiceCode, serviceCodePrefix } from "@/lib/services/service-code";
 import { isWorkspaceEntitled, readEnabledModules } from "@/server/access/workspace-modules";
@@ -17,6 +18,46 @@ const audit = (tx: Parameters<Parameters<typeof database.$transaction>[0]>[0], c
   tx.auditEvent.create({ data: { tenantId: c.tenantId, branchId: c.branchId, actorMembershipId: c.userId, sessionId: c.sessionId, requestId: c.requestId, action, entityType, entityId, severity, sourceApplication: c.sourceApplication } });
 
 const isUniqueConstraintError = (caught: unknown) => typeof caught === "object" && caught !== null && (caught as { code?: string }).code === "P2002";
+
+/**
+ * The branches a staff member works at, checked against this hospital.
+ *
+ * Staff were held to a single branch everywhere — one `primaryBranchId` on the
+ * membership, one `branchId` on the staff record, one role row carrying it —
+ * so a consultant or dietitian who covers two sites in a hospital group could
+ * only be registered at one of them. The first id is the primary (the branch
+ * their record and their default session belong to); the rest are the other
+ * sites they hold their roles at.
+ *
+ * An empty result means organization-wide rather than "no branch": a role with
+ * no branch matches every branch, which is what a hospital running a single
+ * site wants and what memberships created before branches existed already had.
+ */
+async function resolveStaffBranchIds(
+  c: WonFlowTenantRequestContext,
+  input: { branchIds?: readonly string[] | null; primaryBranchId?: string | null },
+): Promise<{ branchIds: string[]; primaryBranchId: string | null }> {
+  const requested = [input.primaryBranchId ?? "", ...(input.branchIds ?? [])]
+    .map((value) => value?.trim() ?? "")
+    .filter((value) => value.length > 0);
+
+  const unique = [...new Set(requested)];
+  if (unique.length === 0) return { branchIds: [], primaryBranchId: null };
+
+  const branches = await database.branch.findMany({
+    where: { id: { in: unique }, tenantId: c.tenantId, organizationId: c.organizationId, archivedAt: null },
+    select: { id: true },
+  });
+  const valid = new Set(branches.map((branch) => branch.id));
+  if (valid.size !== unique.length) {
+    throw new WonFlowApiError(400, "invalid-branch", "One of the selected branches does not belong to this hospital.");
+  }
+
+  return {
+    branchIds: unique,
+    primaryBranchId: input.primaryBranchId?.trim() || unique[0] || null,
+  };
+}
 
 const ADMIN_PERMISSION_CODES = ["organization.audit.read","organization.branches.manage","organization.profile.manage","organization.profile.read","organization.roles.manage","organization.roles.read","organization.schedules.manage","organization.schedules.read","organization.services.manage","organization.services.read","organization.users.manage","organization.users.read"] as const;
 
@@ -118,12 +159,16 @@ export class HospitalAdministrationService {
       include:{
         identity:{select:{email:true,phone:true,status:true}},
         primaryBranch:true,
-        roles:{include:{role:true}},
+        // The branch on each role assignment is what actually scopes this
+        // person's permissions, so it is also the honest answer to "which
+        // sites do they work at" — the team screen reads it back from here.
+        roles:{include:{role:true,branch:{select:{id:true,name:true}}}},
         staffProfile:{
           select:{
             id:true,
             title:true,
             employeeNumber:true,
+            staffType:true,
             doctor:{
               select:{
                 id:true,
@@ -149,7 +194,8 @@ export class HospitalAdministrationService {
     });
     return memberships.map(({staffProfile,...membership})=>({
       ...membership,
-      staffProfile:staffProfile?{id:staffProfile.id,title:staffProfile.title,employeeNumber:staffProfile.employeeNumber}:null,
+      branches:[...new Map(membership.roles.flatMap(assignment=>assignment.branch?[[assignment.branch.id,assignment.branch] as const]:[])).values()],
+      staffProfile:staffProfile?{id:staffProfile.id,title:staffProfile.title,employeeNumber:staffProfile.employeeNumber,staffType:staffProfile.staffType}:null,
       doctorProfile:staffProfile?.doctor?{
         id:staffProfile.doctor.id,
         specialty:staffProfile.doctor.specialty,
@@ -164,9 +210,9 @@ export class HospitalAdministrationService {
       }:null
     }));
   }
-  async inviteUser(rc:WonFlowRequestContext,input:{email:string;displayName:string;primaryBranchId?:string;departmentId?:string;department?:string;workspaceCodes?:Array<"ADMIN"|"RECEPTION"|"DOCTOR"|"PATIENT"|"LABORATORY"|"RADIOLOGY"|"PHARMACY"|"BILLING"|"MANAGEMENT"|"PHYSIOTHERAPIST"|"NUTRITIONIST">}){
+  async inviteUser(rc:WonFlowRequestContext,input:{email:string;displayName:string;primaryBranchId?:string;branchIds?:string[];title?:string|null;departmentId?:string;department?:string;workspaceCodes?:Array<"ADMIN"|"RECEPTION"|"DOCTOR"|"PATIENT"|"LABORATORY"|"RADIOLOGY"|"PHARMACY"|"BILLING"|"MANAGEMENT"|"PHYSIOTHERAPIST"|"NUTRITIONIST">}){
     const c=this.context(rc);requirePermission(c,"organization.users.manage");
-    if(input.primaryBranchId&&!await database.branch.findFirst({where:{id:input.primaryBranchId,tenantId:c.tenantId,organizationId:c.organizationId}}))throw new Error("Branch does not belong to this organization.");
+    const { branchIds, primaryBranchId } = await resolveStaffBranchIds(c, input);
     // Doctors are attached to a configured department record, selected inline
     // on the invite form rather than typed into a prompt.
     const selectedDepartment=input.departmentId?await database.department.findFirst({where:{id:input.departmentId,tenantId:c.tenantId,organizationId:c.organizationId,archivedAt:null,isActive:true}}):null;
@@ -211,14 +257,14 @@ export class HospitalAdministrationService {
             tenantId: c.tenantId,
             identityId: existingIdentity.id,
             organizationId: c.organizationId,
-            primaryBranchId: input.primaryBranchId ?? null,
+            primaryBranchId,
             displayName: input.displayName.trim(),
             workspaceCodes: mergedWorkspaceCodes,
             status: "ACTIVE",
           },
           update: {
             displayName: input.displayName.trim(),
-            primaryBranchId: input.primaryBranchId ?? undefined,
+            primaryBranchId: primaryBranchId ?? undefined,
             workspaceCodes: mergedWorkspaceCodes,
             status: "ACTIVE",
           },
@@ -250,41 +296,24 @@ export class HospitalAdministrationService {
           }
         }
 
-        const assignedRoleIds = new Set(
-          (
-            await tx.membershipRole.findMany({
-              where: { tenantId: c.tenantId, membershipId: membership.id },
-              select: { roleId: true },
-            })
-          ).map((assignment) => assignment.roleId),
-        );
+        await syncMembershipBranchRoles(tx, {
+          tenantId: c.tenantId,
+          membershipId: membership.id,
+          roleIds: workspaceRoles.map((role) => role.id),
+          branchIds,
+        });
 
-        for (const role of workspaceRoles) {
-          if (!assignedRoleIds.has(role.id)) {
-            await tx.membershipRole.create({
-              data: {
-                tenantId: c.tenantId,
-                membershipId: membership.id,
-                roleId: role.id,
-                branchId: input.primaryBranchId ?? null,
-              },
-            });
-          }
-        }
+        // Every clinical and departmental workspace gets the staff record the
+        // rest of the hospital addresses the person by — not the doctor alone.
+        const staff = await syncStaffProfile(tx, {
+          tenantId: c.tenantId,
+          membershipId: membership.id,
+          workspaceCodes: mergedWorkspaceCodes,
+          branchId: primaryBranchId,
+          ...(input.title !== undefined ? { title: input.title } : {}),
+        });
 
-        if (mergedWorkspaceCodes.includes("DOCTOR") && selectedDepartment) {
-          const staff = await tx.staffProfile.upsert({
-            where: { membershipId: membership.id },
-            create: {
-              tenantId: c.tenantId,
-              membershipId: membership.id,
-              branchId: input.primaryBranchId ?? null,
-              employeeNumber: `DR-${membership.id.slice(0, 8).toUpperCase()}`,
-              staffType: "DOCTOR",
-            },
-            update: { branchId: input.primaryBranchId ?? null, staffType: "DOCTOR", status: "ACTIVE" },
-          });
-
+        if (staff && mergedWorkspaceCodes.includes("DOCTOR") && selectedDepartment) {
           await tx.doctorProfile.upsert({
             where: { staffProfileId: staff.id },
             create: {
@@ -320,12 +349,12 @@ export class HospitalAdministrationService {
           tenantId: c.tenantId,
           identityId: identity.id,
           organizationId: c.organizationId,
-          primaryBranchId: input.primaryBranchId ?? null,
+          primaryBranchId,
           displayName: input.displayName.trim(),
           workspaceCodes,
           status: "INVITED",
         },
-        update: { displayName: input.displayName.trim(), primaryBranchId: input.primaryBranchId ?? null, workspaceCodes },
+        update: { displayName: input.displayName.trim(), primaryBranchId, workspaceCodes },
       });
       // Tenants provisioned before workspace roles existed only have ADMIN, so
       // create the invited workspace's role (with its permissions) on demand.
@@ -353,35 +382,24 @@ export class HospitalAdministrationService {
           }
         }
       }
-      const assignedRoleIds = new Set(
-        (
-          await tx.membershipRole.findMany({
-            where: { tenantId: c.tenantId, membershipId: membership.id },
-            select: { roleId: true },
-          })
-        ).map((assignment) => assignment.roleId),
-      );
-      for (const role of workspaceRoles) {
-        if (!assignedRoleIds.has(role.id)) {
-          await tx.membershipRole.create({
-            data: { tenantId: c.tenantId, membershipId: membership.id, roleId: role.id, branchId: input.primaryBranchId ?? null },
-          });
-        }
+      await syncMembershipBranchRoles(tx, {
+        tenantId: c.tenantId,
+        membershipId: membership.id,
+        roleIds: workspaceRoles.map((role) => role.id),
+        branchIds,
+      });
+      if (workspaceCodes.includes("DOCTOR") && !selectedDepartment) {
+        throw new WonFlowApiError(400, "doctor-department-required", "Select the doctor's department.");
       }
-      if (workspaceCodes.includes("DOCTOR")) {
-        const staff = await tx.staffProfile.upsert({
-          where: { membershipId: membership.id },
-          create: {
-            tenantId: c.tenantId,
-            membershipId: membership.id,
-            branchId: input.primaryBranchId ?? null,
-            employeeNumber: `DR-${membership.id.slice(0, 8).toUpperCase()}`,
-            staffType: "DOCTOR",
-          },
-          update: { branchId: input.primaryBranchId ?? null, staffType: "DOCTOR", status: "ACTIVE" },
-        });
-        const specialty = selectedDepartment?.name ?? input.department?.trim();
-        if (!selectedDepartment) throw new WonFlowApiError(400, "doctor-department-required", "Select the doctor's department.");
+      const staff = await syncStaffProfile(tx, {
+        tenantId: c.tenantId,
+        membershipId: membership.id,
+        workspaceCodes,
+        branchId: primaryBranchId,
+        ...(input.title !== undefined ? { title: input.title } : {}),
+      });
+      if (staff && workspaceCodes.includes("DOCTOR") && selectedDepartment) {
+        const specialty = selectedDepartment.name ?? input.department?.trim();
         await tx.doctorProfile.upsert({
           where: { staffProfileId: staff.id },
           create: { tenantId: c.tenantId, staffProfileId: staff.id, departmentId: selectedDepartment.id, specialty },
@@ -394,7 +412,7 @@ export class HospitalAdministrationService {
           normalizedEmail,
           displayName: input.displayName.trim(),
           organizationId: c.organizationId,
-          primaryBranchId: input.primaryBranchId ?? null,
+          primaryBranchId,
           workspaceCodes,
           invitedByMembershipId: c.userId,
           expiresAt: new Date(Date.now() + 72 * 60 * 60 * 1000),
@@ -428,6 +446,7 @@ export class HospitalAdministrationService {
       workspaceCodes: WorkspaceCode[];
       departmentId?: string | null;
       primaryBranchId?: string | null;
+      branchIds?: string[] | null;
     },
   ) {
     const c = this.context(rc);
@@ -474,6 +493,27 @@ export class HospitalAdministrationService {
       }
     }
 
+    // `branchIds` omitted entirely means "leave the branches alone"; sending an
+    // empty array is how a hospital deliberately makes someone organization-wide.
+    const existingBranchIds =
+      input.branchIds === undefined
+        ? [
+            ...new Set(
+              (
+                await database.membershipRole.findMany({
+                  where: { tenantId: c.tenantId, membershipId: membership.id, branchId: { not: null } },
+                  select: { branchId: true },
+                })
+              ).flatMap((row) => (row.branchId ? [row.branchId] : [])),
+            ),
+          ]
+        : null;
+
+    const { branchIds, primaryBranchId } = await resolveStaffBranchIds(c, {
+      primaryBranchId: input.primaryBranchId !== undefined ? input.primaryBranchId : membership.primaryBranchId,
+      branchIds: input.branchIds ?? existingBranchIds ?? [],
+    });
+
     return database.$transaction(async (tx) => {
       await ensureWorkspaceRoles(tx, c.tenantId, input.workspaceCodes);
       const roles = await tx.role.findMany({
@@ -503,55 +543,25 @@ export class HospitalAdministrationService {
         where: { id: membership.id },
         data: {
           workspaceCodes: input.workspaceCodes,
-          primaryBranchId: input.primaryBranchId !== undefined ? input.primaryBranchId : membership.primaryBranchId,
+          primaryBranchId,
         },
       });
 
-      const targetRoleIds = new Set(roles.map((r) => r.id));
-      await tx.membershipRole.deleteMany({
-        where: {
-          tenantId: c.tenantId,
-          membershipId: membership.id,
-          roleId: { notIn: Array.from(targetRoleIds) },
-        },
+      await syncMembershipBranchRoles(tx, {
+        tenantId: c.tenantId,
+        membershipId: membership.id,
+        roleIds: roles.map((role) => role.id),
+        branchIds,
       });
 
-      const existingRoleAssignments = await tx.membershipRole.findMany({
-        where: { tenantId: c.tenantId, membershipId: membership.id },
-        select: { roleId: true },
+      const staff = await syncStaffProfile(tx, {
+        tenantId: c.tenantId,
+        membershipId: membership.id,
+        workspaceCodes: input.workspaceCodes,
+        branchId: primaryBranchId,
       });
-      const existingRoleIds = new Set(existingRoleAssignments.map((a) => a.roleId));
 
-      for (const role of roles) {
-        if (!existingRoleIds.has(role.id)) {
-          await tx.membershipRole.create({
-            data: {
-              tenantId: c.tenantId,
-              membershipId: membership.id,
-              roleId: role.id,
-              branchId: input.primaryBranchId !== undefined ? input.primaryBranchId : membership.primaryBranchId,
-            },
-          });
-        }
-      }
-
-      if (input.workspaceCodes.includes("DOCTOR") && selectedDepartment) {
-        const staff = await tx.staffProfile.upsert({
-          where: { membershipId: membership.id },
-          create: {
-            tenantId: c.tenantId,
-            membershipId: membership.id,
-            branchId: input.primaryBranchId !== undefined ? input.primaryBranchId : membership.primaryBranchId,
-            employeeNumber: `DR-${membership.id.slice(0, 8).toUpperCase()}`,
-            staffType: "DOCTOR",
-            status: "ACTIVE",
-          },
-          update: {
-            branchId: input.primaryBranchId !== undefined ? input.primaryBranchId : membership.primaryBranchId,
-            staffType: "DOCTOR",
-            status: "ACTIVE",
-          },
-        });
+      if (staff && input.workspaceCodes.includes("DOCTOR") && selectedDepartment) {
         await tx.doctorProfile.upsert({
           where: { staffProfileId: staff.id },
           create: {
@@ -572,18 +582,27 @@ export class HospitalAdministrationService {
     });
   }
 
-  async updateUser(rc:WonFlowRequestContext,id:string,input:{status?:"INVITED"|"ACTIVE"|"SUSPENDED"|"ARCHIVED";displayName?:string;primaryBranchId?:string|null;title?:string|null;email?:string;phone?:string|null}){
+  async updateUser(rc:WonFlowRequestContext,id:string,input:{status?:"INVITED"|"ACTIVE"|"SUSPENDED"|"ARCHIVED";displayName?:string;primaryBranchId?:string|null;branchIds?:string[]|null;title?:string|null;email?:string;phone?:string|null}){
     const c=this.context(rc);
     requirePermission(c,"organization.users.manage");
-    if(input.primaryBranchId){
-      const branch=await database.branch.findFirst({where:{id:input.primaryBranchId,tenantId:c.tenantId,organizationId:c.organizationId}});
-      if(!branch)throw new WonFlowApiError(400,"invalid-branch","Branch does not belong to this organization.");
-    }
     const membership = await database.tenantMembership.findFirst({
       where: { id, tenantId: c.tenantId, organizationId: c.organizationId, archivedAt: null },
-      include: { identity: true, staffProfile: true },
+      include: { identity: true, staffProfile: true, roles: { select: { roleId: true, branchId: true } } },
     });
     if (!membership) throw new WonFlowApiError(404, "user-not-found", "User not found.");
+
+    // Only touch branch assignments when the caller actually sent one. Editing
+    // a staff member's phone number must not quietly re-scope the sites they
+    // work at.
+    const branchesRequested = input.primaryBranchId !== undefined || input.branchIds !== undefined;
+    const resolved = branchesRequested
+      ? await resolveStaffBranchIds(c, {
+          primaryBranchId: input.primaryBranchId !== undefined ? input.primaryBranchId : membership.primaryBranchId,
+          branchIds:
+            input.branchIds ??
+            [...new Set(membership.roles.flatMap((role) => (role.branchId ? [role.branchId] : [])))],
+        })
+      : null;
 
     return database.$transaction(async tx=>{
       if (input.email && input.email.trim().toLowerCase() !== membership.identity.email.toLowerCase()) {
@@ -608,20 +627,22 @@ export class HospitalAdministrationService {
         });
       }
 
-      if (membership.staffProfile && (input.title !== undefined || input.primaryBranchId !== undefined)) {
+      if (membership.staffProfile && (input.title !== undefined || resolved)) {
         await tx.staffProfile.update({
           where: { id: membership.staffProfile.id },
           data: {
             ...(input.title !== undefined ? { title: input.title?.trim() || null } : {}),
-            ...(input.primaryBranchId !== undefined ? { branchId: input.primaryBranchId } : {}),
+            ...(resolved ? { branchId: resolved.primaryBranchId } : {}),
           },
         });
       }
 
-      if (input.primaryBranchId !== undefined) {
-        await tx.membershipRole.updateMany({
-          where: { tenantId: c.tenantId, membershipId: membership.id },
-          data: { branchId: input.primaryBranchId || null },
+      if (resolved) {
+        await syncMembershipBranchRoles(tx, {
+          tenantId: c.tenantId,
+          membershipId: membership.id,
+          roleIds: [...new Set(membership.roles.map((role) => role.roleId))],
+          branchIds: resolved.branchIds,
         });
       }
 
@@ -629,7 +650,7 @@ export class HospitalAdministrationService {
         where:{id,tenantId:c.tenantId},
         data:{
           ...(input.displayName !== undefined ? { displayName: input.displayName.trim() } : {}),
-          ...(input.primaryBranchId !== undefined ? { primaryBranchId: input.primaryBranchId } : {}),
+          ...(resolved ? { primaryBranchId: resolved.primaryBranchId } : {}),
           ...(input.status !== undefined ? { status: input.status } : {}),
         }
       });
@@ -672,14 +693,18 @@ export class HospitalAdministrationService {
   async listDoctors(rc:WonFlowRequestContext){
     const c=this.context(rc);
     requirePermission(c,"organization.users.read");
-    return database.doctorProfile.findMany({
+    const doctors=await database.doctorProfile.findMany({
       where:{tenantId:c.tenantId,staffProfile:{membership:{organizationId:c.organizationId,archivedAt:null}}},
       include:{
         staffProfile:{
           include:{
             membership:{
               include:{
-                identity:{select:{email:true,phone:true,status:true}}
+                identity:{select:{email:true,phone:true,status:true}},
+                // Branch-scoped role rows are where a doctor's other sites live,
+                // so the directory reads their full coverage from here rather
+                // than showing only the primary branch on the staff record.
+                roles:{select:{branch:{select:{id:true,name:true}}}}
               }
             },
             branch:true
@@ -697,6 +722,10 @@ export class HospitalAdministrationService {
       },
       orderBy:{staffProfile:{membership:{displayName:"asc"}}}
     });
+    return doctors.map(doctor=>({
+      ...doctor,
+      branches:[...new Map(doctor.staffProfile.membership.roles.flatMap(assignment=>assignment.branch?[[assignment.branch.id,assignment.branch] as const]:[])).values()],
+    }));
   }
   async listServices(rc:WonFlowRequestContext){const c=this.context(rc);requirePermission(c,"organization.services.read");return database.serviceDefinition.findMany({where:{tenantId:c.tenantId,isActive:true},include:{branch:true,handlerMembership:{select:{id:true,displayName:true,primaryWorkspace:true}},doctor:{include:{staffProfile:{include:{membership:true}}}},feeHistory:{orderBy:{changedAt:"desc"},take:10}},orderBy:{name:"asc"}});}
   /** Staff who can be named as the person operating a service. */
@@ -834,6 +863,7 @@ export class HospitalAdministrationService {
       email?: string;
       contactPhone?: string | null;
       primaryBranchId?: string | null;
+      branchIds?: string[] | null;
       departmentId?: string | null;
       specialty?: string | null;
       registrationNumber?: string | null;
@@ -916,14 +946,23 @@ export class HospitalAdministrationService {
       }
     }
 
-    if (input.primaryBranchId) {
-      const branch = await database.branch.findFirst({
-        where: { id: input.primaryBranchId, tenantId: c.tenantId, organizationId: c.organizationId, archivedAt: null },
-      });
-      if (!branch) {
-        throw new WonFlowApiError(400, "invalid-branch", "Branch does not belong to this hospital.");
-      }
-    }
+    const branchesRequested = input.primaryBranchId !== undefined || input.branchIds !== undefined;
+    const existingDoctorBranchIds = [
+      ...new Set(
+        (
+          await database.membershipRole.findMany({
+            where: { tenantId: c.tenantId, membershipId: doctor.staffProfile.membership.id, branchId: { not: null } },
+            select: { branchId: true },
+          })
+        ).flatMap((row) => (row.branchId ? [row.branchId] : [])),
+      ),
+    ];
+    const resolvedBranches = branchesRequested
+      ? await resolveStaffBranchIds(c, {
+          primaryBranchId: input.primaryBranchId !== undefined ? input.primaryBranchId : doctor.staffProfile.membership.primaryBranchId,
+          branchIds: input.branchIds ?? existingDoctorBranchIds,
+        })
+      : { branchIds: existingDoctorBranchIds, primaryBranchId: doctor.staffProfile.membership.primaryBranchId };
 
     if (input.registrationNumber !== undefined && input.registrationNumber?.trim()) {
       const existingReg = await database.doctorProfile.findFirst({
@@ -979,8 +1018,8 @@ export class HospitalAdministrationService {
       if (input.displayName !== undefined) {
         membershipData.displayName = input.displayName.trim();
       }
-      if (input.primaryBranchId !== undefined) {
-        membershipData.primaryBranchId = input.primaryBranchId || null;
+      if (branchesRequested) {
+        membershipData.primaryBranchId = resolvedBranches.primaryBranchId;
       }
       if (input.workspaceCodes !== undefined) {
         membershipData.workspaceCodes = input.workspaceCodes;
@@ -999,23 +1038,28 @@ export class HospitalAdministrationService {
           where: { tenantId: c.tenantId, code: { in: input.workspaceCodes }, isActive: true, archivedAt: null },
           select: { id: true },
         });
-        await tx.membershipRole.deleteMany({
-          where: { tenantId: c.tenantId, membershipId: doctor.staffProfile.membership.id },
+        await syncMembershipBranchRoles(tx, {
+          tenantId: c.tenantId,
+          membershipId: doctor.staffProfile.membership.id,
+          roleIds: roles.map((role) => role.id),
+          branchIds: resolvedBranches.branchIds,
         });
-        if (roles.length > 0) {
-          await tx.membershipRole.createMany({
-            data: roles.map((r) => ({
-              tenantId: c.tenantId,
-              membershipId: doctor.staffProfile.membership.id,
-              roleId: r.id,
-              branchId: input.primaryBranchId !== undefined ? (input.primaryBranchId || null) : doctor.staffProfile.membership.primaryBranchId,
-            })),
-          });
-        }
-      } else if (input.primaryBranchId !== undefined) {
-        await tx.membershipRole.updateMany({
-          where: { tenantId: c.tenantId, membershipId: doctor.staffProfile.membership.id },
-          data: { branchId: input.primaryBranchId || null },
+      } else if (branchesRequested) {
+        const heldRoleIds = [
+          ...new Set(
+            (
+              await tx.membershipRole.findMany({
+                where: { tenantId: c.tenantId, membershipId: doctor.staffProfile.membership.id },
+                select: { roleId: true },
+              })
+            ).map((row) => row.roleId),
+          ),
+        ];
+        await syncMembershipBranchRoles(tx, {
+          tenantId: c.tenantId,
+          membershipId: doctor.staffProfile.membership.id,
+          roleIds: heldRoleIds,
+          branchIds: resolvedBranches.branchIds,
         });
       }
 
@@ -1024,8 +1068,8 @@ export class HospitalAdministrationService {
       if (input.title !== undefined) {
         staffData.title = input.title?.trim() || null;
       }
-      if (input.primaryBranchId !== undefined) {
-        staffData.branchId = input.primaryBranchId || null;
+      if (branchesRequested) {
+        staffData.branchId = resolvedBranches.primaryBranchId;
       }
       if (Object.keys(staffData).length > 0) {
         await tx.staffProfile.update({
@@ -1073,7 +1117,7 @@ export class HospitalAdministrationService {
       const serviceName = `Consultation - ${input.displayName?.trim() ?? doctor.staffProfile.membership.displayName}`;
       const serviceDuration = input.durationMinutes !== undefined ? input.durationMinutes : doctor.durationMinutes;
       const serviceBookable = input.publiclyBookable !== undefined ? input.publiclyBookable : doctor.publiclyBookable;
-      const serviceBranchId = input.primaryBranchId !== undefined ? (input.primaryBranchId || null) : doctor.staffProfile.branchId;
+      const serviceBranchId = branchesRequested ? resolvedBranches.primaryBranchId : doctor.staffProfile.branchId;
 
       if (consultationService) {
         const updateServiceData: {
@@ -1087,8 +1131,8 @@ export class HospitalAdministrationService {
           durationMinutes: serviceDuration,
           publiclyBookable: serviceBookable,
         };
-        if (input.primaryBranchId !== undefined) {
-          updateServiceData.branchId = input.primaryBranchId || null;
+        if (branchesRequested) {
+          updateServiceData.branchId = resolvedBranches.primaryBranchId;
         }
         if (priceMinorUnits !== undefined) {
           updateServiceData.priceMinorUnits = priceMinorUnits;

@@ -74,8 +74,10 @@ interface UserRecord {
   workspaceCodes: string[];
   identity: { email: string; phone?: string | null; status: string };
   primaryBranch: { id: string; name: string } | null;
+  /** Every branch this person holds a role at — the primary one plus any others. */
+  branches?: Array<{ id: string; name: string }>;
   roles: Array<{ role: { id: string; name: string } }>;
-  staffProfile?: { id: string; title: string | null; employeeNumber: string } | null;
+  staffProfile?: { id: string; title: string | null; employeeNumber: string; staffType?: string } | null;
   doctorProfile?: {
     id: string;
     department: { id: string; name: string; code: string } | null;
@@ -140,6 +142,8 @@ interface AuditRecord {
 
 interface DoctorRecord {
   id: string;
+  /** Every branch this doctor holds a role at — the primary one plus any others. */
+  branches?: Array<{ id: string; name: string }>;
   departmentId?: string | null;
   registrationNumber: string | null;
   specialty: string | null;
@@ -168,6 +172,119 @@ interface DoctorRecord {
   };
 }
 
+/**
+ * The branches a staff member works at.
+ *
+ * Every staff form offered one branch — a single `<select>` writing
+ * `primaryBranchId` — so a hospital group could not register the consultant
+ * who operates at two sites, or the dietitian who covers three. Their role
+ * assignment carried exactly one branch and their permissions died at the
+ * door of every other one.
+ *
+ * The first branch ticked is the primary: the site their staff record and
+ * their default session belong to. Ticking none means hospital-wide, which is
+ * what a single-site hospital wants and what memberships created before
+ * branches existed already have.
+ */
+function BranchMultiSelect({
+  branches,
+  selectedIds,
+  primaryBranchId,
+  onChange,
+  idPrefix,
+}: {
+  branches: BranchRecord[];
+  selectedIds: string[];
+  primaryBranchId: string;
+  onChange(next: { branchIds: string[]; primaryBranchId: string }): void;
+  idPrefix: string;
+}) {
+  const toggle = (branchId: string) => {
+    const next = selectedIds.includes(branchId)
+      ? selectedIds.filter((id) => id !== branchId)
+      : [...selectedIds, branchId];
+    onChange({
+      branchIds: next,
+      primaryBranchId: next.includes(primaryBranchId) ? primaryBranchId : next[0] ?? "",
+    });
+  };
+
+  if (branches.length === 0) {
+    return (
+      <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50/60 p-3 text-[11px] font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-400">
+        No branches have been created yet. Add one under Branches to place staff at a site.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <div className="grid gap-1.5 sm:grid-cols-2">
+        {branches.map((branch) => {
+          const checked = selectedIds.includes(branch.id);
+          const isPrimary = checked && primaryBranchId === branch.id;
+          return (
+            <div
+              key={branch.id}
+              className={`flex items-center justify-between gap-2 rounded-xl border p-2 transition ${
+                checked
+                  ? "border-indigo-600 bg-indigo-50/80 dark:border-indigo-500 dark:bg-indigo-950/50"
+                  : "border-slate-200 bg-white/70 dark:border-slate-800 dark:bg-slate-900/60"
+              }`}
+            >
+              <button
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+                id={`${idPrefix}-branch-${branch.id}`}
+                onClick={() => toggle(branch.id)}
+                type="button"
+              >
+                <span
+                  className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
+                    checked
+                      ? "border-indigo-600 bg-indigo-600 text-white"
+                      : "border-slate-300 bg-white dark:border-slate-600 dark:bg-slate-800"
+                  }`}
+                >
+                  {checked ? <Check size={12} strokeWidth={3} /> : null}
+                </span>
+                <span
+                  className={`truncate text-xs ${
+                    checked
+                      ? "font-bold text-indigo-950 dark:text-indigo-200"
+                      : "text-slate-600 dark:text-slate-400"
+                  }`}
+                >
+                  {branch.name}
+                </span>
+              </button>
+              {checked ? (
+                isPrimary ? (
+                  <span className="shrink-0 rounded-lg bg-indigo-600 px-2 py-0.5 text-[10px] font-black uppercase tracking-wide text-white">
+                    Primary
+                  </span>
+                ) : (
+                  <button
+                    className="shrink-0 rounded-lg border border-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-500 transition hover:border-indigo-400 hover:text-indigo-600 dark:border-slate-700 dark:text-slate-400"
+                    onClick={() => onChange({ branchIds: selectedIds, primaryBranchId: branch.id })}
+                    type="button"
+                  >
+                    Make primary
+                  </button>
+                )
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[11px] leading-4 text-slate-500 dark:text-slate-400">
+        {selectedIds.length === 0
+          ? "None selected — this person works across every branch of the hospital."
+          : `Works at ${selectedIds.length} ${selectedIds.length === 1 ? "branch" : "branches"}. The primary branch is where their record and default session sit.`}
+      </p>
+    </div>
+  );
+}
+
 function getDoctorInitials(name?: string | null): string {
   if (!name) return "DR";
   const cleaned = name.replace(/^dr\.?\s+/i, "").trim();
@@ -181,7 +298,18 @@ const fieldClass = "min-h-11 w-full rounded-xl border border-slate-200 bg-white 
 const primaryButtonClass = "inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 px-5 text-sm font-bold text-white shadow-md shadow-indigo-500/20 transition hover:from-indigo-500 hover:to-violet-500 hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60";
 
 function formatRoleList(user: UserRecord) {
-  return user.roles.map((assignment) => assignment.role.name).filter(Boolean).join(", ") || "No role assigned";
+  return [...new Set(user.roles.map((assignment) => assignment.role.name).filter(Boolean))].join(", ") || "No role assigned";
+}
+
+/** Where this person works, with the primary site named first. */
+function formatBranchList(user: UserRecord) {
+  const names = [
+    ...new Set([
+      ...(user.primaryBranch ? [user.primaryBranch.name] : []),
+      ...(user.branches ?? []).map((branch) => branch.name),
+    ]),
+  ];
+  return names.length > 0 ? names.join(" · ") : "All branches";
 }
 
 function useAdminResource<T>(key: string, path: string) {
@@ -1248,7 +1376,15 @@ function DoctorEditModal({
   const [title, setTitle] = useState(doctor.staffProfile.title || "");
   const [email, setEmail] = useState(doctor.staffProfile.membership.identity?.email || "");
   const [phone, setPhone] = useState(doctor.contactPhone || doctor.staffProfile.membership.identity?.phone || "");
-  const [primaryBranchId, setPrimaryBranchId] = useState(doctor.staffProfile.branch?.id || doctor.staffProfile.membership.primaryBranchId || branches[0]?.id || "");
+  const [primaryBranchId, setPrimaryBranchId] = useState(
+    doctor.staffProfile.branch?.id || doctor.staffProfile.membership.primaryBranchId || doctor.branches?.[0]?.id || "",
+  );
+  const [branchIds, setBranchIds] = useState<string[]>(() => {
+    const held = (doctor.branches ?? []).map((branch) => branch.id);
+    if (held.length > 0) return held;
+    const fallback = doctor.staffProfile.branch?.id || doctor.staffProfile.membership.primaryBranchId;
+    return fallback ? [fallback] : [];
+  });
   const [departmentId, setDepartmentId] = useState(doctor.departmentId || doctor.department?.id || departments[0]?.id || "");
   const [specialty, setSpecialty] = useState(doctor.specialty || "");
   const [registrationNumber, setRegistrationNumber] = useState(doctor.registrationNumber || "");
@@ -1313,6 +1449,7 @@ function DoctorEditModal({
           email: email.trim(),
           contactPhone: phone.trim() || null,
           primaryBranchId: primaryBranchId || null,
+          branchIds,
           departmentId: departmentId || null,
           specialty: specialty.trim() || null,
           registrationNumber: registrationNumber.trim() || null,
@@ -1466,18 +1603,18 @@ function DoctorEditModal({
                     value={phone}
                   />
                 </div>
-                <div>
-                  <label className="mb-1 block text-slate-600 dark:text-slate-400">Primary Hospital Branch</label>
-                  <select
-                    className={fieldClass}
-                    onChange={(e) => setPrimaryBranchId(e.target.value)}
-                    value={primaryBranchId}
-                  >
-                    <option value="">No branch</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>{b.name}</option>
-                    ))}
-                  </select>
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-slate-600 dark:text-slate-400">Hospital Branches</label>
+                  <BranchMultiSelect
+                    branches={branches}
+                    idPrefix={`doctor-${doctor.id}`}
+                    onChange={(next) => {
+                      setBranchIds(next.branchIds);
+                      setPrimaryBranchId(next.primaryBranchId);
+                    }}
+                    primaryBranchId={primaryBranchId}
+                    selectedIds={branchIds}
+                  />
                 </div>
               </div>
             </div>
@@ -2177,7 +2314,14 @@ function StaffEditModal({
   const [title, setTitle] = useState(user.staffProfile?.title || "");
   const [email, setEmail] = useState(user.identity.email || "");
   const [phone, setPhone] = useState(user.identity.phone || "");
-  const [primaryBranchId, setPrimaryBranchId] = useState(user.primaryBranch?.id || branches[0]?.id || "");
+  const [branchIds, setBranchIds] = useState<string[]>(() => {
+    const held = (user.branches ?? []).map((branch) => branch.id);
+    if (held.length > 0) return held;
+    return user.primaryBranch?.id ? [user.primaryBranch.id] : [];
+  });
+  const [primaryBranchId, setPrimaryBranchId] = useState(
+    user.primaryBranch?.id || user.branches?.[0]?.id || "",
+  );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -2202,6 +2346,7 @@ function StaffEditModal({
           email: email.trim(),
           phone: phone.trim() || null,
           primaryBranchId: primaryBranchId || null,
+          branchIds,
         }),
       });
       onSaved();
@@ -2279,17 +2424,17 @@ function StaffEditModal({
               />
             </div>
             <div>
-              <label className="mb-1 block text-slate-600 dark:text-slate-400">Primary Branch</label>
-              <select
-                className={fieldClass}
-                onChange={(e) => setPrimaryBranchId(e.target.value)}
-                value={primaryBranchId}
-              >
-                <option value="">No branch</option>
-                {branches.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
-              </select>
+              <label className="mb-1 block text-slate-600 dark:text-slate-400">Branches</label>
+              <BranchMultiSelect
+                branches={branches}
+                idPrefix={`staff-${user.id}`}
+                onChange={(next) => {
+                  setBranchIds(next.branchIds);
+                  setPrimaryBranchId(next.primaryBranchId);
+                }}
+                primaryBranchId={primaryBranchId}
+                selectedIds={branchIds}
+              />
             </div>
           </div>
 
@@ -2330,6 +2475,7 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
   const [savingWorkspaces, setSavingWorkspaces] = useState(false);
   const [editWorkspacesError, setEditWorkspacesError] = useState("");
   const [department, setDepartment] = useState("");
+  const [branchIds, setBranchIds] = useState<string[]>(branches[0]?.id ? [branches[0].id] : []);
   const [branchId, setBranchId] = useState(branches[0]?.id ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -2416,9 +2562,49 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
    * A role added to the enum later shows up here on its own rather than
    * waiting for someone to remember this list.
    */
+  /**
+   * The staff the branch and search filters leave, before the role chips
+   * narrow it further.
+   *
+   * This is what the chips count over. Counting over every membership in the
+   * hospital instead made "Shalimar Hospital branch · Doctor 9" a lie: the
+   * list below honoured the branch and showed two, while the chip promised
+   * nine, and no number on the screen agreed with any other.
+   *
+   * The role filter is deliberately left out of it — a chip's own count must
+   * say how many it would show if you pressed it, so selecting "Doctor" must
+   * not collapse "Reception" to zero.
+   */
+  const branchAndQueryMatches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+
+    return users.filter((user) => {
+      // Someone who works at three sites belongs under each of their filters,
+      // not only under the one their record happens to be primary at.
+      const memberBranchIds = [
+        ...(user.branches ?? []).map((branch) => branch.id),
+        ...(user.primaryBranch ? [user.primaryBranch.id] : []),
+      ];
+      if (selectedBranch !== "ALL" && !memberBranchIds.includes(selectedBranch)) {
+        return false;
+      }
+      if (!q) return true;
+      const nameMatch = user.displayName.toLowerCase().includes(q);
+      const emailMatch = user.identity.email.toLowerCase().includes(q);
+      const branchMatch = [user.primaryBranch?.name ?? "", ...(user.branches ?? []).map((branch) => branch.name)]
+        .join(" ")
+        .toLowerCase()
+        .includes(q);
+      const workspaceMatch = user.workspaceCodes.join(" ").toLowerCase().includes(q);
+      const roleMatch = user.roles.some((r) => r.role.name.toLowerCase().includes(q));
+      const deptMatch = (user.doctorProfile?.department?.name ?? "").toLowerCase().includes(q);
+      return nameMatch || emailMatch || branchMatch || workspaceMatch || roleMatch || deptMatch;
+    });
+  }, [users, query, selectedBranch]);
+
   const workspaceFilterOptions = useMemo(() => {
     const counts = new Map<string, number>();
-    for (const u of users) {
+    for (const u of branchAndQueryMatches) {
       for (const ws of u.workspaceCodes) {
         counts.set(ws, (counts.get(ws) ?? 0) + 1);
       }
@@ -2430,7 +2616,17 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
       count: counts.get(code) ?? 0,
     }));
 
-    const unlisted = [...counts.keys()]
+    /*
+     * Any workspace code found on a real membership but missing from the
+     * invite catalogue is appended, so a role added to the enum later shows up
+     * here on its own rather than waiting for someone to remember this list.
+     *
+     * Counted across every user, not just the ones in view, so a code that
+     * exists in the hospital keeps its chip when a branch filter happens to
+     * exclude everyone holding it.
+     */
+    const allCodes = new Set(users.flatMap((user) => user.workspaceCodes));
+    const unlisted = [...allCodes]
       .filter((code) => !WORKSPACE_INVITE_OPTIONS.some((option) => option.code === code))
       .sort()
       .map((code) => ({
@@ -2440,31 +2636,19 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
       }));
 
     return [
-      { code: "ALL", label: "All staff", count: users.length },
+      { code: "ALL", label: "All staff", count: branchAndQueryMatches.length },
       ...known,
       ...unlisted,
     ];
-  }, [users]);
+  }, [branchAndQueryMatches, users]);
 
-  const filteredUsers = useMemo(() => {
-    return users.filter((user) => {
-      if (selectedWorkspace !== "ALL" && !user.workspaceCodes.includes(selectedWorkspace)) {
-        return false;
-      }
-      if (selectedBranch !== "ALL" && user.primaryBranch?.id !== selectedBranch) {
-        return false;
-      }
-      if (!query.trim()) return true;
-      const q = query.toLowerCase().trim();
-      const nameMatch = user.displayName.toLowerCase().includes(q);
-      const emailMatch = user.identity.email.toLowerCase().includes(q);
-      const branchMatch = (user.primaryBranch?.name ?? "").toLowerCase().includes(q);
-      const workspaceMatch = user.workspaceCodes.join(" ").toLowerCase().includes(q);
-      const roleMatch = user.roles.some((r) => r.role.name.toLowerCase().includes(q));
-      const deptMatch = (user.doctorProfile?.department?.name ?? "").toLowerCase().includes(q);
-      return nameMatch || emailMatch || branchMatch || workspaceMatch || roleMatch || deptMatch;
-    });
-  }, [query, users, selectedWorkspace, selectedBranch]);
+  const filteredUsers = useMemo(
+    () =>
+      selectedWorkspace === "ALL"
+        ? branchAndQueryMatches
+        : branchAndQueryMatches.filter((user) => user.workspaceCodes.includes(selectedWorkspace)),
+    [branchAndQueryMatches, selectedWorkspace],
+  );
 
   const userPages = useWonFlowPagination(filteredUsers, 6);
   const { confirm, dialog: confirmDialog } = useWonFlowConfirm();
@@ -2521,6 +2705,7 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
           email,
           departmentId: effectiveSelectedWorkspaces.includes("DOCTOR") ? department : undefined,
           primaryBranchId: branchId || undefined,
+          branchIds,
           workspaceCodes: effectiveSelectedWorkspaces,
         }),
       });
@@ -2710,7 +2895,16 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
           </div>
         </div>
       ) : null}
-      <Panel description={`${users.length} active tenant membership ${users.length === 1 ? "record" : "records"}.`} title="Hospital users">
+      {/* The heading counts what is on screen, and says so when a filter is
+          narrowing it — a bare total over a filtered list reads as a bug. */}
+      <Panel
+        description={
+          filteredUsers.length === users.length
+            ? `${users.length} active tenant membership ${users.length === 1 ? "record" : "records"}.`
+            : `Showing ${filteredUsers.length} of ${users.length} active tenant membership ${users.length === 1 ? "record" : "records"}.`
+        }
+        title="Hospital users"
+      >
         {removeError ? <div className="mb-3"><MutationMessage error={removeError} success="" /></div> : null}
         {resetCredentials ? <div className="mb-3"><IssuedCredentialsPanel credentials={resetCredentials} organizationName={organizationName} /></div> : null}
 
@@ -2768,7 +2962,11 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
           <div className="mt-2.5 flex flex-wrap items-center gap-1.5 overflow-x-auto pb-0.5">
             <span className="mr-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Role:</span>
             {workspaceFilterOptions.map(({ code, label, count }) => {
-              if (count === 0 && code !== "ALL") return null;
+              // An empty role is hidden, unless it is the one currently
+              // selected: dropping the chip the moment a branch filter empties
+              // it leaves an unexplained empty list and nothing to click to
+              // get back out of it.
+              if (count === 0 && code !== "ALL" && selectedWorkspace !== code) return null;
               const isSelected = selectedWorkspace === code;
               return (
                 <button
@@ -2811,6 +3009,9 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
                     <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
                       {formatRoleList(user)}
                     </span>
+                    <span className="text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                      {formatBranchList(user)}
+                    </span>
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -2825,6 +3026,7 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
                       onClick={() => {
                         setEditingDoctorUser({
                           id: user.doctorProfile!.id,
+                          branches: user.branches,
                           departmentId: user.doctorProfile!.department?.id ?? null,
                           registrationNumber: user.doctorProfile!.registrationNumber ?? null,
                           specialty: user.doctorProfile!.specialty ?? null,
@@ -2964,11 +3166,17 @@ function TeamManager({ users, branches, departments, organizationName, onInvited
               {departments.length === 0 ? <p className="mt-1.5 text-[11px] font-semibold text-amber-700 dark:text-amber-400">No departments exist yet. Create one under Departments before inviting a doctor.</p> : null}
             </LabeledField>
           ) : null}
-          <LabeledField label="Primary branch">
-            <select className={fieldClass} onChange={(event) => setBranchId(event.target.value)} value={branchId}>
-              <option value="">No branch</option>
-              {branches.map((branch) => <option key={branch.id} value={branch.id}>{branch.name}</option>)}
-            </select>
+          <LabeledField label="Branches">
+            <BranchMultiSelect
+              branches={branches}
+              idPrefix="invite"
+              onChange={(next) => {
+                setBranchIds(next.branchIds);
+                setBranchId(next.primaryBranchId);
+              }}
+              primaryBranchId={branchId}
+              selectedIds={branchIds}
+            />
           </LabeledField>
           <MutationMessage error={error} success="" />
           <button className={`${primaryButtonClass} w-full`} disabled={saving} type="submit"><UserPlus aria-hidden="true" size={17} />{saving ? "Creating invitation" : "Invite staff"}</button>
@@ -3005,7 +3213,11 @@ function DoctorDirectory({
     return doctors.filter((doctor) => {
       const name = `${doctor.staffProfile.title ?? ""} ${doctor.staffProfile.membership.displayName}`.toLowerCase();
       const specialty = (doctor.specialty ?? "").toLowerCase();
-      const branch = (doctor.staffProfile.branch?.name ?? "").toLowerCase();
+      // Every site they cover, not only the primary one on their record — a
+      // consultant searched for by their second hospital must still be found.
+      const branch = [doctor.staffProfile.branch?.name ?? "", ...(doctor.branches ?? []).map((entry) => entry.name)]
+        .join(" ")
+        .toLowerCase();
       const reg = (doctor.registrationNumber ?? doctor.staffProfile.employeeNumber ?? "").toLowerCase();
       return name.includes(q) || specialty.includes(q) || branch.includes(q) || reg.includes(q);
     });

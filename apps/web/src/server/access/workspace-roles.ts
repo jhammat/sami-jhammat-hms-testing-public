@@ -148,3 +148,69 @@ export async function syncMembershipWorkspaceRoles(tx: TransactionClient, tenant
   }
   return repaired;
 }
+
+/**
+ * Assigns a membership's workspace roles across every branch the person works at.
+ *
+ * `MembershipRole` is already the branch boundary — `resolvePermissionCodes`
+ * keeps an assignment only when its `branchId` is unset or matches the branch
+ * the caller is signed in to — so covering several sites is one role row per
+ * (role, branch) pair. Staff creation only ever wrote a single row carrying the
+ * primary branch, which is why a doctor or dietitian working at two hospitals
+ * in a group could be given exactly one of them and silently lost every
+ * permission at the other.
+ *
+ * An empty `branchIds` means organization-wide: one row per role with no
+ * branch, which every branch matches.
+ *
+ * Rows outside the target set are removed, so this both grants and revokes and
+ * can be called with the full intended state on every save.
+ */
+export async function syncMembershipBranchRoles(
+  tx: TransactionClient,
+  input: {
+    tenantId: string;
+    membershipId: string;
+    roleIds: readonly string[];
+    branchIds: readonly string[];
+  },
+): Promise<void> {
+  const branchKeys: (string | null)[] = input.branchIds.length > 0 ? [...new Set(input.branchIds)] : [null];
+
+  const existing = await tx.membershipRole.findMany({
+    where: { tenantId: input.tenantId, membershipId: input.membershipId },
+    select: { id: true, roleId: true, branchId: true },
+  });
+
+  const wanted = new Set(input.roleIds.flatMap((roleId) => branchKeys.map((branchId) => `${roleId}::${branchId ?? ""}`)));
+  const held = new Set<string>();
+  const stale: string[] = [];
+
+  for (const row of existing) {
+    const key = `${row.roleId}::${row.branchId ?? ""}`;
+    if (wanted.has(key) && !held.has(key)) {
+      held.add(key);
+    } else {
+      stale.push(row.id);
+    }
+  }
+
+  if (stale.length > 0) {
+    await tx.membershipRole.deleteMany({ where: { id: { in: stale } } });
+  }
+
+  const missing = [...wanted].filter((key) => !held.has(key));
+  if (missing.length === 0) return;
+
+  await tx.membershipRole.createMany({
+    data: missing.map((key) => {
+      const [roleId = "", branchId = ""] = key.split("::");
+      return {
+        tenantId: input.tenantId,
+        membershipId: input.membershipId,
+        roleId,
+        branchId: branchId || null,
+      };
+    }),
+  });
+}
