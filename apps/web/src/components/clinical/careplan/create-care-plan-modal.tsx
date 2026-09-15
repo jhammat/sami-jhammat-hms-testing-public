@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { Calendar, Check, Clock, HeartPulse, Loader2, Search, User, X } from "lucide-react";
+import { Clock, HeartPulse, Loader2, Search, User, X } from "lucide-react";
 
 import {
   PhaseOneAccentButton,
@@ -11,6 +11,7 @@ import {
   PhaseOneQuietButton,
   PhaseOneSelect,
 } from "@/components/phase-one-design";
+import { ReferralManagerModal } from "@/components/allied/referral-manager-modal";
 import { todayLocalDate } from "@/lib/time/local-date";
 
 interface PatientRow {
@@ -37,6 +38,24 @@ interface AlliedStaffRow {
   staffType: string;
   title: string | null;
   displayName: string;
+  employeeNumber?: string | null;
+  branchName?: string | null;
+}
+
+/**
+ * How a clinician reads in a picker: their name first, then what they do and
+ * where.
+ *
+ * The option used to be the display name alone, and when the staff record
+ * behind a membership was missing the endpoint substituted "Unnamed clinician"
+ * — so a surgeon assigning a dietitian was choosing between one or more
+ * identical placeholder rows. The name now comes straight from the membership
+ * the hospital created, and the qualifier says which colleague it is when two
+ * people share a first name.
+ */
+function describeClinician(staff: AlliedStaffRow): string {
+  const qualifiers = [staff.title, staff.branchName].filter((value): value is string => Boolean(value?.trim()));
+  return qualifiers.length > 0 ? `${staff.displayName} — ${qualifiers.join(" · ")}` : staff.displayName;
 }
 
 const CATEGORIES = [
@@ -98,7 +117,35 @@ export function CreateCarePlanModal({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  /*
+   * Whether the clinician list has come back yet.
+   *
+   * Held as "has it loaded" rather than "is it loading" so the flag is only
+   * ever flipped from inside the fetch, never synchronously as the effect
+   * starts — which is a cascading render, and which the hook lint rightly
+   * refuses.
+   */
+  const [staffLoaded, setStaffLoaded] = useState(false);
+  const loadingStaff = !staffLoaded;
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * The plan that was just started, held open so the referral step can follow.
+   *
+   * Assigning a physiotherapist on the plan does not raise a referral, and a
+   * referral is what actually opens the patient's record to them — so a plan
+   * created with allied staff named still left those clinicians locked out
+   * until someone remembered to open the referral dialog from the plan detail
+   * screen. It now follows creation directly, and can be skipped.
+   */
+  const [createdPlan, setCreatedPlan] = useState<{
+    carePlanId: string;
+    patientId: string;
+    patientName: string;
+    /** The clinicians named on the plan, carried into the referral step. */
+    therapist: AlliedStaffRow | null;
+    dietitian: AlliedStaffRow | null;
+  } | null>(null);
 
   const loadPatients = useCallback(async (search: string) => {
     setLoadingPatients(true);
@@ -135,6 +182,7 @@ export function CreateCarePlanModal({
       setTitle("");
       setTherapistId("");
       setNutritionistId("");
+      setCreatedPlan(null);
       return;
     }
     const timer = window.setTimeout(() => void loadPatients(query), 250);
@@ -148,15 +196,17 @@ export function CreateCarePlanModal({
     void (async () => {
       try {
         const [staffResponse, templateResponse] = await Promise.all([
-          fetch("/api/v1/allied/staff", { credentials: "same-origin", cache: "no-store" }),
+          fetch("/api/v1/clinical/care-team", { credentials: "same-origin", cache: "no-store" }),
           fetch("/api/v1/clinical/careplans/templates", { credentials: "same-origin", cache: "no-store" }),
         ]);
         const payload = await staffResponse.json().catch(() => null);
-        if (!cancelled && staffResponse.ok) setAllied(payload?.staff ?? []);
+        if (!cancelled && staffResponse.ok) setAllied(payload?.allied ?? []);
         const templatePayload = await templateResponse.json().catch(() => null);
         if (!cancelled && templateResponse.ok) setTemplates(templatePayload?.templates ?? []);
       } catch {
         // Assignment stays optional
+      } finally {
+        if (!cancelled) setStaffLoaded(true);
       }
     })();
 
@@ -225,12 +275,18 @@ export function CreateCarePlanModal({
         throw new Error(payload?.error?.message ?? "The care plan could not be created.");
       }
 
-      onCreated(payload.carePlan.id);
-      setSelectedPatient(null);
-      setPatientId("");
-      setTitle("");
-      setTherapistId("");
-      setNutritionistId("");
+      setCreatedPlan({
+        carePlanId: payload.carePlan.id,
+        patientId,
+        patientName: selectedPatient
+          ? `${selectedPatient.givenName} ${selectedPatient.familyName}`
+          : "This patient",
+        // Whoever was named on the plan is who the referral should go to.
+        // Re-picking them by hand on the next screen is the same decision
+        // twice, and the second one is the one that can be got wrong.
+        therapist: allied.find((staff) => staff.id === therapistId) ?? null,
+        dietitian: allied.find((staff) => staff.id === nutritionistId) ?? null,
+      });
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The care plan could not be created.");
     } finally {
@@ -240,6 +296,64 @@ export function CreateCarePlanModal({
 
   const therapists = allied.filter((staff) => staff.staffType === "PHYSIOTHERAPIST");
   const dietitians = allied.filter((staff) => staff.staffType === "NUTRITIONIST");
+
+  const staffHint = (roleLabel: string, count: number) => {
+    if (loadingStaff) return "Loading the hospital's clinicians…";
+    if (count === 0) {
+      return `No ${roleLabel} has been given a login for this hospital yet. Hospital administration adds them under Team & permissions.`;
+    }
+    return "Optional — a referral can be raised after the plan starts.";
+  };
+
+  /*
+   * The referral step, shown once the plan exists.
+   *
+   * Rendered instead of the form rather than over it: the plan is already
+   * saved at this point, so re-presenting an editable form behind the dialog
+   * would invite a second submission of the same plan.
+   */
+  if (createdPlan) {
+    const finish = () => {
+      const planId = createdPlan.carePlanId;
+      setCreatedPlan(null);
+      setSelectedPatient(null);
+      setPatientId("");
+      setTitle("");
+      setTherapistId("");
+      setNutritionistId("");
+      onCreated(planId);
+    };
+
+    const named = [createdPlan.therapist, createdPlan.dietitian].filter(Boolean).length;
+
+    return (
+      <ReferralManagerModal
+        isOpen
+        onClose={finish}
+        patientId={createdPlan.patientId}
+        patientName={createdPlan.patientName}
+        prefill={{
+          physiotherapist: createdPlan.therapist
+            ? { id: createdPlan.therapist.id, displayName: createdPlan.therapist.displayName, title: createdPlan.therapist.title }
+            : null,
+          nutritionist: createdPlan.dietitian
+            ? { id: createdPlan.dietitian.id, displayName: createdPlan.dietitian.displayName, title: createdPlan.dietitian.title }
+            : null,
+        }}
+        introMessage={
+          named > 0
+            ? `Care plan started for ${createdPlan.patientName}. ${
+                named === 2 ? "Both clinicians are" : "The clinician is"
+              } already named on the plan — give the reason and the referral${named === 2 ? "s go" : " goes"} straight to them.`
+            : `Care plan started for ${createdPlan.patientName}. Refer them on to allied health or a colleague now, or skip and do it later from the plan.`
+        }
+        closeLabel="Skip for now"
+        onReferralCreated={() => {
+          // The dialog shows its own confirmation, then closes through `finish`.
+        }}
+      />
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-950/50 p-4 backdrop-blur-sm">
@@ -516,18 +630,20 @@ export function CreateCarePlanModal({
             <PhaseOneField
               label="Physiotherapist"
               htmlFor="cp-therapist"
-              hint="Optional — can refer later"
+              hint={staffHint("physiotherapist", therapists.length)}
             >
               <PhaseOneSelect
                 id="cp-therapist"
                 value={therapistId}
                 onChange={(event) => setTherapistId(event.target.value)}
+                disabled={loadingStaff || therapists.length === 0}
               >
-                <option value="">Not assigned</option>
+                <option value="">
+                  {therapists.length === 0 && !loadingStaff ? "No physiotherapist on staff" : "Not assigned"}
+                </option>
                 {therapists.map((staff) => (
                   <option key={staff.id} value={staff.id}>
-                    {staff.displayName}
-                    {staff.title ? ` — ${staff.title}` : ""}
+                    {describeClinician(staff)}
                   </option>
                 ))}
               </PhaseOneSelect>
@@ -536,18 +652,20 @@ export function CreateCarePlanModal({
             <PhaseOneField
               label="Dietitian"
               htmlFor="cp-dietitian"
-              hint="Optional — can refer later"
+              hint={staffHint("dietitian", dietitians.length)}
             >
               <PhaseOneSelect
                 id="cp-dietitian"
                 value={nutritionistId}
                 onChange={(event) => setNutritionistId(event.target.value)}
+                disabled={loadingStaff || dietitians.length === 0}
               >
-                <option value="">Not assigned</option>
+                <option value="">
+                  {dietitians.length === 0 && !loadingStaff ? "No dietitian on staff" : "Not assigned"}
+                </option>
                 {dietitians.map((staff) => (
                   <option key={staff.id} value={staff.id}>
-                    {staff.displayName}
-                    {staff.title ? ` — ${staff.title}` : ""}
+                    {describeClinician(staff)}
                   </option>
                 ))}
               </PhaseOneSelect>

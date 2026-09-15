@@ -25,11 +25,29 @@ export const REFERRAL_DISCIPLINES = [
 
 export type ReferralDiscipline = (typeof REFERRAL_DISCIPLINES)[number];
 
-export const REFERRAL_SPECIALTIES = [
+/**
+ * The allied disciplines a referral can name, which are also the specialties
+ * an allied portal opens a patient record under: a physiotherapist sees the
+ * patients referred to PHYSIOTHERAPY and nobody else.
+ */
+export const ALLIED_REFERRAL_SPECIALTIES = [
   "PHYSIOTHERAPY",
   "NUTRITION",
 ] as const;
 
+/**
+ * `DOCTOR` is a referral to a named colleague — a second opinion, or a handover
+ * to another department — rather than to an allied discipline. It carries the
+ * `OTHER` discipline and a specific assignee, and it deliberately does not widen
+ * any allied clinician's patient scope: that scope is matched on the exact
+ * specialty string, so a doctor-to-doctor referral is invisible to it.
+ */
+export const REFERRAL_SPECIALTIES = [
+  ...ALLIED_REFERRAL_SPECIALTIES,
+  "DOCTOR",
+] as const;
+
+export type AlliedReferralSpecialty = (typeof ALLIED_REFERRAL_SPECIALTIES)[number];
 export type ReferralSpecialty = (typeof REFERRAL_SPECIALTIES)[number];
 
 export interface ClinicalReferral {
@@ -87,6 +105,8 @@ export interface CreateReferralInput {
   specialty: ReferralSpecialty | string;
   discipline?: ReferralDiscipline;
   assignedToId?: string | null;
+  /** Set on a DOCTOR referral to record which department is taking it on. */
+  departmentId?: string | null;
   priority?: ReferralPriority;
   reason: string;
   goal?: string;

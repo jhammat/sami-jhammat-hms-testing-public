@@ -1,6 +1,6 @@
 import { database } from "@wonflow/database";
 import type { Prisma, ReferralDiscipline, ReferralPriority, ReferralStatus } from "@wonflow/database";
-import { requirePermission, requireTenantContext } from "@wonflow/contracts";
+import { REFERRAL_SPECIALTIES, requirePermission, requireTenantContext } from "@wonflow/contracts";
 import type { WonFlowRequestContext } from "@wonflow/contracts";
 import type {
   AcceptReferralInput,
@@ -48,20 +48,29 @@ export class ReferralService {
     }
 
     const specialty = input.specialty?.trim().toUpperCase();
-    if (!specialty || !["PHYSIOTHERAPY", "NUTRITION"].includes(specialty)) {
+    if (!specialty || !REFERRAL_SPECIALTIES.includes(specialty as (typeof REFERRAL_SPECIALTIES)[number])) {
       throw new WonFlowApiError(
         400,
         "invalid-specialty",
-        "Referral specialty must be PHYSIOTHERAPY or NUTRITION.",
+        `Referral specialty must be one of ${REFERRAL_SPECIALTIES.join(", ")}.`,
       );
     }
 
+    /*
+     * DOCTOR referrals carry the OTHER discipline.
+     *
+     * The discipline drives the allied workspaces, and a handover to a
+     * colleague in another department belongs to neither of them. Keeping the
+     * two apart also keeps `getActiveReferredPatientIds` honest: it matches on
+     * the exact specialty string, so referring a patient to a hepatologist
+     * cannot widen what a physiotherapist can open.
+     */
     const discipline: ReferralDiscipline =
       specialty === "PHYSIOTHERAPY"
         ? "PHYSIOTHERAPY"
         : specialty === "NUTRITION"
           ? "NUTRITION"
-          : ((input.discipline ?? "OTHER") as ReferralDiscipline);
+          : "OTHER";
 
     if (!input.reason?.trim()) {
       throw new WonFlowApiError(
@@ -105,6 +114,22 @@ export class ReferralService {
       );
     }
 
+    /*
+     * A named assignee must be the kind of clinician the referral is for.
+     *
+     * Nothing checked this before, so a physiotherapy referral could be
+     * assigned to a pharmacist — and then sat in a queue nobody watches,
+     * looking assigned. A DOCTOR referral is required to name someone,
+     * because "refer to another doctor" without saying which one is just an
+     * unassigned note.
+     */
+    const expectedStaffTypes =
+      specialty === "PHYSIOTHERAPY"
+        ? ["PHYSIOTHERAPIST"]
+        : specialty === "NUTRITION"
+          ? ["NUTRITIONIST"]
+          : ["DOCTOR"];
+
     let assignedToId: string | null = null;
     if (input.assignedToId?.trim()) {
       const staff = await database.staffProfile.findFirst({
@@ -113,6 +138,7 @@ export class ReferralService {
           tenantId: context.tenantId,
           status: "ACTIVE",
         },
+        select: { id: true, staffType: true },
       });
       if (!staff) {
         throw new WonFlowApiError(
@@ -121,7 +147,20 @@ export class ReferralService {
           "The assigned staff member could not be found or is inactive.",
         );
       }
+      if (!expectedStaffTypes.includes(staff.staffType)) {
+        throw new WonFlowApiError(
+          400,
+          "assignee-wrong-discipline",
+          `The person selected is not a ${expectedStaffTypes[0]?.toLowerCase()}. Choose a clinician from that discipline, or leave the referral unassigned.`,
+        );
+      }
       assignedToId = staff.id;
+    } else if (specialty === "DOCTOR") {
+      throw new WonFlowApiError(
+        400,
+        "assignee-required",
+        "Choose the doctor this patient is being referred to.",
+      );
     }
 
     const validDays = Math.max(1, Math.min(365, input.validDays ?? 30));
